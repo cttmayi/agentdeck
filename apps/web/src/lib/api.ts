@@ -226,9 +226,13 @@ export interface WorkflowTemplate {
 /** 编排运行里的一步（一次"组跑" / 一个 gate 站）。 */
 export interface WorkflowStep {
   seq: number
-  /* ⚠️ 2026-11：`'aggregate'` 删了——`WorkflowStep.kind` 的类型里曾有它，但引擎
-   *   的五个原语（flow / parallel / loop / route / gate）**没有任何一个产出**它。 */
-  kind: 'flow' | 'parallel' | 'loop' | 'route' | 'gate'
+  /*
+   * ⚠️ `'aggregate'` **保留**：当前引擎的五个原语不产出它（flow / parallel / loop /
+   *   route / gate），但**老数据里有**（早期版本产出过，实测到 `step 3 aggregate done`）。
+   *   删掉它等于让那些运行记录读不出来——与 `RunKind 'review'`、`SubjectRef 'report'`
+   *   同一个处置：枚举值留着，界面按"聚合"显示。
+   */
+  kind: 'flow' | 'parallel' | 'aggregate' | 'loop' | 'route' | 'gate'
   label: string
   nodeId: string | null
   prompt: string | null

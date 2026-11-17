@@ -89,6 +89,8 @@ export const workflowsText = {
    */
   'workflows.stepKindFlow': { zh: '流水线', en: 'Flow' },
   'workflows.stepKindParallel': { zh: '并行', en: 'Parallel' },
+  // ⚠️ 老数据里有 `aggregate`（早期引擎产出过），词条保留——删了那一步会显示成"流水线"
+  'workflows.stepKindAggregate': { zh: '聚合', en: 'Aggregate' },
   'workflows.stepKindLoop': { zh: '把关循环', en: 'Loop' },
   'workflows.stepKindRoute': { zh: '路由', en: 'Route' },
   'workflows.stepKindGate': { zh: '等人确认', en: 'Confirm' },

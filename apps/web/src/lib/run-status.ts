@@ -96,6 +96,8 @@ export const WORKFLOW_STEP_STATUS_KEY: Record<string, WebTextId> = {
 export const WORKFLOW_STEP_KIND_KEY: Record<string, WebTextId> = {
   flow: 'workflows.stepKindFlow',
   parallel: 'workflows.stepKindParallel',
+  // 老数据里有 aggregate（早期引擎产出过）⇒ 词条留着，不然那一步会退回"流水线"
+  aggregate: 'workflows.stepKindAggregate',
   loop: 'workflows.stepKindLoop',
   route: 'workflows.stepKindRoute',
   gate: 'workflows.stepKindGate',

@@ -182,9 +182,12 @@ export interface WorkflowStep {
   /** 步骤序号（幂等键：代码未变时稳定；续跑按它跳过已完成步骤）。 */
   seq: number
   /** 步骤类型。 */
-  /* ⚠️ 2026-11：原来这里还有一个 `'aggregate'`——**没有任何原语产出它**（五个原语是
-   *   flow / parallel / loop / route / gate），是一条只活在类型里的死值。删掉。 */
-  kind: 'flow' | 'parallel' | 'loop' | 'route' | 'gate'
+  /*
+   * ⚠️ `'aggregate'` **保留**：当前原语不产出它（flow / parallel / loop / route / gate），
+   *   但**持久化的老运行里存在**（实测到 `step 3 aggregate done`）。删掉枚举值会让
+   *   那些记录读不出来——与协议里 `RunKind 'review'` 同一处置：留着，读得懂就行。
+   */
+  kind: 'flow' | 'parallel' | 'aggregate' | 'loop' | 'route' | 'gate'
   /** 展示名（如"起草 A · 组A"、"gate · 等你确认"）。 */
   label: string
   /** 节点（组 id 或内嵌智能体 id）。gate/并行聚合时可能为 null。 */
