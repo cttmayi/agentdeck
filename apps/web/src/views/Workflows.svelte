@@ -45,7 +45,7 @@
     loadWorkflows,
     loadWorkflowRuns,
   } from '../lib/stores.ts'
-  import { workflowRun, toast } from '../lib/view.ts'
+  import { pickChatAgentIntent, workflowRun, toast } from '../lib/view.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { Modal } from '@agentdeck/ui/components'
@@ -122,6 +122,12 @@
       onActivate: startCreate,
     },
     {
+      id: 'ai',
+      label: $t('workflows.aiDraftAction'),
+      kind: 'ghost',
+      onActivate: startAiDraft,
+    },
+    {
       id: 'refresh',
       label: $t('common.refresh'),
       kind: 'ghost',
@@ -133,6 +139,20 @@
 
   function refresh(): Promise<void> {
     return Promise.all([loadWorkflows(), loadWorkflowRuns()]).then(() => {})
+  }
+
+  /**
+   * 「AI 生成…」：跳到聊天页开一个新对话，执行者选中**编排生成者**（D135）。
+   *
+   * ⚠️ 为什么不在这里弹一个"你想做什么"的框：生成是**聊出来的**（要来回问几次），
+   *   所以入口把用户送到聊天页，让生成者按它自己的套路问——与"智能体生成者"同一形态。
+   *   聊天页那边靠 `#/chat?agent=<id>` 的既有约定预选执行者（`chat.ts` 读它）。
+   */
+  function startAiDraft(): void {
+    location.hash = '#/chat'
+    // 预选执行者交给聊天页：`agent` store 改名不划算，这里用一个意图标记
+    // （聊天页读到就选中它，读到空/坏值时照旧选默认 —— 不因为一个入口把整页搞崩）。
+    pickChatAgentIntent.set('workflow-maker')
   }
 
   /** 选一条：进编辑（与"选中即编辑"同一条：没有查看态）。 */

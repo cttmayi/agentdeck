@@ -580,8 +580,16 @@ export const Agent = z.object({
    * ⚠️ 可选：老记录里没有这个键（它们有的是 `role`），读时兜底会把 `role` 映射成
    *    它并摘掉 `role`（`packages/protocol/src/agent-legacy.ts`）。
    */
+  /*
+   * ★ 2026-11（D135）：加了 `'workflow-maker'`（编排生成者——在聊天里问清楚要什么流程、
+   *   把编排代码写成草稿，人采纳后存成一条编排）。
+   *
+   * ⚠️ 加一个值要动三处：这里、`apps/daemon/src/builtin-drafter.ts` 的 `BuiltinKind`
+   *   + `builtinDefaultsOf`，以及前端 `apps/web/src/lib/api.ts` 的同名联合——漏一处
+   *   就是"字段在、没路径"，或者更糟：界面按名字猜它是不是内置（本仓库明令禁止）。
+   */
   builtinKind: z
-    .enum(['drafter', 'skill-reviewer', 'memory-tidy', 'agent-maker'])
+    .enum(['drafter', 'skill-reviewer', 'memory-tidy', 'agent-maker', 'workflow-maker'])
     .optional(),
 
   /**

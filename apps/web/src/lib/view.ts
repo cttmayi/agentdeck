@@ -132,6 +132,18 @@ export const workflowRun = writable<{ runId: string } | null>(parseHash(location
  *   根本没有返回按钮）⇒ 返回恒回「编排」页，store 没有存在的必要，删。
  */
 
+/**
+ * 「去聊天页跟某个内置生成者开一个新对话」的意图（2026-11，D135）。
+ *
+ * 用法：编排页点「AI 生成…」⇒ 写 `'workflow-maker'` 再 `location.hash = '#/chat'`；
+ * 聊天页挂载/切到草稿态时读它，把执行者预选成那个内置岗位，然后**清空**（一次性意图，
+ * 不是持久设置——否则下次手点「新对话」还会被它抢走执行者）。
+ *
+ * ⚠️ 为什么不用地址（`#/chat?agent=…`）：地址是路由的唯一出处，而这个应用刻意不做
+ *    query 路由；一个"一次性意图"用 store 表达最省事，也不会作废任何已有链接。
+ */
+export const pickChatAgentIntent = writable<'workflow-maker' | null>(null)
+
 /** 读地址 → 写四个 store。地址是唯一出处，store 只是它的投影。 */
 function syncRoute(): void {
   // 旧子路由重定向（D80 三轮）：`#/chat/crystallize/<runId>` 与 `#/tasks/crystallize/<runId>`

@@ -26,6 +26,11 @@ export const workflowsText = {
   'workflows.listCount': { zh: '共 {count} 个编排', en: '{count} workflows' },
   'workflows.search': { zh: '搜索编排名…', en: 'Search workflow names…' },
   'workflows.new': { zh: '新建', en: 'New' },
+  /**
+   * 编排页顶栏那颗「AI 生成…」（2026-11，D135）：跳聊天页开一个新对话、执行者选中
+   * **编排生成者**——生成是聊出来的（要来回问几次），所以入口把人送到聊天页。
+   */
+  'workflows.aiDraftAction': { zh: 'AI 生成…', en: 'Generate with AI' },
   'workflows.createTitle': { zh: '新建编排', en: 'New workflow' },
   'workflows.empty': { zh: '还没有编排', en: 'No workflows yet' },
   'workflows.emptyHint': {

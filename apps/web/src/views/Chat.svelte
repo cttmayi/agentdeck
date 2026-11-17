@@ -16,6 +16,7 @@
   import ChatMemoryTidy from '../components/ChatMemoryTidy.svelte'
   import ChatSettings from '../components/ChatSettings.svelte'
   import AgentMakerConfirm from '../components/AgentMakerConfirm.svelte'
+  import WorkflowMakerConfirm from '../components/WorkflowMakerConfirm.svelte'
   import { api, type Agent, type ChatTurnView, type Conversation } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
@@ -31,7 +32,8 @@
     stripMemoryPrefix,
     type DraftPick,
   } from '../lib/chat.ts'
-  import { goCrystallize, showToast } from '../lib/view.ts'
+  import { get } from 'svelte/store'
+  import { goCrystallize, pickChatAgentIntent, showToast } from '../lib/view.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { absoluteTime, relativeTime } from '../lib/time.ts'
   import type { WebTextId } from '@agentdeck/i18n'
@@ -195,6 +197,8 @@
    * 按钮按条件出现（`hasAgentDraft`），不搞置灰——没有岗位卡时置灰按钮是一种半开的门。
    */
   let agentMakerOpen = false
+  /** 编排生成者的采纳面板（D135）。 */
+  let workflowMakerOpen = false
   /**
    * 聊天页自己的「设置」抽屉（分批第 242 批）。
    *
@@ -428,7 +432,19 @@
     //   连同它的 live run 一起（与 `select()` 切对话时清 `chatLiveRunId` 同一规矩）。
     chatDetail.set(null)
     chatLiveRunId.set(null)
-    const first = $effectiveDefaultAgentId ?? executors[0]?.id ?? ''
+    /*
+     * ★ 2026-11（D135）：别的页可能带着"跟某个内置生成者聊"的意图过来
+     *   （编排页的「AI 生成…」⇒ `pickChatAgentIntent`）。这里读一次并**清空**
+     *   （一次性意图）：否则下一次手点「新对话」还会被它抢走执行者。
+     *   ⚠️ 找不到那个内置岗位就照旧选默认——一个入口不该让整页失灵。
+     */
+    const intent = get(pickChatAgentIntent)
+    pickChatAgentIntent.set(null)
+    const intentAgent =
+      intent === null
+        ? null
+        : ($agents.find((a) => a.builtinKind === intent) ?? null)
+    const first = intentAgent?.id ?? $effectiveDefaultAgentId ?? executors[0]?.id ?? ''
     draftChoice = first === '' ? '' : `agent:${first}`
     draftPick = { agentId: first, skillId: '' }
   }
@@ -1116,6 +1132,15 @@
               {$t('chat.agentMakerAction')}
             </button>
           {/if}
+          <!--
+            ★ 2026-11（D135）：编排生成者写完草稿（`workflow-draft/workflow-draft.md`）
+            才出现「确认采纳编排」——与上面那颗同一模式：**按条件出现**，不置灰。
+          -->
+          {#if detail?.hasWorkflowDraft}
+            <button class="btn btn--ghost" onclick={() => (workflowMakerOpen = true)}>
+              {$t('chat.workflowMakerAction')}
+            </button>
+          {/if}
           <button class="btn btn--danger" onclick={() => void remove($activeConversationId ?? '')}>
             {$t('chat.delete')}
           </button>
@@ -1497,6 +1522,7 @@
     />
 
     <!-- ★ 2026-11 设计定稿（§3.5）：「确认生成智能体」面板（岗位卡 + 配套技能审阅） -->
+    <WorkflowMakerConfirm bind:open={workflowMakerOpen} conversationId={$activeConversationId ?? ''} />
     <AgentMakerConfirm
       bind:open={agentMakerOpen}
       conversationId={activeConversation?.id ?? ''}

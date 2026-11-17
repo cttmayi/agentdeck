@@ -299,7 +299,7 @@ export interface Agent {
    */
   builtin?: boolean
   /** **平台内置岗位**（只有内置的有；用户建的 agent 没有）。见上面那条说明。 */
-  builtinKind?: 'drafter' | 'skill-reviewer' | 'memory-tidy' | 'agent-maker'
+  builtinKind?: 'drafter' | 'skill-reviewer' | 'memory-tidy' | 'agent-maker' | 'workflow-maker'
   /**
    * ★ 分批第 245 批：记忆功能的总开关。`false` = 关（不带入第一句话、不能手写、不能整理）。
    *

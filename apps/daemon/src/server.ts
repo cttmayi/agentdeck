@@ -68,6 +68,12 @@ import { FileStore } from '@agentdeck/store-file'
 import { resolveReviewStandard } from './review-standard.ts'
 import { readAgentDraftArtifacts, parseAgentDraft } from './agent-maker.ts'
 import {
+  WORKFLOW_DRAFT_DIR,
+  WORKFLOW_DRAFT_FILE,
+  parseWorkflowDraft,
+  validateWorkflowCode,
+} from './workflow-maker.ts'
+import {
   describeCron,
   loadSchedules,
   MAX_RECORDS,
@@ -7538,7 +7544,13 @@ async function injectedSkillsOf(
        *   `kind !== 'drafter'`。
        */
       const chatKind = builtinKindOf(agent)
-      if (chatKind !== null && chatKind !== 'agent-maker') {
+      /*
+       * ★ 2026-11（D135）：能聊天的内置岗位有两个——智能体生成者与**编排生成者**
+       *   （它们干的活就是"在聊天里问清楚，产出草稿给人采纳"）。
+       *   ⚠️ 仍然写**等值**比较（一个集合），不写"不是起草者/记忆整理者"这种列表式排除。
+       */
+      const CHAT_CAPABLE_BUILTINS: ReadonlyArray<string> = ['agent-maker', 'workflow-maker']
+      if (chatKind !== null && !CHAT_CAPABLE_BUILTINS.includes(chatKind)) {
         sendJson(res, 400, {
           error:
             `「${agent.name}」是${describeBuiltinAgent(agent)}，不参与聊天——` +
@@ -7774,6 +7786,11 @@ async function injectedSkillsOf(
          * 出不出——按钮按条件出现，不搞置灰（设计稿 §9.7）。
          */
         let hasAgentDraft = false
+        /**
+         * ★ 2026-11（D135）：**这个对话能不能「确认采纳编排」**——判据同构：
+         *   工作目录的 `workflow-draft/` 里有 `workflow-draft.md`（编排生成者写好了草稿）。
+         */
+        let hasWorkflowDraft = false
         {
           const dir = resolveWorkDir({
             requested: conversation.workDir,
@@ -7786,12 +7803,20 @@ async function injectedSkillsOf(
           } catch {
             hasAgentDraft = false
           }
+          try {
+            hasWorkflowDraft = (await readdir(join(dir, WORKFLOW_DRAFT_DIR))).includes(
+              WORKFLOW_DRAFT_FILE,
+            )
+          } catch {
+            hasWorkflowDraft = false
+          }
         }
         sendJson(res, 200, {
           conversation,
           turns: view,
           workDir: conversation.workDir ?? lastRun?.workDir ?? null,
           hasAgentDraft,
+          hasWorkflowDraft,
         })
         return
       }
@@ -7887,6 +7912,116 @@ async function injectedSkillsOf(
       }).path
       const artifacts = await readAgentDraftArtifacts(dir)
       sendJson(res, 200, artifacts)
+      return
+    }
+
+    /*
+     * ══════════════════════════════════════════════════════════════════
+     * 编排生成者（D135）：读草稿 / 采纳
+     * ══════════════════════════════════════════════════════════════════
+     *
+     * 与上面岗位卡那两条同构：草稿在**对话的工作目录**里（`workflow-draft/`），
+     * 采纳时**以请求里的最终版为准**（人可能改过代码），服务端重新解析 + 校验三道
+     * （语法 / 节点名 / 名字），通过就落成一条编排（`source: 'ai'`）。
+     *
+     * ⚠️ 只有「编排生成者」的对话能采纳：别的 agent 把 workflow-draft.md 放进工作目录
+     *   不是"生成编排"，这条接口不替它背书（与岗位卡同一条）。
+     */
+    const wfDraftMatch = /^\/api\/conversations\/([^/]+)\/workflow-draft$/.exec(path)
+    if (req.method === 'GET' && wfDraftMatch) {
+      const id = wfDraftMatch[1] as ConversationId
+      const conversation = await store.getConversation(id)
+      if (!conversation || conversation.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: '对话不存在' })
+        return
+      }
+      const dir = resolveWorkDir({
+        requested: conversation.workDir,
+        subject: { type: 'conversation', id: conversation.id },
+        fallbackId: conversation.id,
+        workRoot,
+      }).path
+      let text: string | null = null
+      try {
+        text = await readFile(join(dir, WORKFLOW_DRAFT_DIR, WORKFLOW_DRAFT_FILE), 'utf8')
+      } catch {
+        text = null
+      }
+      if (text === null) {
+        sendJson(res, 404, { error: '还没有编排草稿', code: 'workflow_draft_missing' })
+        return
+      }
+      const parsed = parseWorkflowDraft(text)
+      sendJson(res, 200, {
+        workflowDraft: text,
+        ...(parsed.ok
+          ? { name: parsed.name, summary: parsed.summary, code: parsed.code, parseError: null }
+          : { name: '', summary: '', code: '', parseError: parsed.error }),
+      })
+      return
+    }
+
+    const wfCommitMatch = /^\/api\/conversations\/([^/]+)\/workflow-commit$/.exec(path)
+    if (req.method === 'POST' && wfCommitMatch) {
+      const id = wfCommitMatch[1] as ConversationId
+      const conversation = await store.getConversation(id)
+      if (!conversation || conversation.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: '对话不存在' })
+        return
+      }
+      const maker = await store.getAgent(conversation.agentId as Agent['id'])
+      if (!maker || builtinKindOf(maker) !== 'workflow-maker') {
+        sendJson(res, 400, {
+          error: '只有「编排生成者」的对话能采纳编排（这条对话的执行者不是它）',
+          code: 'workflow_commit_not_maker',
+        })
+        return
+      }
+      const body = (await readJsonBody(req)) as { workflowDraft?: unknown }
+      const draftText = typeof body?.workflowDraft === 'string' ? body.workflowDraft : ''
+      if (draftText.trim() === '') {
+        sendJson(res, 400, { error: '需要 workflowDraft（草稿正文）', code: 'workflow_draft_required' })
+        return
+      }
+      const parsed = parseWorkflowDraft(draftText)
+      if (!parsed.ok) {
+        sendJson(res, 400, {
+          error: `编排草稿解析失败：${parsed.error}`,
+          code: 'workflow_draft_invalid',
+        })
+        return
+      }
+      const agents = await store.listAgents(workspaceId)
+      const check = validateWorkflowCode(
+        parsed.code,
+        agents.map((a) => a.name as string),
+      )
+      if (!check.ok) {
+        sendJson(res, 400, {
+          error:
+            check.syntaxError !== null
+              ? `编排代码有语法错误：${check.syntaxError}`
+              : `编排代码里引用了不存在的智能体：${check.unknownAgents.join('、')}`,
+          code: check.syntaxError !== null ? 'workflow_code_syntax' : 'workflow_code_unknown_agent',
+          ...(check.syntaxError !== null ? {} : { unknownAgents: check.unknownAgents }),
+        })
+        return
+      }
+      const wf = {
+        id: ulid() as string,
+        workspaceId,
+        name: parsed.name,
+        code: parsed.code,
+        // ★ 采纳 ⇒ 来源是 AI（列表徽标那一档终于有人产出了）
+        source: 'ai' as const,
+        templateKey: null,
+        inlineAgents: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }
+      workflows.push(wf)
+      await saveWorkflows(options.dataDir, workflows)
+      sendJson(res, 201, { workflow: wf, unverifiable: check.unverifiable })
       return
     }
 

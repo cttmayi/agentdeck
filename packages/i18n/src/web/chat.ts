@@ -536,6 +536,35 @@ export const chatText = {
    * 按钮按条件出现（agent-draft/ 目录有 agent-draft.md 才出现），不搞置灰——没有素材时置灰
    * 按钮是一种半开的门（设计稿 §9.7）。
    */
+  // ── 编排生成者的采纳面板（2026-11，D135）──
+  /*
+   * 与「确认生成智能体」那一族同构、同一条纪律（**按条件出现**，不置灰）。
+   * ⚠️ 词条里不许出现 markdown 记号（`**` 与反引号）——i18n 守卫要求。
+   */
+  'chat.workflowMakerAction': { zh: '确认采纳编排', en: 'Adopt workflow' },
+  'chat.workflowMakerPanelTitle': { zh: '确认采纳编排', en: 'Adopt workflow' },
+  'chat.workflowMakerPanelHint': { zh: '采纳后进编排页，可继续改', en: 'Lands in Workflows, still editable' },
+  'chat.workflowMakerLoading': { zh: '正在读草稿…', en: 'Reading the draft…' },
+  'chat.workflowMakerClosed': { zh: '已采纳。', en: 'Adopted.' },
+  'chat.workflowMakerDraftNote': {
+    zh: '这是编排生成者写的草稿。采纳之前你可以改名、改代码——采纳是最后一次把关的机会。',
+    en: 'Drafted by the workflow maker. You can rename and edit before adopting — this is your last check.',
+  },
+  'chat.workflowMakerNameLabel': { zh: '编排名', en: 'Workflow name' },
+  'chat.workflowMakerSummaryLabel': { zh: '一句话说明（可选）', en: 'One-line summary (optional)' },
+  'chat.workflowMakerCodeLabel': { zh: '编排代码', en: 'Workflow code' },
+  'chat.workflowMakerCodeHint': {
+    zh: '采纳前会查两件事：语法对不对、代码里引用的智能体是否存在。',
+    en: 'Before adopting we check the syntax, and that every referenced agent exists.',
+  },
+  'chat.workflowMakerParseError': { zh: '草稿解析失败：{error}', en: 'Draft could not be parsed: {error}' },
+  'chat.workflowMakerLoadFail': { zh: '读不到草稿：{error}', en: 'Cannot read the draft: {error}' },
+  'chat.workflowMakerFail': { zh: '采纳失败：{error}', en: 'Adopting failed: {error}' },
+  'chat.workflowMakerDone': { zh: '已采纳「{name}」', en: 'Adopted “{name}”' },
+  'chat.workflowMakerDoneUnverifiable': {
+    zh: '已采纳「{name}」（有 {n} 处引用是拼出来的，没法静态校验）',
+    en: 'Adopted “{name}” ({n} references built at runtime — not statically checked)',
+  },
   'chat.agentMakerAction': { zh: '确认生成智能体', en: 'Confirm agent' },
   'chat.agentMakerPanelTitle': { zh: '确认生成智能体 · 岗位卡 + 配套技能', en: 'Confirm the agent · job card + skills' },
   'chat.agentMakerDraftNote': {

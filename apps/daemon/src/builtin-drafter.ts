@@ -78,7 +78,7 @@ export function effectiveInstructions(agent: Agent): string {
  *   ——在聊天里问五字段、规则由它描述，产出岗位卡（agent-draft.md）供确认生成。它取代了
  *   早先设想的「访谈官」与「岗位卡起草者」两条（问和写合并成一个内置，见设计稿 §2）。
  */
-export type BuiltinKind = 'drafter' | 'skill-reviewer' | 'memory-tidy' | 'agent-maker'
+export type BuiltinKind = 'drafter' | 'skill-reviewer' | 'memory-tidy' | 'agent-maker' | 'workflow-maker'
 
 /**
  * 这条 agent 是内置的哪一条？**不是内置的返回 null**。
@@ -200,6 +200,77 @@ export const MEMORY_TIDY_NAME = '记忆整理者（内置）'
 
 /** 内置「智能体生成者」的默认名字（与起草者同一套：名字可改，认的是 `builtin` + `role`）。 */
 export const AGENT_MAKER_NAME = '智能体生成者（内置）'
+
+/**
+ * 内置「编排生成者」的默认名字（2026-11，D135）。
+ *
+ * 与「智能体生成者」并列：那个问"一个岗位"，这个问"一条流程"。
+ */
+export const WORKFLOW_MAKER_NAME = '编排生成者（内置）'
+
+/**
+ * 「编排生成者」的默认身份（2026-11，设计 `docs/tmp/workflow-maker-design.md`）。
+ *
+ * 使用者："有没有好的方案" → 定稿：与智能体生成者同构（聊天里问清楚 → 写产物 → 人采纳），
+ * 产物是**编排代码**。所以它的身份只有三件事：
+ *   · 问清楚（几步 / 每步谁干 / 哪一步要人拍板）；
+ *   · 把规则**自己描述出来**（用户只回答、只确认，不用学 API）；
+ *   · 产出 `workflow-draft/workflow-draft.md`，**只产代码与配置**，不建人、不建组、不跑。
+ *
+ * ⚠️ 代码里**只能引用现有智能体**（`agent('名字')`）与 `gate('文案')`——
+ *   引擎没有 `inline()` 原语（只有 `Workflow.inlineAgents` 字段、没实现），
+ *   写它也跑不起来。采纳时会校验名字，缺了会当场点名。
+ * ⚠️ 它不会看到"有哪些智能体"以外的东西，所以**别让它编名字**：不确定就问用户
+ *   "这个活谁干？智能体页里有没有现成的人？"。
+ */
+export const WORKFLOW_MAKER_INSTRUCTIONS_BODY = [
+  "你是平台内置的编排生成者：帮人把「一条流程」问清楚并写成代码，**不干活**。",
+  '用户派活、求产出时，引导回流程本身——你的产出是编排代码，不是任务结果。',
+  '',
+  '## 怎么问（一条流程三件事）',
+  '',
+  '按顺序问，一次一两个问题：',
+  '- **要几步**：一件事从头到尾要经过哪些环节（两三步最常见）；',
+  '- **每步谁干**：这一步落在哪个智能体身上（**必须是智能体页里已有的名字**；',
+  '  用户说不出名字时，问他想让谁干、提示去智能体页看一眼，不要自己编）；',
+  '- **哪一步要人拍板**：交付物什么时候必须停下来等人确认（默认建议「最后一步」）。',
+  '',
+  '## 规则由你描述，不是让用户写',
+  '',
+  '- 每个环节**你提出草稿**（"我建议这样：先让 数据员 取数，再让 撰稿员 成稿，最后你确认"），',
+  '  用户确认或修正；用户**只回答、只确认**；',
+  '- 不要跟用户讲 API 名字（`flow` / `loop` / `gate`），除非他自己问。',
+  '',
+  '## 产出（用户表示聊够了之后）',
+  '',
+  '1. 新建目录 `workflow-draft/`（工作目录下，**整个生成产物都放这里面**），',
+  '   写 `workflow-draft/workflow-draft.md`：',
+  '   frontmatter 两行：`name`（编排名，如"周报流水线"）与 `summary`（一句话说它做什么）；',
+  '   正文就是编排代码（可以包在 ```js 围栏里）。',
+  '2. 代码里只能这样写：',
+  "   - `const 某人 = agent('智能体页里的名字')` —— **名字必须真存在**；",
+  "   - `await flow([甲, 乙], '{{task}}')` —— 接力流水线（`{{task}}` 是这次运行填的任务）；",
+  "   - `await parallel([甲, 乙], '{{task}}')` —— 并行，返回 Reply 数组；",
+  '   - `await loop(执行者, 把关者, { maxRounds: 2 })` —— 把关循环，不通过就打回重写；',
+  "   - `await loop(某人, gate('请过目'), { maxRounds: 3, reuseOutput: true })` ——",
+  '     **人放行**：不重写，直接把这一版摆给人看；不满意才带着意见重写；',
+  "   - `await gate('…')` —— 单独等人拍板。",
+  '3. 写完在聊天里说明：几步、每步谁干、哪一步要人确认。**不要宣布"已完成"就完事**——',
+  '   要让用户知道你写了什么、他接下来在界面上点哪一下（「确认采纳编排」）。',
+  '',
+  '## 边界',
+  '',
+  '- **只产代码与配置**：不建智能体、不建组、不提交运行；',
+  '- 缺人就让用户去智能体页建，**不要编一个名字**（采纳时会因为"没有这个智能体"被拒）；',
+  '- 不确定能不能写对的地方就问，不要猜。',
+  '',
+  '素材不足以支撑时如实说，不要硬凑。',
+].join('\n')
+
+export const WORKFLOW_MAKER_INSTRUCTIONS = withConduct(WORKFLOW_MAKER_INSTRUCTIONS_BODY)
+
+/** 已知的历史默认（逐字比对用）。第一个版本没有旧默认。 */
+export const WORKFLOW_MAKER_INSTRUCTIONS_HISTORY: readonly string[] = []
 
 /**
  * 「智能体生成者」的默认身份（2026-11 设计定稿 `docs/design/recruiter-interview.md` §3.2）。
@@ -782,6 +853,13 @@ export function builtinDefaultsOf(kind: BuiltinKind): {
       label: '平台内置的智能体生成者（在聊天里把岗位问清楚并写出岗位卡的作者）',
     }
   }
+  if (kind === 'workflow-maker') {
+    return {
+      name: WORKFLOW_MAKER_NAME,
+      instructions: WORKFLOW_MAKER_INSTRUCTIONS_BODY,
+      label: '平台内置的编排生成者（在聊天里把一条流程问清楚并写出编排代码的作者）',
+    }
+  }
   // ★ 分批第 137 批：`skill-reviewer` 的默认身份已经随评审一起删除。老工作区里那条
   //   智能体仍是使用者的数据（不自动删），但**没有默认值可恢复**——所以这里的
   //   `instructions` 是空串，调用方（恢复默认那条路由）会在写库之前就拒绝它。
@@ -989,11 +1067,13 @@ export async function ensureBuiltinAgents(
   drafter: EnsureDrafterResult
   memoryTidy: EnsureDrafterResult
   agentMaker: EnsureDrafterResult
+  workflowMaker: EnsureDrafterResult
 }> {
   const drafter = await ensureBuiltinDrafter(store, workspaceId)
   const memoryTidy = await ensureBuiltinMemoryTidy(store, workspaceId)
   const agentMaker = await ensureBuiltinAgentMaker(store, workspaceId)
-  return { drafter, memoryTidy, agentMaker }
+  const workflowMaker = await ensureBuiltinWorkflowMaker(store, workspaceId)
+  return { drafter, memoryTidy, agentMaker, workflowMaker }
 }
 
 /**
@@ -1060,6 +1140,59 @@ export async function ensureBuiltinAgentMaker(
     await store.insertAgent({
       ...found,
       instructions: AGENT_MAKER_INSTRUCTIONS_BODY,
+      updatedAt: Date.now(),
+    })
+    return { action: 'healed', agentId: found.id as string, why: '内置指令还是旧版' }
+  }
+  return { action: 'left-alone', agentId: found.id as string }
+}
+
+/**
+ * 确保内置「编排生成者」在（2026-11，D135）。
+ *
+ * 与智能体生成者**同一套三条纪律**（幂等 / 清空自愈 / 旧默认跟上）。
+ * ⚠️ 它**不挂技能**：编排代码的写法全在身份里，没有"编排用技能"这种东西。
+ */
+export async function ensureBuiltinWorkflowMaker(
+  store: Store,
+  workspaceId: WorkspaceId,
+): Promise<EnsureDrafterResult> {
+  const all = await store.listAgents(workspaceId)
+  const found = findBuiltinAgent(all, 'workflow-maker')
+  if (!found) {
+    const now = Date.now()
+    const agent: Agent = {
+      id: ulid() as Agent['id'],
+      workspaceId,
+      name: WORKFLOW_MAKER_NAME,
+      instructions: WORKFLOW_MAKER_INSTRUCTIONS_BODY,
+      model: null,
+      // 跟随全局默认（与其它内置同一档）
+      runtimeKey: 'default',
+      workDir: null,
+      skillIds: [],
+      env: {},
+      builtin: true,
+      builtinKind: 'workflow-maker',
+      reviewStandard: null,
+      createdAt: now,
+      updatedAt: now,
+    }
+    await store.insertAgent(agent)
+    return { action: 'created', agentId: agent.id as string }
+  }
+  if (found.instructions.trim() === '') {
+    await store.insertAgent({
+      ...found,
+      instructions: WORKFLOW_MAKER_INSTRUCTIONS_BODY,
+      updatedAt: Date.now(),
+    })
+    return { action: 'healed', agentId: found.id as string, why: '指令被清空了' }
+  }
+  if (WORKFLOW_MAKER_INSTRUCTIONS_HISTORY.includes(effectiveInstructions(found))) {
+    await store.insertAgent({
+      ...found,
+      instructions: WORKFLOW_MAKER_INSTRUCTIONS_BODY,
       updatedAt: Date.now(),
     })
     return { action: 'healed', agentId: found.id as string, why: '内置指令还是旧版' }

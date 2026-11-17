@@ -83,6 +83,8 @@ export interface ChatDetail {
    *    产出岗位卡）⇒ 聊天页出现「确认生成智能体」按钮。按钮按条件出现，不搞置灰。
    */
   hasAgentDraft: boolean
+  /** 2026-11（D135）：工作目录里有 `workflow-draft/workflow-draft.md` ⇒ 出现「确认采纳编排」。 */
+  hasWorkflowDraft?: boolean
 }
 
 /** 全部对话，最近说过话的在前（顺序由服务端定，界面不重排）。 */
