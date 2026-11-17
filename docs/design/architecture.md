@@ -826,7 +826,7 @@ CLI，消耗真实额度。这条错误当场被测试抓到了（`apps/daemon/s
 | GET | `/api/audits/export` | 审计导出（带校验和） |
 | **聊天（D49，闭环的旁路）** | | |
 | GET | `/api/conversations` | 对话列表（按最近说过话排序） |
-| POST | `/api/conversations` | **对话由第一句话诞生**（没有"先建一个空对话"这条路）：标题取第一个非空行；agent 必须是**执行者**（审核者 ⇒ `agent_role_mismatch`） |
+| POST | `/api/conversations` | **对话由第一句话诞生**（没有"先建一个空对话"这条路）：标题取第一个非空行；agent 必须是**能聊天的人**：用户建的任意智能体，或两条**聊天型内置岗位**（智能体生成者 / 编排生成者，判据 `CHAT_CAPABLE_BUILTINS` 写**等值集合**）；其余内置岗位 ⇒ 400 `agent_builtin_no_chat`（⚠️ 2026-11/D127 之前这里是按角色判的 `agent_role_mismatch`） |
 | GET | `/api/conversations/{id}` | 对话 + 全部轮次（每轮带 `output` / `status` / `toolCount` / `durationMs`）+ **实际工作目录** |
 | PATCH | `/api/conversations/{id}` | 改名 / 改工作目录（`workDir: null` = 回到自动分配；**空串是 400**，两者不同）。⚠️ **界面只在「新对话」那一步设工作目录**（详情页只读）：改目录等于把"这次对话在哪个目录里干的活"变成不确定的，而回看时列出的文件、路径都指着旧目录。接口仍然收这个字段（老客户端与脚本照旧能用） |
 | DELETE | `/api/conversations/{id}` | 删对话**连同它的轮次**；那一轮的 run 一个都不动（成本与审计还认得它） |
@@ -837,6 +837,10 @@ CLI，消耗真实额度。这条错误当场被测试抓到了（`apps/daemon/s
 | GET | `/api/agents/{id}/memory-consolidate/{runId}` | 轮询结果（形状与 `memory-tidy` 同） |
 | GET | `/api/conversations/{id}/files` | 这个对话工作目录的文件树（一次一层；D49 ⑪） |
 | GET | `/api/conversations/{id}/file` | 目录里某个文件的内容（查看器用；带 NUL 就按二进制）。⚠️ 2026-10：**音视频**（`video/*` / `audio/*`）走另一条发法——不读进内存、认 `Range`（206 / 416）、带 `accept-ranges`，上限也从 8MB 换到 2GB |
+| GET | `/api/conversations/{id}/agent-draft` | **智能体生成者的草稿**（D109）：读工作目录 `agent-draft/agent-draft.md` + 配套技能草稿（`agent-draft/skill/<slug>/SKILL.md`）。对话详情另带 `hasAgentDraft`（按钮**条件出现**，不置灰） |
+| POST | `/api/conversations/{id}/agent-commit` | **确认生成智能体**：先沉淀配套技能（进新智能体的**独有目录**，不进共享技能池），再建智能体并挂上它们；响应如实带 `exclusiveSlugs`。只有**智能体生成者**的对话能采纳（`agent_commit_not_maker`） |
+| GET | `/api/conversations/{id}/workflow-draft` | **编排生成者的草稿**（D135）：读工作目录 `workflow-draft/workflow-draft.md`（frontmatter `name`/`summary` + 正文即代码，```js 围栏会剥掉）。解析失败**照样 200**，带 `parseError`——界面据此说清哪里不对。对话详情另带 `hasWorkflowDraft` |
+| POST | `/api/conversations/{id}/workflow-commit` | **采纳编排**（D135）：**以请求里的最终版为准**（人可能改过代码），服务端重解析 + 三道校验（语法 `new AsyncFunction` **只构造不调用** / `agent('字面量')` 必须是现存智能体 / 名字非空 ≤100），通过就落一条编排 `source: 'ai'`；拼出来的 `agent(变量)` 放行但落 `unverifiable` 计数。只有**编排生成者**的对话能采纳（`workflow_commit_not_maker`） |
 | **摄取与执行** | | |
 | ~~POST~~ | ~~`/api/reports`~~ | **⚠️ 已退场（2026-11，D125）**：第三方报告的消费方是"审核 run"，审核 run 退场之后这条入口没有归宿。整条链一起删（`Report` 实体 / `ReportIngestor` / 远端 `/api/pending` / CLI `reports` / MCP `submit_report`） |
 | POST | `/api/runs` | 提交 run（**INV-1 在这里、写入之前强制校验**） |
