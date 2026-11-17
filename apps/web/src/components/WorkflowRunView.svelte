@@ -18,6 +18,7 @@
   import type { WebTextId } from '@agentdeck/i18n'
   import { api, type WorkflowRun, type WorkflowStep } from '../lib/api.ts'
   import {
+    runStatusKey,
     workflowRunStatusClass,
     workflowRunStatusKey,
     workflowStepStatusClass,
@@ -483,9 +484,22 @@
                       <li class="wf-round">
                         <div class="wf-round-head">
                           <div class="wf-round-tag">
-                            <!-- 这是**这条 run** 的状态（不是步骤的）——用 run 那一族词条 -->
+                            <!--
+                              ★ 这是**这条 run** 的状态（不是步骤的），所以词条也必须用
+                              **Run.status 那一族**（`term.runStatus.*`：completed / queued /
+                              running / failed / cancelled…）。
+                              ⚠️ 别用 `workflowRunStatusKey`：那是**编排 run** 的六档
+                              （queued/running/paused/waiting-human/done/failed）——把
+                              `completed` 传进去它不认识，会**兜底成「排队中」**
+                              （使用者实测就是这个：已经写完了，徽标却写「排队中」）。
+                              颜色仍用 `workflowRunStatusClass`：那几档在两族里同名同色。
+                            -->
                             <span class="badge {workflowRunStatusClass(execStatuses[row.runId] ?? '')}">
-                              {$t(workflowRunStatusKey(execStatuses[row.runId] ?? 'queued'))}
+                              <!-- 状态还没取到 ⇒ 画「…」，**不猜一个状态**：猜成「排队中」
+                                   正是上一次的 bug（已经写完了，徽标却写「排队中」） -->
+                              {execStatuses[row.runId] === undefined
+                                ? '…'
+                                : $t(runStatusKey(execStatuses[row.runId]!))}
                             </span>
                             <span class="wf-round-name">{runTitle(row.runId, row.role)}</span>
                             {#if row.role === 'guard'}
