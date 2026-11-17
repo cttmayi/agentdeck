@@ -31,6 +31,7 @@
     isRunTerminal,
     logExpanded,
     loopRounds,
+    stepExpanded,
     needsFetch,
     runCardBody,
     stepPreview,
@@ -83,8 +84,17 @@
    *   用 plain object 替换触发渲染（Svelte 5 legacy，Map 不触发）。
    */
   let outputs: Record<string, string> = {}
-  /** 点击步骤卡头展开它的完整过程日志（RunLog）。 */
-  let expandedSeq: number | null = null
+  /**
+   * 每条步骤**自己的**展开状态（`seq → 展开?`）；`undefined` = 人没动过，按默认走。
+   *
+   * ⚠️ 使用者 2026-11 报的真缺陷：这里原来是一个**全局的 `expandedSeq`**——
+   *   点开上面那张步骤卡，自动展开的那一步（正在跑 / 等人确认）就被悄悄收起，
+   *   于是"下面那张 Agent 卡片"看起来凭空消失。原话："如果把上面『把关循环』展开，
+   *   下面多的卡片就不见了。说明下面多的卡片是上面『把关循环』的。"
+   *   ——不是"多出来的卡片"，是**别人展开时把它的卡片收起来了**。
+   *   现在与日志同一条纪律：**按步骤各存各的**（判据 `workflow-cards.ts#stepExpanded`）。
+   */
+  let openSteps: Record<number, boolean> = {}
 
   /**
    * ★ 2026-11 每个 Agent 一个显示：loop 步骤按轮拆成「执行者 → 把关者」两行。
@@ -170,8 +180,8 @@
     if (role === 'exec') return $t('workflows.loopExecLabel')
     return runId.slice(-8)
   }
-  function toggleStep(seq: number): void {
-    expandedSeq = expandedSeq === seq ? null : seq
+  function toggleStep(st: WorkflowStep): void {
+    openSteps = { ...openSteps, [st.seq]: !isExpanded(st) }
   }
   /**
    * 卡片标题上的「最后结果」摘要（使用者 2026-11：结果放标题上）。
@@ -214,10 +224,12 @@
   function toggleRunLog(runId: string): void {
     openLogs = { ...openLogs, [runId]: !isLogOpen(runId) }
   }
-  /** 展开态：手动展开（expandedSeq）优先；默认运行中/等确认自动展开，执行完收起。 */
+  /**
+   * 这条步骤展不展开：人点过听人的；没点过则**正在跑 / 等人确认的自动展开**。
+   * 判据在 `workflow-cards.ts#stepExpanded`（有单测：展开一个不许影响别的步骤）。
+   */
   function isExpanded(st: WorkflowStep): boolean {
-    if (expandedSeq === st.seq) return true
-    return expandedSeq === null && (st.status === 'running' || st.status === 'waiting-human')
+    return stepExpanded(openSteps[st.seq], st.status)
   }
 
   /** 某个 run 是哪个 agent 跑的（找不到就 null——调用方退回通用说法）。 */
@@ -410,7 +422,7 @@
           <ol class="wf-outputs">
             {#each [...run.steps].sort((a, b) => a.seq - b.seq) as st (st.seq)}
               <li class="wf-out {st.status === 'running' ? 'on' : ''}">
-                <button type="button" class="wf-out-head" onclick={() => toggleStep(st.seq)}>
+                <button type="button" class="wf-out-head" onclick={() => toggleStep(st)}>
                   <span class="wf-out-line">
                     <span class="badge {workflowStepStatusClass(st.status)}">{$t(workflowStepStatusKey(st.status))}</span>
                     <!--

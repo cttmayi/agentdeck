@@ -192,3 +192,38 @@ export function stepPreview(
   }
   return { text: truncated ? `${text}…` : text, truncated }
 }
+
+/**
+ * 步骤自己的终态（`WorkflowStep.status`，注意与 run 的状态**不是**一套词）。
+ */
+export const STEP_TERMINAL_STATUSES = ['done', 'failed', 'skipped'] as const
+
+/** 这个步骤状态是不是终态。 */
+export function isStepTerminal(status: string | undefined | null): boolean {
+  if (status === undefined || status === null) return false
+  return (STEP_TERMINAL_STATUSES as readonly string[]).includes(status)
+}
+
+/**
+ * 这个步骤的正文（= 里面那几张 Agent 卡片）现在展不展开。
+ *
+ * @param manual 人手动设过的状态（`true` 展开 / `false` 收起 / `undefined` 没动过）
+ * @param status 步骤状态
+ *
+ * ⚠️ 使用者 2026-11 报的真缺陷：这里原来是**一个全局的 `expandedSeq`**——
+ *   点开上面的步骤，自动展开的那一步（正在跑 / 等人确认）就被悄悄收起来了，
+ *   于是"下面那张 Agent 卡片"看起来凭空消失、又凭空出现，像是多出来的。
+ *   症状原话："如果把上面『把关循环』展开，下面多的卡片就不见了。"
+ *
+ *   现在每条步骤**各存各的**（与日志按 run 存同一个道理）：
+ *     · 人点过 ⇒ 听人的；
+ *     · 没点过 ⇒ **正在跑 / 等人确认的自动展开**，其余收起。
+ */
+export function stepExpanded(
+  manual: boolean | undefined,
+  status: string | undefined | null,
+): boolean {
+  if (manual !== undefined) return manual
+  if (isStepTerminal(status)) return false
+  return status === 'running' || status === 'waiting-human'
+}

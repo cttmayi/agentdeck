@@ -9,6 +9,7 @@ import {
   loopRounds,
   needsFetch,
   runCardBody,
+  stepExpanded,
   stepPreview,
   stepSummaryRunId,
 } from './workflow-cards.ts'
@@ -148,5 +149,18 @@ describe('编排运行画面：每个 run 一张卡片', () => {
     // 没有产出 / 只有空白
     assert.deepEqual(stepPreview(undefined), { text: '', truncated: false })
     assert.deepEqual(stepPreview('\n\n  \n'), { text: '', truncated: false })
+  })
+
+  test('★★ 步骤展开状态按步骤各存各的（不是一个全局值）', () => {
+    // 没点过：正在跑 / 等人确认的自动展开，终态收起
+    assert.equal(stepExpanded(undefined, 'running'), true)
+    assert.equal(stepExpanded(undefined, 'waiting-human'), true)
+    assert.equal(stepExpanded(undefined, 'done'), false)
+    assert.equal(stepExpanded(undefined, 'failed'), false)
+    assert.equal(stepExpanded(undefined, 'pending'), false)
+    assert.equal(stepExpanded(undefined, 'skipped'), false)
+    // 人点过：一律听人的（展开一个**不许**影响别的步骤）
+    assert.equal(stepExpanded(true, 'done'), true)
+    assert.equal(stepExpanded(false, 'waiting-human'), false)
   })
 })
