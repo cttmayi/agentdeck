@@ -1690,15 +1690,123 @@ const CHECKS = [
   { view: '定时任务（D115）', key: 'schedules.cancelCloses',
     label: '★ 点「取消」表单消失、回到空态',
     ok: (v) => v === true },
-  { view: '编排（2026-11）', key: 'workflows.mainPaneWidth',
-    label: '★ 编排页右栏可见（占详情那列，>200px）——与定时任务同款布局守卫',
-    ok: (v) => v >= 200, show: (v) => `${v}px` },
-  { view: '编排（2026-11）', key: 'workflows.emptyStage',
-    label: '★ 空态给「从模板」引导（还没有编排时，新建是唯一入口）',
-    ok: (v) => v === true },
-  { view: '编排（2026-11）', key: 'workflows.createFormOpens',
-    label: '★ 点「新建」表单真出现（名字框 + 代码编辑框）',
-    ok: (v) => v === true },
+  // ── 编排：按「页面基本规范」重量（2026-11，D133）──
+  //
+  // ⚠️ 这一页原来只有三条判据（右栏宽度 / 空态 / 新建能开），而它**自己一套**：
+  //   栏头写着大标题 + 一颗「新建」、右栏手写 `detail-head`、删除用 `window.confirm`、
+  //   运行表单手搭浮层、`.with-detail` 恒写（窄屏一进来整页空白、没有出口）。
+  //   重排之后这一组按**规范本身**逐条量，而不是按某个实现的类名。
+  {
+    view: '编排',
+    key: 'workflows.twoPanes',
+    label: '★ 主从两栏并排（`.list-pane` 与 `.detail-pane` 都在、右在左的右边）——与任务 / 智能体 / 沉淀同一副骨架',
+    ok: (v) => !!v && v.sideBySide === true && v.listW > 0,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '编排',
+    key: 'workflows.mainPaneWidth',
+    label: '★ 右栏占详情那一列（>200px）——与定时任务同款布局守卫（少一列时它会被网格塞进缝隙）',
+    ok: (v) => v >= 200,
+    show: (v) => `${v}px`,
+  },
+  {
+    view: '编排',
+    key: 'workflows.listHead',
+    /**
+     * ★ 规范来自 D61~D66：列表栏的栏头带**只有计数 + 搜索**，**没有标题**
+     *   （页名已经在顶栏，栏标题与它一字不差时就是噪音），也**没有按钮**
+     *   （主操作在顶栏）。这一页原来三样都反着来。
+     */
+    label:
+      '★★ 左栏栏头带就是「计数 + 搜索」：**没有标题**、**没有按钮**（主操作在顶栏——'
+      + 'D61~D66 定的那副骨架，任务 / 智能体 / 聊天 / 沉淀都按它）',
+    ok: (v) => !!v && v['标题'] === false && v['搜索框'] === true && v['按钮'].length === 0,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '编排',
+    key: 'workflows.pageActions',
+    label:
+      '★★ 页面动作在**顶栏**、主操作是 primary（新建 / 刷新）——与任务 / 智能体 / 沉淀 / 定时任务'
+      + '同一格同一款；这一页原来把「新建」摆在左栏栏头里',
+    ok: (v) =>
+      Array.isArray(v) &&
+      v.length === 2 &&
+      v[0].label === '新建' &&
+      v[0].primary === true &&
+      v[1].label === '刷新',
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '编排',
+    key: 'workflows.rightEmpty',
+    label:
+      '★★ 没选中时右栏是**空态**、不是一片空白（`.with-detail` 也不该加）：'
+      + '改之前 `.with-detail` 恒写 ⇒ 窄屏一进来列表被藏掉、右栏又什么都没有',
+    ok: (v) => !!v && v.withDetail === false && typeof v.text === 'string' && v.text.includes('选一个'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '编排',
+    key: 'workflows.createOpened',
+    label: '★★ 点顶栏「新建」⇒ 右栏塌出表单（名字框 + 代码框 + 从模板那排），`.with-detail` 跟着加上',
+    ok: (v) => !!v && v.nameInput === true && v.codeInput === true && v.withDetail === true && v.templates >= 1,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '编排',
+    key: 'workflows.row',
+    label:
+      '★★ 列表行是**两行结构**（标题单行省略 + 副行元信息），行高与其它三页同一档'
+      + '（`--list-row-min-h` 64px）——列表是用来扫的，长名字不许把行撑开',
+    ok: (v) => !!v && v['两行结构'] === true && v['标题单行'] === true && v['行高'] >= 64,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '编排',
+    key: 'workflows.selectShows',
+    label: '★★ 点一行 ⇒ 右栏是它（**选中即编辑**：代码就在可改的地方），动作有「运行 / 删除 / 保存」三颗',
+    ok: (v) =>
+      !!v &&
+      v.withDetail === true &&
+      v['有代码'] === true &&
+      ['运行', '删除', '保存'].every((l) => v['动作'].includes(l)),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '编排',
+    key: 'workflows.deleteDialog',
+    label:
+      '★★★ 删除弹的是**平台自己的居中对话框**（不是 `window.confirm`），而且点「取消」真的不删——'
+      + '全站只有这一种确认框（原生框在窄屏/触屏上样子完全不同，也带不了说明）',
+    ok: (v) => !!v && v['弹平台对话框'] === true && v['取消后关掉'] === true && v['行数不变'] === true,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '编排',
+    key: 'workflows.runDialog',
+    label:
+      '★★ 点「运行」弹同一个居中对话框（任务描述 + 工作目录 + 发起），关掉之后**不留**半个浮层',
+    ok: (v) => !!v && v['打开'] === true && v['工作目录'] === true && v['发起按钮'] === true && v['关掉'] === true,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '编排',
+    key: 'workflows.narrow',
+    label:
+      '★★★ 窄屏两态都对：**选中时**列表让位、右栏占满且「返回」可见，点它回到列表；'
+      + '**没选中时**列表必须在（改之前 `.with-detail` 恒写 ⇒ 窄屏一进这一页就是整页空白、'
+      + '而且没有任何出口）',
+    ok: (v) =>
+      !!v &&
+      v['选中态']['左栏'] === 'none' &&
+      v['选中态']['右栏'] !== 'none' &&
+      v['选中态']['返回可见'] === true &&
+      v['未选中态']['点返回后左栏'] !== 'none' &&
+      v['未选中态']['withDetail'] === false,
+    show: (v) => JSON.stringify(v),
+  },
   /*
    * ⚠️ 2026-11（D132）：「编排任务」页（`views/WorkflowRuns.svelte`）删掉了——
    *   编排的每一次运行都会建一条 issue，它在**任务页**里按编排分组列着、点开就是

@@ -7,43 +7,70 @@
    * ⚠️ 运行画面（`$workflowRun` 非空）是**另一个组件**（`WorkflowRunView`），
    *   这里是"定义 + 历史"那一半（使用者拍板：编排页只管定义+历史）。
    *
+   * ══════════════════════════════════════════════════════════════════
+   * 2026-11（D133）：按「页面基本规范」重排这一页
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 改之前这一页是**自己一套**，与其它页每一处都对不上：
+   *
+   *   · 左栏栏头写着大标题 + 说明 + 一颗「新建」按钮 —— 而规范是
+   *     **栏头带只有计数 + 搜索**（D61~D66，`ListPane`），**主操作在顶栏**
+   *     （`page-actions`；Crystallize 那句"主操作放顶栏"是明规则，定时任务页
+   *     还因为这条被使用者点名改过一次）；
+   *   · 右栏手写 `detail-head` / `detail-body` —— 规范是 `MainArea`（窄屏返回按钮、
+   *     空态、滚动容器都在它里面）；
+   *   · 删除用 `window.confirm` —— 规范是平台自己的居中对话框（`askConfirm`）；
+   *   · 「发起运行」手写 `.drawer-backdrop` + `.modal` —— 规范是 `Modal` 组件
+   *     （Esc / 遮罩 / 关闭按钮只实现一次）；
+   *   · `.with-detail` **恒写**：窄屏下左栏被藏起来、右栏还空着 ⇒ 一进这一页
+   *     就只剩一片空白，而且没有出口（没有返回按钮）。
+   *
+   * 现在这一页与任务 / 智能体 / 沉淀 / 定时任务同款：`ListPane` + `MainArea` +
+   * 顶栏动作 + 居中对话框 + 窄屏返回。
+   *
    * ⚠️ Svelte 5 legacy 模式：本文件不引 runes（`$state` 一用整文件切 runes 模式，
    *   而 legacy 的 `$:` 与 runes 混用会被编译器拒——Tasks.svelte 同款约束）。
    */
-  import { onMount } from 'svelte'
+  import { onDestroy, onMount } from 'svelte'
   import { listGrip } from '../lib/list-grip.ts'
   import { t, tx } from '../lib/i18n.ts'
   import type { WebTextId } from '@agentdeck/i18n'
-  import {
-    api,
-    type Workflow,
-    type WorkflowRun,
-    type WorkflowTemplate,
-  } from '../lib/api.ts'
+  import { api, type Workflow, type WorkflowRun, type WorkflowTemplate } from '../lib/api.ts'
   import {
     workflows,
     workflowRuns,
     loading,
+    loadError,
     loadIssues,
     loadWorkflows,
     loadWorkflowRuns,
   } from '../lib/stores.ts'
   import { workflowRun, toast } from '../lib/view.ts'
+  import { askConfirm } from '../lib/confirm.ts'
+  import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
+  import { Modal } from '@agentdeck/ui/components'
+  import ListPane from '../components/ListPane.svelte'
   import ListRow from '../components/ListRow.svelte'
+  import MainArea from '../components/MainArea.svelte'
   import DirPicker from '../components/DirPicker.svelte'
   import WorkflowRunView from '../components/WorkflowRunView.svelte'
   import { relativeTime } from '../lib/time.ts'
   import { workflowRunStatusClass, workflowRunStatusKey } from '../lib/run-status.ts'
 
-  // ── 新建/编辑表单 ──
-  let formMode: 'create' | 'edit' = 'create'
+  /**
+   * 右栏此刻是"新建"还是"某条编排的编辑"。
+   *
+   * ⚠️ 与任务页/智能体页的 `creating` 同一套语义：**它不是视图**，是右栏的状态
+   *   （`VIEWS` 里没有 `workflows/new`）。窄屏的"有没有详情"也按它算（`detailOpen`）。
+   */
+  let creating = false
   let formName = ''
   let formCode = ''
   let formTemplateKey: string | null = null
   let formError = ''
   let busy = false
 
-  // ── 发起运行表单 ──
+  // ── 发起运行（居中对话框，不是右栏的一块）──
   let runOpen = false
   let runPrompt = ''
   let runWorkDir = ''
@@ -62,24 +89,69 @@
   })
 
   let selectedId: string | null = null
+  /** 搜索词（与任务 / 智能体 / 聊天同一套：栏头带里的那个框）。 */
+  let filter = ''
 
   $: selected = $workflows.find((w) => w.id === selectedId) ?? null
+  $: visible = filter.trim() === ''
+    ? $workflows
+    : $workflows.filter((w) => w.name.toLowerCase().includes(filter.trim().toLowerCase()))
   $: history = $workflowRuns
     .filter((r) => r.workflowId === selectedId)
     .sort((a, b) => b.updatedAt - a.updatedAt)
+  /**
+   * 右栏是否有东西（窄屏据此决定"列表让位"）。
+   *
+   * ⚠️ 这就是改之前那个 bug：原来 `.with-detail` 恒写，窄屏一进来列表就被藏掉、
+   *   而右栏什么都没有 ⇒ 整页空白、也没有返回按钮。
+   */
+  $: detailOpen = creating || selected !== null
 
-  function openRun(runId: string): void {
-    // 从定义页进运行画面（返回按钮恒回定义页——「编排任务」页删掉之后只剩这一种来处，
-    // 见 D132）
-    location.hash = `#/workflows/run/${runId}`
+  /**
+   * 顶栏动作（与聊天 / 任务 / 智能体 / 沉淀 / 定时任务同一格、同一款）。
+   *
+   * ★ 主操作**只能在顶栏**：栏头带只有"计数 + 搜索"（D61~D66）。这一页原来把
+   *   「新建」摆在左栏栏头里，与全站其它页都对不上（定时任务页因为同一条被点名过）。
+   * ★ 标签读 `$t(...)` 放在 `$:` 里 ⇒ 切语言时自动重新登记（`setPageActions` 是整体覆盖）。
+   */
+  $: setPageActions('workflows', [
+    {
+      id: 'new',
+      label: $t('workflows.new'),
+      kind: 'primary',
+      icon: 'plus',
+      // 表单已经开着时禁点（与智能体页 / 定时任务页同款）
+      disabled: creating,
+      onActivate: startCreate,
+    },
+    {
+      id: 'refresh',
+      label: $t('common.refresh'),
+      kind: 'ghost',
+      icon: 'refresh',
+      onActivate: () => void refresh(),
+    },
+  ])
+  onDestroy(() => clearPageActions('workflows'))
+
+  function refresh(): Promise<void> {
+    return Promise.all([loadWorkflows(), loadWorkflowRuns()]).then(() => {})
   }
 
-  function onBackdropClose(event: MouseEvent): void {
-    if (event.target === event.currentTarget) runOpen = false
+  /** 选一条：进编辑（与"选中即编辑"同一条：没有查看态）。 */
+  function selectOne(w: Workflow): void {
+    creating = false
+    selectedId = w.id
+    formName = w.name
+    formCode = w.code
+    formTemplateKey = w.templateKey
+    formError = ''
+    runOpen = false
   }
 
-  function newForm(): void {
-    formMode = 'create'
+  /** 左栏的「新建」：右栏切成空白表单（主操作在顶栏，这里由它调）。 */
+  function startCreate(): void {
+    creating = true
     selectedId = null
     formName = ''
     formCode = ''
@@ -88,12 +160,15 @@
     runOpen = false
   }
 
-  function editForm(w: Workflow): void {
-    formMode = 'edit'
-    selectedId = w.id
-    formName = w.name
-    formCode = w.code
-    formTemplateKey = w.templateKey
+  /** 进运行画面（子路由）：返回按钮恒回定义页（「编排任务」页已随 D132 删掉）。 */
+  function openRun(runId: string): void {
+    location.hash = `#/workflows/run/${runId}`
+  }
+
+  /** 窄屏返回（`MainArea` 的 `.back-to-list`）：右栏收掉，回到列表。 */
+  function closeDetail(): void {
+    creating = false
+    selectedId = null
     formError = ''
     runOpen = false
   }
@@ -118,12 +193,13 @@
     }
     busy = true
     try {
-      if (formMode === 'create') {
+      if (creating) {
         const out = await api<{ workflow: Workflow }>('/api/workflows', {
           method: 'POST',
           body: JSON.stringify({ name, code: formCode, templateKey: formTemplateKey }),
         })
-        formMode = 'edit'
+        // 存完立刻转成编辑态（与任务页"提交后选中新任务"同一条：界面跟着数据走）
+        creating = false
         selectedId = out.workflow.id
       } else if (selectedId) {
         await api<{ workflow: Workflow }>(`/api/workflows/${selectedId}`, {
@@ -142,12 +218,19 @@
 
   async function remove(): Promise<void> {
     if (busy || !selectedId) return
-    if (!window.confirm(tx('workflows.confirmDelete'))) return
+    // ★ 平台自己的居中对话框，不是 `window.confirm`：全站只有这一种确认框
+    //   （原生对话框在窄屏/触屏上样子完全不同，而且无法带"删了会怎样"的一句说明）。
+    const ok = await askConfirm({
+      title: tx('workflows.delete'),
+      message: tx('workflows.confirmDelete'),
+      confirmLabel: tx('workflows.delete'),
+    })
+    if (!ok) return
     busy = true
     try {
       await api(`/api/workflows/${selectedId}`, { method: 'DELETE' })
       await loadWorkflows()
-      newForm()
+      closeDetail()
     } catch (err) {
       formError = err instanceof Error ? err.message : String(err)
     } finally {
@@ -167,8 +250,8 @@
       if (selected && formCode !== selected.code) {
         await save()
         if (formError !== '' || !selectedId) {
-          // 保存失败（名字/代码为空等）：错误显示在运行表单里（表单区的 notice
-          // 被 modal 盖住看不见，这里带过来）
+          // 保存失败（名字/代码为空等）：错误显示在运行对话框里（右栏那条 error
+          // 被对话框盖住看不见，这里带过来）
           runError = formError
           return
         }
@@ -201,76 +284,100 @@
         ? 'workflows.sourceAi'
         : 'workflows.sourceManual'
   }
-
 </script>
 
 {#if $workflowRun}
   <WorkflowRunView runId={$workflowRun.runId} />
 {:else}
   <div
-    class="split-layout with-detail"
+    class="split-layout"
+    class:with-detail={detailOpen}
     data-list-key="workflows"
     data-list-label={$t('shell.resizeList')}
     use:listGrip
   >
-    <!-- ══════════ 左栏：编排定义列表 ══════════ -->
-    <section class="pane list-pane">
-      <header class="pane-head">
-        <div>
-          <h2>{$t('workflows.listTitle')}</h2>
-          <p class="hint">{$t('workflows.titleHint')}</p>
-        </div>
-        <button type="button" class="btn btn--primary" onclick={newForm}>
-          {$t('workflows.new')}
-        </button>
-      </header>
+    <!-- ══════════ 左栏：编排定义列表（标准控件 ListPane：计数 + 搜索 + 五态）══════════ -->
+    <ListPane
+      countLabel={$t('workflows.listCount', { count: visible.length })}
+      searchPlaceholder={$t('workflows.search')}
+      {filter}
+      onFilter={(v) => (filter = v)}
+      loading={($loading['workflows'] && $workflows.length === 0) ?? false}
+      loadError={$loadError['workflows'] ?? null}
+      empty={$workflows.length === 0}
+      emptyTitle={$t('workflows.empty')}
+      emptyHint={$t('workflows.emptyHint')}
+      emptyFiltered={$workflows.length > 0 && visible.length === 0}
+      emptyFilteredTitle={$t('workflows.emptyFiltered')}
+      emptyFilteredHint={$t('workflows.emptyFilteredHint')}
+    >
+      {#snippet rows()}
+        <ul class="list-stack">
+          {#each visible as w (w.id)}
+            <ListRow rowClass="wf-row" active={w.id === selectedId} onclick={() => selectOne(w)}>
+              {#snippet children()}
+                <span class="wf-title" title={w.name}>{w.name}</span>
+                <span class="wf-sub">
+                  <span class="badge">{$t(sourceKey(w))}</span>
+                  <span class="faint"
+                    >{$t('workflows.updated', { time: relativeTime(w.updatedAt, Date.now()) })}</span
+                  >
+                </span>
+              {/snippet}
+            </ListRow>
+          {/each}
+        </ul>
+      {/snippet}
+    </ListPane>
 
-      <div class="pane-body">
-        {#if $loading.workflows && $workflows.length === 0}
-          <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
-          <div class="skeleton" style="width:70%"></div>
-        {:else if $workflows.length === 0}
-          <div class="empty">
-            <strong>{$t('workflows.empty')}</strong>
-          </div>
-        {:else}
-          <ul class="list-stack">
-            {#each $workflows as w (w.id)}
-              <ListRow
-                rowClass="wf-row"
-                active={w.id === selectedId}
-                onclick={() => editForm(w)}
-              >
-                {#snippet children()}
-                  <span class="wf-title">{w.name}</span>
-                  <span class="wf-sub">
-                    <span class="badge">{$t(sourceKey(w))}</span>
-                    <span class="faint">{$t('workflows.updated', { time: relativeTime(w.updatedAt, Date.now()) })}</span>
-                  </span>
-                {/snippet}
-              </ListRow>
-            {/each}
-          </ul>
+    <!-- ══════════ 右栏：编辑器 / 历史（标准控件 MainArea：栏头 + 窄屏返回 + 空态）══════════ -->
+    <MainArea
+      empty={!detailOpen}
+      emptyTitle={$t('workflows.pickHint')}
+      emptyHint={$t('workflows.pickHintHint')}
+      backLabel={detailOpen ? $t('workflows.backToList') : undefined}
+      onBack={closeDetail}
+      title={creating ? $t('workflows.createTitle') : selected?.name ?? ''}
+      bodyClass="detail-scroll"
+    >
+      {#snippet sub()}
+        {#if selected && !creating}
+          <span class="badge">{$t(sourceKey(selected))}</span>
+          <span class="faint"
+            >{$t('workflows.updated', { time: relativeTime(selected.updatedAt, Date.now()) })}</span
+          >
+        {:else if creating}
+          <span class="faint">{$t('workflows.templatesLabel')}</span>
         {/if}
-      </div>
-    </section>
+      {/snippet}
 
-    <!-- ══════════ 右栏：编辑器 + 运行入口 + 历史 ══════════ -->
-    <section class="pane-body workflows-main">
-      {#if formMode === 'create' && !selected}
-        <!-- 空态 / 新建：从模板起步 -->
-        <div class="detail-head">
-          <div class="detail-sub">
-            <h2>{$t('workflows.title')}</h2>
-          </div>
-        </div>
-        <div class="detail-body">
-          <p class="hint">{$t('workflows.templatesLabel')}</p>
+      {#snippet actions()}
+        {#if !creating && selected}
+          <button type="button" class="btn btn--secondary" onclick={() => (runOpen = true)}>
+            {$t('workflows.run')}
+          </button>
+          <button
+            type="button"
+            class="btn btn--danger"
+            disabled={busy}
+            onclick={() => void remove()}
+          >
+            {$t('workflows.delete')}
+          </button>
+        {/if}
+        <button type="button" class="btn btn--primary" disabled={busy} onclick={() => void save()}>
+          {$t('workflows.save')}
+        </button>
+      {/snippet}
+
+      {#snippet body()}
+        {#if creating}
+          <!-- 从模板起步：模板 → 名字 → 代码。顺序与"先有骨架、再起名、再改"一致 -->
           <div class="wf-tpl-row">
             {#each templates as tpl (tpl.key)}
               <button
                 type="button"
-                class="btn btn--ghost {formTemplateKey === tpl.key ? 'btn--primary' : ''}"
+                class="btn {formTemplateKey === tpl.key ? 'btn--primary' : 'btn--ghost'}"
                 onclick={() => pickTemplate(tpl)}
               >
                 {tpl.name}
@@ -278,144 +385,111 @@
             {/each}
           </div>
           <div class="field">
-            <label>{$t('workflows.nameLabel')}</label>
+            <label for="wf-name">{$t('workflows.nameLabel')}</label>
             <input
+              id="wf-name"
               type="text"
               bind:value={formName}
               placeholder={$t('workflows.namePlaceholder')}
               autocomplete="off"
             />
           </div>
-          <div class="field">
-            <label>{$t('workflows.codeLabel')}</label>
-            <textarea
-              class="mono"
-              rows="12"
-              bind:value={formCode}
-              placeholder={$t('workflows.codePlaceholder')}
-            ></textarea>
-          </div>
-          {#if formError}
-            <div class="notice bad">{formError}</div>
-          {/if}
-          <div class="detail-actions">
-            <button type="button" class="btn btn--primary" disabled={busy} onclick={() => void save()}>
-              {$t('workflows.save')}
-            </button>
-          </div>
-        </div>
-      {:else if selected}
-        <!-- 编辑详情 -->
-        <div class="detail-head">
-          <div class="detail-sub">
-            <h2>{selected.name}</h2>
-            <p class="hint">
-              <span class="badge">{$t(sourceKey(selected))}</span>
-              <span class="faint">{$t('workflows.updated', { time: relativeTime(selected.updatedAt, Date.now()) })}</span>
-            </p>
-          </div>
-          <div class="detail-actions">
-            <button type="button" class="btn btn--secondary" disabled={busy} onclick={() => void remove()}>
-              {$t('workflows.delete')}
-            </button>
-            <button type="button" class="btn btn--primary" onclick={() => (runOpen = true)}>
-              {$t('workflows.run')}
-            </button>
-          </div>
-        </div>
-        <div class="detail-body">
-          <div class="field">
-            <label>{$t('workflows.codeLabel')}</label>
-            <textarea
-              class="mono"
-              rows="14"
-              bind:value={formCode}
-              placeholder={$t('workflows.codePlaceholder')}
-            ></textarea>
-          </div>
-          {#if formError}
-            <div class="notice bad">{formError}</div>
-          {/if}
-          <div class="detail-actions">
-            <button type="button" class="btn btn--primary" disabled={busy} onclick={() => void save()}>
-              {$t('workflows.save')}
-            </button>
-          </div>
+        {/if}
 
-          {#if history.length > 0}
-            <h3 class="wf-history-head">{$t('workflows.stepsTitle')}</h3>
+        {#if detailOpen}
+          <div class="field">
+            <label for="wf-code">{$t('workflows.codeLabel')}</label>
+            <textarea
+              id="wf-code"
+              class="mono"
+              rows={creating ? 12 : 14}
+              bind:value={formCode}
+              placeholder={$t('workflows.codePlaceholder')}
+            ></textarea>
+          </div>
+          {#if formError}
+            <div class="notice bad">{formError}</div>
+          {/if}
+
+          <!-- 该编排的历史：按时间倒序，点一条进运行画面（编排的运行同时也在「任务」页里） -->
+          {#if selected && !creating && history.length > 0}
+            <h3 class="wf-history-head">{$t('workflows.runHistoryTitle')}</h3>
             <ul class="list-stack">
               {#each history as r (r.id)}
-                <ListRow
-                  rowClass="wf-run-row"
-                  onclick={() => openRun(r.id)}
-                >
+                <ListRow rowClass="wf-run-row" onclick={() => openRun(r.id)}>
                   {#snippet children()}
                     <span class="wf-title">
-                      <span class="badge {workflowRunStatusClass(r.status)}">{$t(workflowRunStatusKey(r.status))}</span>
+                      <span class="badge {workflowRunStatusClass(r.status)}"
+                        >{$t(workflowRunStatusKey(r.status))}</span
+                      >
                       <span class="mono">{r.id.slice(-6)}</span>
                     </span>
                     <span class="wf-sub">
                       <span class="faint">{relativeTime(r.updatedAt, Date.now())}</span>
-                      <span class="faint">{$t('workflows.stepsHint')} {r.steps.filter((s) => s.status !== 'pending').length}/{r.steps.length}</span>
+                      <span class="faint"
+                        >{$t('workflows.stepsHint')}
+                        {r.steps.filter((s) => s.status !== 'pending').length}/{r.steps.length}</span
+                      >
                     </span>
                   {/snippet}
                 </ListRow>
               {/each}
             </ul>
           {/if}
-        </div>
-      {/if}
-    </section>
+        {/if}
+      {/snippet}
+    </MainArea>
   </div>
 
-  <!-- ══════════ 发起运行表单（居中对话框） ══════════ -->
-  {#if runOpen && selected}
-    <div class="drawer-backdrop" onclick={onBackdropClose}>
-      <div class="modal">
-        <div class="modal-head">
-          <h2>{$t('workflows.runFormTitle')}</h2>
-          <p class="hint">{selected.name}</p>
-        </div>
-        <div class="modal-body">
-          <div class="field">
-            <label>{$t('workflows.promptLabel')}</label>
-            <textarea rows="4" bind:value={runPrompt} placeholder={$t('workflows.promptPlaceholder')}></textarea>
-            <p class="hint fs-sm">{@html $t('workflows.promptHint')}</p>
-          </div>
-          <div class="field">
-            <label>{$t('workflows.workDirLabel')}</label>
-            <!-- 与「新建任务」「定时任务」同一个控件（.workdir-row + 浏览… + DirPicker）：
-                 输入框始终留着（手打永远可用），选择框是"看见目录里有什么"的入口。 -->
-            <div class="workdir-row">
-              <input
-                type="text"
-                bind:value={runWorkDir}
-                placeholder={$t('workflows.workDirAuto')}
-                autocomplete="off"
-                spellcheck="false"
-              />
-              <button type="button" class="btn btn--ghost" onclick={() => (runDirPickerOpen = true)}>
-                {$t('dirs.browse')}
-              </button>
-            </div>
-            <DirPicker bind:open={runDirPickerOpen} bind:value={runWorkDir} />
-          </div>
-          {#if runError}
-            <div class="notice bad">{runError}</div>
-          {/if}
-        </div>
-        <div class="modal-foot">
-          <button type="button" class="btn btn--secondary" onclick={() => (runOpen = false)}>
-            {$t('common.cancel')}
-          </button>
-          <button type="button" class="btn btn--primary" disabled={runBusy} onclick={() => void startRun()}>
-            {$t('workflows.startRun')}
-          </button>
-        </div>
-      </div>
+  <!-- ══════════ 发起运行（平台居中对话框；Esc / 遮罩 / 关闭按钮由组件负责）══════════ -->
+  <Modal
+    open={runOpen && selected !== null}
+    title={$t('workflows.runFormTitle')}
+    subtitle={selected?.name ?? ''}
+    closeLabel={$t('common.close')}
+    onclose={() => (runOpen = false)}
+  >
+    <div class="field">
+      <label for="wf-run-prompt">{$t('workflows.promptLabel')}</label>
+      <textarea
+        id="wf-run-prompt"
+        rows="4"
+        bind:value={runPrompt}
+        placeholder={$t('workflows.promptPlaceholder')}
+      ></textarea>
+      <p class="hint fs-sm">{@html $t('workflows.promptHint')}</p>
     </div>
-  {/if}
+    <div class="field">
+      <label for="wf-run-workdir">{$t('workflows.workDirLabel')}</label>
+      <!-- 与「新建任务」「定时任务」同一个控件（.workdir-row + 浏览… + DirPicker）：
+           输入框始终留着（手打永远可用），选择框是"看见目录里有什么"的入口。 -->
+      <div class="workdir-row">
+        <input
+          id="wf-run-workdir"
+          type="text"
+          bind:value={runWorkDir}
+          placeholder={$t('workflows.workDirAuto')}
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button type="button" class="btn btn--ghost" onclick={() => (runDirPickerOpen = true)}>
+          {$t('dirs.browse')}
+        </button>
+      </div>
+      <DirPicker bind:open={runDirPickerOpen} bind:value={runWorkDir} />
+    </div>
+    {#if runError}
+      <div class="notice bad">{runError}</div>
+    {/if}
+    <svelte:fragment slot="foot">
+      <button type="button" class="btn btn--secondary" onclick={() => (runOpen = false)}>
+        {$t('common.cancel')}
+      </button>
+      <button type="button" class="btn btn--primary" disabled={runBusy} onclick={() => void startRun()}>
+        {$t('workflows.startRun')}
+      </button>
+    </svelte:fragment>
+  </Modal>
 {/if}
 
 <style>
@@ -432,7 +506,7 @@
   }
   .wf-sub {
     display: flex;
-    gap: 0.6rem;
+    gap: var(--sp-2);
     font-size: var(--fs-xs);
     color: var(--text-faint);
     overflow: hidden;

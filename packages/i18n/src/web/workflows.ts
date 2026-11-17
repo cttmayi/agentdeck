@@ -9,11 +9,38 @@
 export const workflowsText = {
   'workflows.navTitle': { zh: '编排', en: 'Workflows' },
   'workflows.navHint': { zh: '代码编排', en: 'Code flows' },
-  'workflows.title': { zh: '编排', en: 'Workflows' },
-  'workflows.titleHint': { zh: '运行的任务在「任务」页查看', en: 'Runs show up in Tasks' },
-  'workflows.listTitle': { zh: '所有编排', en: 'All workflows' },
+  /*
+   * ⚠️ 2026-11（D133）：`workflows.title`（「编排」）与 `workflows.titleHint`
+   *   （「运行的任务在『任务』页查看」）随左栏那个大标题一起删——按规范，栏头带里
+   *   **没有标题**（页名已经在顶栏，重复一次只是噪音）。"运行的任务在任务页看"
+   *   这件事改由右栏空态那句（`workflows.pickHintHint`）与任务页分组承担。
+   */
+  /*
+   * ⚠️ 2026-11（D133）：这一页按「页面基本规范」重排之后新增的几条。
+   *   规范来自任务 / 智能体 / 沉淀那三页的**同一副骨架**（`ListPane` + `MainArea`
+   *   + 顶栏动作）：栏头带只有"计数 + 搜索"，空态要分**真的没有**与**搜不到**两种，
+   *   右栏没选中时给一句"选一个"。
+   *   ⚠️ `workflows.listTitle`（「所有编排」）随之删：规范里栏头带**没有标题**
+   *   （D61~D64：栏标题与顶栏页名重复时就不放），那一栏现在只显示计数。
+   */
+  'workflows.listCount': { zh: '共 {count} 个编排', en: '{count} workflows' },
+  'workflows.search': { zh: '搜索编排名…', en: 'Search workflow names…' },
   'workflows.new': { zh: '新建', en: 'New' },
-  'workflows.empty': { zh: '还没有编排。用一个模板起步，或直接写代码。', en: 'No workflows yet. Start from a template, or write code.' },
+  'workflows.createTitle': { zh: '新建编排', en: 'New workflow' },
+  'workflows.empty': { zh: '还没有编排', en: 'No workflows yet' },
+  'workflows.emptyHint': {
+    zh: '点右上角「新建」，从一个模板起步，或者直接写代码。',
+    en: 'Pick “New” at the top right — start from a template, or write code.',
+  },
+  'workflows.emptyFiltered': { zh: '没有匹配的编排', en: 'No matching workflows' },
+  'workflows.emptyFilteredHint': { zh: '换个词试试。', en: 'Try another keyword.' },
+  'workflows.pickHint': { zh: '左边选一个编排，或新建一个', en: 'Pick a workflow on the left, or create one' },
+  'workflows.pickHintHint': {
+    zh: '选中的编排在这里改代码、发起运行、看它的历史。',
+    en: 'The selected workflow is edited here — code, run, history.',
+  },
+  'workflows.backToList': { zh: '← 返回编排列表', en: '← Back to workflows' },
+  'workflows.runHistoryTitle': { zh: '运行历史', en: 'Run history' },
   'workflows.templatesLabel': { zh: '从模板', en: 'From template' },
   'workflows.nameLabel': { zh: '名字', en: 'Name' },
   'workflows.nameRequired': { zh: '先给编排起个名字', en: 'Give the workflow a name first' },

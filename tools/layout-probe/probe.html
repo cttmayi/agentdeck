@@ -3536,46 +3536,236 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           return true
         })()
 
-        // ── 编排（2026-11 立项）：定义页右栏可见 + 点「新建」表单出现 ──
+        // ── 编排（2026-11 立项；2026-11 D133 按「页面基本规范」重排之后重量）──
         //
-        //   与定时任务那条同款布局守卫：右栏（`.workflows-main`）必须 > 200px 宽；
-        //   点「新建」后表单出现（名字框 + 从模板胶囊 + 代码编辑框），空态文案在。
+        // 这一页曾经是**自己一套**：左栏栏头写着大标题 + 一颗「新建」、右栏手写
+        // `detail-head`、删除用 `window.confirm`、运行表单手搭浮层、`.with-detail`
+        // 恒写（窄屏一进来整页空白、没有出口）。D133 改成与任务 / 智能体 / 沉淀 /
+        // 定时任务同一副骨架：`ListPane` + `MainArea` + 顶栏动作 + 居中对话框。
+        //
+        // 所以下面量的不是"某一页长什么样"，而是**它有没有照着规范来**——
+        // 每一条都对着规范里的一句话，而不是对着实现里的某个类名。
         f.contentWindow.location.hash = '#/workflows'
-        await until(() => !!d().querySelector('.workflows-main'))
+        await until(() => !!d().querySelector('.list-pane') && !!d().querySelector('.detail-pane'), 60)
         await wait(300)
+
+        // ① 主从两栏并排（与任务/智能体同一副骨架）
         facts['workflows.mainPaneWidth'] = await (async () => {
-          const right = d().querySelector('.workflows-main')
+          const right = d().querySelector('.detail-pane')
           if (!right) {
-            errors.push('编排页右栏 .workflows-main 不存在')
+            errors.push('编排页右栏 .detail-pane 不存在')
             return -1
           }
           const w = Math.round(right.getBoundingClientRect().width)
-          if (w < 200) {
-            errors.push(`编排页右栏被挤窄了（${w}px）——它应该占详情那列`)
-          }
+          if (w < 200) errors.push(`编排页右栏被挤窄了（${w}px）——它应该占详情那列`)
           return w
         })()
-        facts['workflows.emptyStage'] = await (async () => {
-          // 空态：还没有编排时，右栏给「从模板」引导（新建是唯一入口）。
-          // ⚠️ 模板胶囊按钮的文字是模板名（如「单组流程」），不带"模板"字样——
-          //    引导是那条 hint（"从模板"）+ 模板按钮列表本身，两样都要在。
-          const hintOk = [...d().querySelectorAll('.workflows-main')].some((el) =>
-            (text(el) ?? '').includes('从模板'),
-          )
-          const tplBtns = d().querySelectorAll('.workflows-main .wf-tpl-row button').length
-          return hintOk && tplBtns >= 1
+        facts['workflows.twoPanes'] = (() => {
+          const left = d().querySelector('.list-pane')
+          const right = d().querySelector('.detail-pane')
+          const shell = d().querySelector('.split-layout')
+          if (!left || !right || !shell) return null
+          const a = left.getBoundingClientRect()
+          const b = right.getBoundingClientRect()
+          return { sideBySide: b.left > a.left + 40, listW: Math.round(a.width) }
         })()
-        facts['workflows.createFormOpens'] = await (async () => {
-          const newBtn = [...d().querySelectorAll('button')].find((b) => text(b) === '新建')
-          if (!newBtn) {
-            errors.push('编排页找不到「新建」按钮')
-            return false
+
+        // ② 栏头带：**计数 + 搜索**，**没有标题**（D61~D66；页名已经在顶栏）
+        facts['workflows.listHead'] = (() => {
+          const head = d().querySelector('.list-pane .pane-head')
+          if (!head) return null
+          return {
+            标题: !!head.querySelector('h2'),
+            搜索框: !!head.querySelector('input'),
+            计数: (text(head.querySelector('.faint')) ?? '').trim(),
+            // 栏头里**不许**有按钮：主操作在顶栏（这一页原来在这里摆了「新建」）
+            按钮: [...head.querySelectorAll('button')].map((b) => (text(b) ?? '').trim()),
           }
-          click(newBtn)
-          await until(() => !!d().querySelector('.workflows-main textarea'), 60)
-          const nameInput = d().querySelector('.workflows-main input[type=text]')
-          const codeArea = d().querySelector('.workflows-main textarea')
-          return !!nameInput && !!codeArea
+        })()
+
+        // ③ 顶栏动作：主操作在顶栏（primary），与其它页同一格同一款
+        facts['workflows.pageActions'] = [
+          ...d().querySelectorAll('.topbar .page-actions button'),
+        ].map((b) => ({ label: (text(b) ?? '').trim(), primary: b.className.includes('primary') }))
+
+        // ④ 右栏空态：没选中时给"选一个"，不是一片空白
+        facts['workflows.rightEmpty'] = (() => {
+          const shell = d().querySelector('.split-layout')
+          const empty = d().querySelector('.detail-pane .empty')
+          return {
+            withDetail: !!shell && shell.className.includes('with-detail'),
+            text: empty ? (text(empty.querySelector('strong')) ?? '').trim() : null,
+          }
+        })()
+
+        // ⑤ 点顶栏「新建」⇒ 右栏塌出表单（`.with-detail` 加上）
+        facts['workflows.createOpened'] = await (async () => {
+          const btn = [...d().querySelectorAll('.topbar .page-actions button')].find(
+            (b) => (text(b) ?? '').trim() === '新建',
+          )
+          if (!btn) {
+            errors.push('编排页顶栏找不到「新建」（主操作应该在顶栏）')
+            return null
+          }
+          click(btn)
+          const ok = await until(
+            () => !!d().querySelector('.detail-pane input#wf-name') && !!d().querySelector('.detail-pane textarea#wf-code'),
+            60,
+          )
+          const shell = d().querySelector('.split-layout')
+          const tplBtns = d().querySelectorAll('.detail-pane .wf-tpl-row button').length
+          // 收尾：返回列表（否则后面的行结构会量在"新建"那屏上）
+          const back = d().querySelector('.detail-pane .back-to-list')
+          if (back && getComputedStyle(back).display !== 'none') click(back)
+          else {
+            const wfFirst = d().querySelector('.list-pane .wf-row')
+            if (wfFirst) click(wfFirst.querySelector('.list-row-main') ?? wfFirst)
+          }
+          await wait(200)
+          return {
+            nameInput: ok,
+            codeInput: !!d().querySelector('.detail-pane textarea#wf-code'),
+            withDetail: !!shell && shell.className.includes('with-detail'),
+            templates: tplBtns,
+          }
+        })()
+
+        // ⑥ 造一条编排（真接口）→ 行结构（两行、单行省略、行高与其它页同一档）
+        facts['workflows.fixtureCreated'] = await f.contentWindow
+          .fetch('/api/workflows', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              name: '探针编排（页面规范）',
+              code: "await flow([agent('助手')], '{{task}}')",
+            }),
+          })
+          .then((r) => r.ok)
+          .catch(() => false)
+        if (!facts['workflows.fixtureCreated']) {
+          errors.push('造编排夹具失败（POST /api/workflows）——下面几条会量不到')
+        }
+        /**
+         * store 是**页面级**的（`App.svelte` 启动时拉一次），接口那边新造的那条不会
+         * 自己冒出来 ⇒ 点**顶栏的「刷新」**（它就是为这件事存在的：别处改了、
+         * 这一页要重读）。切走再切回来不管用——那样只是重新渲染同一份 stale store。
+         */
+        const wfRefresh = () =>
+          [...d().querySelectorAll('.topbar .page-actions button')].find(
+            (b) => (text(b) ?? '').trim() === '刷新',
+          ) ?? null
+        if (wfRefresh()) click(wfRefresh())
+        const rowsThere = await until(() => d().querySelectorAll('.list-pane .wf-row').length > 0, 60)
+        if (!rowsThere && wfRefresh()) {
+          click(wfRefresh())
+          await until(() => d().querySelectorAll('.list-pane .wf-row').length > 0, 60)
+        }
+        await wait(200)
+        facts['workflows.row'] = (() => {
+          const row = d().querySelector('.list-pane .wf-row')
+          if (!row) return null
+          const title = row.querySelector('.wf-title')
+          const sub = row.querySelector('.wf-sub')
+          return {
+            行数: d().querySelectorAll('.list-pane .wf-row').length,
+            两行结构: !!title && !!sub,
+            标题单行: title === null ? null : title.scrollWidth <= title.clientWidth + 1,
+            行高: Math.round(row.getBoundingClientRect().height),
+          }
+        })()
+
+        // ⑦ 点一行 ⇒ 右栏是它（选中即编辑：标题 + 代码 + 动作）
+        facts['workflows.selectShows'] = await (async () => {
+          const row = d().querySelector('.list-pane .wf-row')
+          if (!row) return null
+          // ⚠️ 点**里面那颗整行按钮**（`ListRow` 的 `.list-row-main`）：点 `li` 本身
+          //    不触发 onclick（`ListRow` 的契约是"整行可点的主按钮 + 右侧动作钮"）。
+          click(row.querySelector('.list-row-main') ?? row)
+          const ok = await until(() => !!d().querySelector('.detail-pane textarea#wf-code'), 60)
+          if (!ok) return null
+          const area = d().querySelector('.detail-pane textarea#wf-code')
+          const shell = d().querySelector('.split-layout')
+          const labels = [...d().querySelectorAll('.detail-pane .detail-actions button')].map(
+            (b) => (text(b) ?? '').trim(),
+          )
+          return {
+            withDetail: !!shell && shell.className.includes('with-detail'),
+            有代码: (area?.value ?? '').length > 0,
+            动作: labels,
+          }
+        })()
+
+        // ⑧ 删除 ⇒ **平台自己的居中对话框**（不是 window.confirm），取消不删
+        facts['workflows.deleteDialog'] = await (async () => {
+          const del = [...d().querySelectorAll('.detail-pane .detail-actions button')].find(
+            (b) => (text(b) ?? '').trim() === '删除',
+          )
+          if (!del) return null
+          const before = d().querySelectorAll('.list-pane .wf-row').length
+          click(del)
+          const appeared = await until(() => !!d().querySelector('.modal .confirm-message'), 40)
+          const text0 = appeared ? (text(d().querySelector('.modal .confirm-message')) ?? '') : ''
+          // 取消（`Modal` 的脚注里那颗 secondary）
+          const cancel = d().querySelector('.modal .modal-foot button.secondary')
+          if (cancel) click(cancel)
+          const closed = await until(() => !d().querySelector('.modal .confirm-message'), 40)
+          const after = d().querySelectorAll('.list-pane .wf-row').length
+          return { 弹平台对话框: appeared, 文案: text0, 取消后关掉: closed, 行数不变: before === after }
+        })()
+
+        // ⑨ 运行 ⇒ 同一个 `Modal`（任务描述 + 工作目录 + 发起），关掉不留下半个浮层
+        facts['workflows.runDialog'] = await (async () => {
+          const runBtn = [...d().querySelectorAll('.detail-pane .detail-actions button')].find(
+            (b) => (text(b) ?? '').trim() === '运行',
+          )
+          if (!runBtn) return null
+          click(runBtn)
+          const appeared = await until(() => !!d().querySelector('.modal textarea#wf-run-prompt'), 60)
+          const hasDir = !!d().querySelector('.modal input#wf-run-workdir')
+          const hasStart = [...d().querySelectorAll('.modal .modal-foot button')].some(
+            (b) => (text(b) ?? '').trim() === '发起',
+          )
+          const close = d().querySelector('.modal .modal-head button')
+          if (close) click(close)
+          const closed = await until(() => !d().querySelector('.modal textarea#wf-run-prompt'), 40)
+          return { 打开: appeared, 工作目录: hasDir, 发起按钮: hasStart, 关掉: closed }
+        })()
+
+        // ⑩ 窄屏：**选中/新建时**列表让位 + 有「返回」；**没选中时**列表必须在
+        //    （改之前 `.with-detail` 恒写 ⇒ 窄屏一进来整页空白、也没有出口）
+        facts['workflows.narrow'] = await (async () => {
+          // 前提：**先选中一条**（窄屏的"选中态"才量得到；没选中时窄屏应该显示列表）
+          const firstRow = d().querySelector('.list-pane .wf-row')
+          if (!firstRow) return null
+          click(firstRow.querySelector('.list-row-main') ?? firstRow)
+          await until(
+            () => (d().querySelector('.split-layout')?.className ?? '').includes('with-detail'),
+            60,
+          )
+          f.style.width = '800px'
+          await wait(400)
+          const cs = (sel) => {
+            const el = d().querySelector(sel)
+            return el === null ? null : getComputedStyle(el).display
+          }
+          // 选中态（此刻右栏正开着一条）
+          const back = d().querySelector('.detail-pane .back-to-list')
+          const selectedState = {
+            左栏: cs('.list-pane'),
+            右栏: cs('.detail-pane'),
+            返回可见: back === null ? null : getComputedStyle(back).display !== 'none',
+          }
+          // 点「返回」⇒ 回到列表（右栏收掉、左栏回来）
+          if (back) click(back)
+          const leftBack = await until(() => cs('.list-pane') !== 'none', 60)
+          const emptyState = {
+            点返回后左栏: cs('.list-pane'),
+            点返回后右栏: cs('.detail-pane'),
+            withDetail: (d().querySelector('.split-layout')?.className ?? '').includes('with-detail'),
+          }
+          f.style.width = ''
+          await wait(300)
+          return { 选中态: selectedState, 未选中态: emptyState, 返回可用: leftBack }
         })()
 
         /*
