@@ -13,7 +13,8 @@
  * 比如目录的名字叫 agent-draft。在工作目录下，很容易和其他文件干扰"）：
  *
  *   agent-draft/
- *     agent-draft.md        ← 岗位卡：frontmatter `name` + `role`，正文从
+ *     agent-draft.md        ← 岗位卡：frontmatter `name`（⚠️ 2026-11/D127 起不再有
+ *                             `role`——角色退场），正文从
  *                             "你是<name>。"开始，然后 `## 目标` / `## 职责` /
  *                             `## 边界（不能碰）` / `## 输出格式` / `## 验收标准`
  *                             （见 `AGENT_MAKER_INSTRUCTIONS` 与平台技能
