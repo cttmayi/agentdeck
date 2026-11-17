@@ -536,3 +536,126 @@ await loop(写作, 坏审查, '任务')`,
   assert.equal(rr.status, 'failed')
   assert.match(rr.error ?? '', /不认识的结果/)
 })
+
+/* ══════════════════════════════════════════════════════════════════
+ * reuseOutput（D134）：**人把关**的 loop 第一轮不许重跑执行者
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 使用者的真机编排（2026-11）：
+ *
+ *   const 写作 = agent('文章写作员')
+ *   await loop(写作, agent('审查员', 判定), '{{task}}')            // ① 机器把关
+ *   await loop(写作, gate('…请过目…'), '{{task}}', { maxRounds: 3 })  // ② 人把关
+ *
+ * ② 一进来就先把"写作"跑了一遍 ⇒ 使用者刚审过的那一版被换成新写的，
+ * 人称"有重新写的嫌疑"（原话）。加 `reuseOutput: true` 之后：第一轮**不提交执行 run**，
+ * 直接拿上一版产出问人。
+ */
+test('★★ reuseOutput：第一轮复用上一版产出、不提交执行 run；人否决后才重写', async () => {
+  const { makePrimitives } = await import('./primitives.ts')
+  const submitLog: string[] = []
+  const { hooks } = makeHooks({ outputOf: (p) => (p.includes('请审核') ? '意见' : '新一版') })
+  const orig = hooks.submit
+  hooks.submit = async (step, prompt, opts) => {
+    submitLog.push(prompt.includes('请审核') ? 'guard' : 'exec')
+    return orig(step, prompt, opts)
+  }
+  // gate 裁决**按顺序**给：第一次否决、第二次通过
+  const verdicts: Array<'pass' | 'fail'> = ['fail', 'pass']
+  let gateWaits = 0
+  hooks.waitForGateConfirm = async () => {
+    gateWaits += 1
+    const v = verdicts.shift() ?? 'pass'
+    return v === 'pass' ? { kind: 'passed' } : ({ kind: 'rejected', feedback: '改一下' } as never)
+  }
+  const run1 = freshRun()
+  const env = {
+    run: run1,
+    hooks,
+    nextStep: async (kind: WorkflowStep['kind'], label: string, nodeId: string | null, prompt: string | null, gateText: string | null): Promise<WorkflowStep> => {
+      const s: WorkflowStep = { seq: run1.steps.length, kind, label, nodeId, prompt, gateText, runIds: [], status: 'pending', startedAt: null, finishedAt: null }
+      run1.steps.push(s)
+      return s
+    },
+    atBoundary: async () => {},
+  }
+  const primitives = makePrimitives(env)
+  // 先真跑一次，让执行者句柄有"上一版产出"（相当于 ① 机器把关那一轮已经写完）
+  const 写作 = primitives.agent('文章写作员')
+  await (写作 as unknown as Promise<Reply>)
+  assert.equal(写作.lastOutput, '新一版', '句柄记着最近一次的产出')
+
+  submitLog.length = 0
+  const gateLoop = primitives.loop(写作, primitives.gate('请过目'), '任务', {
+    maxRounds: 3,
+    reuseOutput: true,
+  })
+  const reply = await (gateLoop as unknown as Promise<Reply>)
+  assert.equal(reply.result, 'done', '第二次人确认通过 ⇒ 这一步 done')
+  assert.deepEqual(submitLog, ['exec'], '只有"否决后的重写"提交了执行 run —— 第一轮复用了上一版')
+  assert.equal(gateWaits, 2, '人确认了两次（否决一次 + 通过一次）')
+
+  // ⚠️ `run1.steps[0]` 是上面那次"先跑一遍写作"留下的步骤 ⇒ 这里要按 kind 找 loop 那一步
+  const loopStep = run1.steps.find((x) => x.kind === 'loop')!
+  assert.ok(loopStep, 'loop 步骤登记出来了')
+  assert.ok(loopStep.rounds && loopStep.rounds.length === 2, 'loop 步骤记下两轮结构')
+  assert.deepEqual(loopStep.rounds![0]!.runIds, [], '第一轮：复用产出 ⇒ 没有执行 run')
+  assert.equal(loopStep.rounds![0]!.gate, '请过目', '第一轮的把关文案记在轮里')
+  assert.equal(loopStep.rounds![1]!.runIds.length, 1, '第二轮：重写那一条 run')
+})
+
+test('★ reuseOutput：执行者还没有产出时退化成"照旧先执行"（不会拿空材料去问人）', async () => {
+  const { makePrimitives } = await import('./primitives.ts')
+  const { hooks } = makeHooks({ outputOf: () => '第一版' })
+  const run1 = freshRun()
+  const env = {
+    run: run1,
+    hooks,
+    nextStep: async (kind: WorkflowStep['kind'], label: string, nodeId: string | null, prompt: string | null, gateText: string | null): Promise<WorkflowStep> => {
+      const s: WorkflowStep = { seq: run1.steps.length, kind, label, nodeId, prompt, gateText, runIds: [], status: 'pending', startedAt: null, finishedAt: null }
+      run1.steps.push(s)
+      return s
+    },
+    atBoundary: async () => {},
+  }
+  const primitives = makePrimitives(env)
+  const 写作 = primitives.agent('文章写作员') // 从来没跑过 ⇒ lastOutput 是 undefined
+  hooks.waitForGateConfirm = async () => ({ kind: 'passed' })
+  const reply = await (primitives.loop(写作, primitives.gate('请过目'), '任务', {
+    reuseOutput: true,
+  }) as unknown as Promise<Reply>)
+  assert.equal(reply.result, 'done')
+  const st = run1.steps.find((x) => x.kind === 'loop')!
+  assert.equal(st.runIds.length, 1, '退化成功：先执行了一次，再把产出交给人')
+})
+
+test('★ loop 的第三个参数可以直接给 opts（prompt 用默认 {{task}}）', async () => {
+  const { makePrimitives } = await import('./primitives.ts')
+  const prompts: string[] = []
+  const { hooks } = makeHooks({ outputOf: () => '产出' })
+  const orig = hooks.submit
+  hooks.submit = async (step, prompt, opts) => {
+    prompts.push(prompt)
+    return orig(step, prompt, opts)
+  }
+  const run1 = freshRun()
+  const env = {
+    run: run1,
+    hooks,
+    nextStep: async (kind: WorkflowStep['kind'], label: string, nodeId: string | null, prompt: string | null, gateText: string | null): Promise<WorkflowStep> => {
+      const s2: WorkflowStep = { seq: run1.steps.length, kind, label, nodeId, prompt, gateText, runIds: [], status: 'pending', startedAt: null, finishedAt: null }
+      run1.steps.push(s2)
+      return s2
+    },
+    atBoundary: async () => {},
+  }
+  const primitives = makePrimitives(env)
+  hooks.waitForGateConfirm = async () => ({ kind: 'passed' })
+  // ⚠️ 第三个参数是**对象** ⇒ 当成 opts（prompt 用默认 '{{task}}'）
+  const reply = await (primitives.loop(primitives.agent('写作员'), primitives.gate('请过目'), {
+    maxRounds: 2,
+  }) as unknown as Promise<Reply>)
+  assert.equal(reply.result, 'done')
+  // 执行那一步拿到的还是默认的 '{{task}}'（由 daemon 在提交时替换成这次的任务描述）
+  assert.match(prompts[0]!, /^\{\{task\}\}/, 'prompt 用默认 {{task}}，不是把 opts 当任务传下去')
+})

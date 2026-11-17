@@ -259,4 +259,37 @@ describe('编排运行画面：每个 run 一张卡片', () => {
     ) as any
     assert.equal(waiting.preview, '"可以发了吗"')
   })
+
+  test('★★ 有 rounds 时照 rounds 画：第一轮只有人确认（reuseOutput）也放得下', () => {
+    const look = {
+      statusOf: (id: string) => ({ e2: 'running' }[id] ?? 'completed'),
+      outputOf: (id: string) => `out-${id}`,
+      nameOf: () => '写作员',
+      text: {
+        stepWorking: '（正在跑…）', noOutput: '（还没有产出）', loopReviewing: '（把关中…）',
+        stepWaitingHuman: '等你确认',
+        roundTitle: (n: number) => `第${n}轮`,
+        execMeta: (n: number) => `执行${n}`, guardMeta: (n: number) => `把关${n}`,
+        stageMeta: (i: number, t: number) => `${i}/${t}`,
+        execLabel: '执行者', guardLabel: '把关者',
+      },
+    }
+    // 第一轮复用上一版（没有执行 run，只有人确认），第二轮真跑了一次
+    const step = buildCards(
+      {
+        seq: 5,
+        kind: 'loop',
+        label: '把关循环 · 写作员',
+        status: 'running',
+        gateText: '请过目',
+        runIds: ['e2'],
+        rounds: [{ runIds: [], gate: '请过目' }, { runIds: ['e2'], gate: null }],
+      },
+      look,
+    ) as any
+    assert.equal(step.children.length, 2, '两轮')
+    assert.deepEqual(step.children[0].children.map((c: any) => c.kind), ['gate'], '第一轮只有 GateCard')
+    assert.equal(step.children[0].children[0].text, '请过目')
+    assert.deepEqual(step.children[1].children.map((c: any) => c.kind), ['run'], '第二轮是执行 run')
+  })
 })

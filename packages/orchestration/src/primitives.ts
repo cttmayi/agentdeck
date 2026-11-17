@@ -10,11 +10,23 @@
  * 共享可变字段会被兄弟分支互相踩（实测导致步骤漏登记、或 run 挂到别人身上）。
  */
 
+import type { RunId } from '@agentdeck/protocol'
 import type { Reply, Handle, RunContext, WorkflowRun, WorkflowStep, EngineHooks } from './types.ts'
 
 /* ══════════════════════════════════════════════════════════════════
  * 环境（engine 注入）
  * ══════════════════════════════════════════════════════════════════ */
+
+/** `loop` 的选项。 */
+export interface LoopOptions {
+  /** 最多几轮（默认 1）。`reuseOutput` 时表示"人最多否决几次"。 */
+  maxRounds?: number
+  /**
+   * 第一轮**不重跑执行者**，直接拿它上一版产出送审（人把关用它）。
+   * 详见 `types.ts` 与 `docs/reference/orchestration-api.md` §3.5。
+   */
+  reuseOutput?: boolean
+}
 
 export interface Env {
   /** 当前编排 run（步骤登记/状态写回）。 */
@@ -131,7 +143,24 @@ export interface Primitives {
   gate: (text: string) => Handle
   flow: (agents: Handle[], prompt?: string, opts?: { returnIndex?: number }) => Handle
   parallel: (agents: Handle | Handle[], prompts?: string | string[], opts?: { concurrency?: number }) => Handle[]
-  loop: (executor: Handle, guard: Handle, prompt?: string, opts?: { maxRounds?: number }) => Handle
+  /**
+   * 把关循环。
+   *
+   * ★ 2026-11（D134）：第三个参数**允许直接给 opts**——因为 `reuseOutput` 让"prompt
+   *   用默认值"成了常见情形，而位置参数没法跳过：`loop(a, b, undefined, {…})` 很难看。
+   *
+   *   ```js
+   *   await loop(写作, gate('请过目'), { maxRounds: 3, reuseOutput: true })  // prompt 用默认 '{{task}}'
+   *   await loop(写作, 审查, '按这个改：…', { maxRounds: 2 })
+   *   ```
+   *   两种都行；第三个是对象就当 opts，是字符串就当 prompt。
+   */
+  loop: (
+    executor: Handle,
+    guard: Handle,
+    promptOrOpts?: string | LoopOptions,
+    opts?: LoopOptions,
+  ) => Handle
   route: (map: Record<string, Handle>, prompt?: string) => Handle
 }
 
@@ -230,6 +259,13 @@ export function makePrimitives(env: Env): Primitives {
         throw new Error(`执行失败：${out.error ?? '未知原因'}`)
       }
       if (resume) lastRunId = out.runId
+      /*
+       * ★ 2026-11（D134）：把**正文**也挂到句柄上。
+       *   `loop(..., { reuseOutput: true })` 要"先把已经写好的那一版拿去问人"，
+       *   而句柄原来只记 `lastRunId`（会话锚点）——正文要再读一次 run 才拿得到。
+       *   这里顺手缓存一份（只是文本，不改变任何语义）。
+       */
+      handle.lastOutput = out.output
       let reply: Reply = { result: 'done', message: out.output }
       if (run) {
         const handled = run(out.output)
@@ -360,7 +396,14 @@ export function makePrimitives(env: Env): Primitives {
     return thenable
   }
 
-  const loop: Primitives['loop'] = (executor, guard, prompt, opts) => {
+  const loop: Primitives['loop'] = (executor, guard, promptOrOpts, optsIn) => {
+    /*
+     * 第三个参数是字符串 ⇒ prompt；是对象 ⇒ **opts**（prompt 用默认 `{{task}}`）。
+     * 见 `Primitives['loop']` 的类型说明：`reuseOutput` 让"用默认 prompt"成为常态，
+     * 而位置参数没法跳过，所以给这一种写法。
+     */
+    const prompt = typeof promptOrOpts === 'string' ? promptOrOpts : undefined
+    const opts = typeof promptOrOpts === 'object' && promptOrOpts !== null ? promptOrOpts : optsIn
     const promptText = prompt ?? '{{task}}'
     const maxRounds = Math.max(0, opts?.maxRounds ?? 1)
     const exec = async (input: string): Promise<Reply> => {
@@ -394,9 +437,52 @@ export function makePrimitives(env: Env): Primitives {
       let execReply: Reply = { result: 'done', message: '' }
       let guardReply: Reply = { result: 'fail', message: '' }
       let taskNow = task
+      /**
+       * ★★ 2026-11（D134）`reuseOutput`：**第一轮不重跑执行者**，直接拿上一版产出送审。
+       *
+       * 为什么要有它（使用者真机上的编排）：
+       *
+       *   ```js
+       *   const 写作 = agent('文章写作员')
+       *   await loop(写作, agent('审查员', 判定), '{{task}}', { maxRounds: 3 })  // ① 机器把关
+       *   await loop(写作, gate('文章已完成，请过目…'), '{{task}}', { maxRounds: 3 })  // ② 人把关
+       *   ```
+       *
+       *   ② 一进来就**先把写作跑一遍**（loop 的骨架是"先执行再把关"），于是：
+       *   使用者刚在 ① 里审过的那一版**被悄悄换成了新写的一版**，人确认的其实不是他看过的东西；
+       *   而且白花一次额度。使用者原话："用户确认的 loop 由于'写作'先执行，导致有重新写的嫌疑"。
+       *
+       *   加上这个开关之后，② 的语义变成："**这一版已经写好了，先问人**"——
+       *   通过 ⇒ 这一步 done（这一轮没有执行 run）；否决 ⇒ 带着意见重写，再问一次。
+       *   `maxRounds` 此时表示"人最多否决几次"。
+       *
+       * ⚠️ 三个约束：
+       *   · 只在**第一轮**生效（否决之后当然要真跑执行者）；
+       *   · 执行者还没有任何产出（比如 ① 没跑）⇒ 自动退化成"照旧先执行"，不会卡死在空材料上；
+       *   · 复用的是执行者**最近一次的产出**（`Handle.lastOutput`），不是"再读一遍 run"。
+       */
+      let reuseText =
+        opts?.reuseOutput === true ? (executor.lastOutput ?? '').trim() : ''
       while (attempt <= maxRounds) {
-        // ① 执行者（resume 是执行者 run 自己的事——loop 不管）
-        execReply = await executor.run(taskNow, { owner: step })
+        // 轮次结构：把"这一轮交了哪些 run / 这一轮的把关文案"如实记下来（D134）
+        step.rounds ??= []
+        const round: { runIds: RunId[]; gate: string | null } = { runIds: [], gate: null }
+        step.rounds.push(round)
+        const roundStart = step.runIds.length
+
+        let execText: string
+        if (reuseText !== '') {
+          // 复用上一版：**不提交 run**（这一轮的 runIds 只会有把关那一条）
+          execReply = { result: 'done', message: reuseText }
+          execText = reuseText
+          reuseText = ''
+        } else {
+          // ① 执行者（resume 是执行者 run 自己的事——loop 不管）
+          execReply = await executor.run(taskNow, { owner: step })
+          execText = Array.isArray(execReply.message)
+            ? execReply.message.join('\n')
+            : (execReply.message ?? '')
+        }
         /*
          * ★ 2026-11（把关的硬闸，从 server 搬到这里）：**没有产出就没有可审的东西**。
          *
@@ -406,15 +492,17 @@ export function makePrimitives(env: Env): Primitives {
          *   编排就带着"没跑成的一步"继续往下走了。空材料既可能被说成通过也可能被
          *   说成不通过，两种都不是对产出的判断 ⇒ 平台必须自己拦下来。
          */
-        const execText = Array.isArray(execReply.message)
-          ? execReply.message.join('\n')
-          : (execReply.message ?? '')
         if (execText.trim() === '') {
           throw new Error('执行者这一轮没有产出（空文本），不提交审核')
         }
+        round.runIds.push(...(step.runIds.slice(roundStart) as RunId[]))
         // ② 把关者——**就是一次普通执行 run**（那段审视任务的文字由
         //    `reviewTaskText` 组装；gate 把关者忽略材料——人看的是运行画面）。
+        const beforeGuard = step.runIds.length
         guardReply = await guard.run(reviewTaskText(execText), { owner: step })
+        round.runIds.push(...(step.runIds.slice(beforeGuard) as RunId[]))
+        // gate 的把关文案记进这一轮（人确认的那一轮没有执行 run，界面照样画得出来）
+        if (step.gateText !== null && round.gate === null) round.gate = step.gateText
         if (guardReply.result === 'pass') {
           finishStep(step)
           return { result: 'done', message: execReply.message, guard: guardReply } as Reply & { guard: Reply }

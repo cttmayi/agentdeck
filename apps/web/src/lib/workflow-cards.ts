@@ -360,12 +360,37 @@ export function buildCards(
     status: string
     gateText: string | null
     runIds: readonly string[]
+    /** 引擎记下的轮次结构（只有 loop，且老数据没有） */
+    rounds?: ReadonlyArray<{ runIds: readonly string[]; gate: string | null }>
   },
   look: CardLookups,
 ): CardNode {
   const children: CardNode[] = []
 
-  if (step.kind === 'loop') {
+  if (step.kind === 'loop' && Array.isArray(step.rounds) && step.rounds.length > 0) {
+    /*
+     * ★ 有引擎记下的轮次结构就直接用（D134）。必须这么做：
+     *   `loop(..., { reuseOutput: true })` 的第一轮**没有执行 run**（直接拿上一版问人），
+     *   靠 `runIds` 两两配对会把"第 2 轮的执行"当成"第 1 轮的把关"——卡片错位。
+     * 老数据没有 `rounds` ⇒ 走下面的配对分支。
+     */
+    step.rounds.forEach((r: { runIds: readonly string[]; gate: string | null }, i: number) => {
+      const roundChildren: CardNode[] = r.runIds.map((rid: string, j: number) =>
+        runNode(rid, j === 0 ? 'exec' : 'guard', j === 0 ? look.text.execMeta(i + 1) : look.text.guardMeta(i + 1), look),
+      )
+      if (r.gate !== null && r.gate !== '') {
+        roundChildren.push({ kind: 'gate', key: `gate:${step.seq}:${i}`, text: r.gate })
+      }
+      const isLast = i === step.rounds!.length - 1
+      children.push({
+        kind: 'round',
+        key: `round:${step.seq}:${i}`,
+        title: look.text.roundTitle(i + 1),
+        status: isLast ? step.status : 'done',
+        children: roundChildren,
+      })
+    })
+  } else if (step.kind === 'loop') {
     const rounds = loopRounds(step.runIds)
     rounds.forEach((r, i) => {
       const roundChildren: CardNode[] = [

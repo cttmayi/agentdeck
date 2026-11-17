@@ -71,7 +71,7 @@ interface EngineHooks {
 | `gate` | `gate(text) => Handle` | 人把关者（界面确认/否决）；thenable（`await gate()` 独立等待） |
 | `flow` | `flow(agents: Handle[], prompt?: string, opts?: { returnIndex? }) => Handle` | 一条流水线：内部接力（第一个吃 prompt，后续收上一步产出）；`returnIndex` 支持负数（-1 最后、默认 -1） |
 | `parallel` | `parallel(agents: Handle \| Handle[], prompts?: string \| string[], opts?: { concurrency? }) => Handle[]` | 并行：prompts×agents（1×N 广播 / N×N 派发 / N×1 多任务 / 不匹配报错）；**thenable 数组**（`await` → Reply[]） |
-| `loop` | `loop(executor: Handle, guard: Handle, prompt?: string, opts?: { maxRounds? }) => Handle` | 把关循环：每轮执行者 run → 把关者 Reply（pass 出 / fail 重写/意见附加）→ 超轮兜底（返回 fail，run 不挂） |
+| `loop` | `loop(executor: Handle, guard: Handle, promptOrOpts?: string \| { maxRounds?, reuseOutput? }, opts?) => Handle` | 把关循环：每轮执行者 run → 把关者 Reply（pass 出 / fail 重写/意见附加）→ 超轮兜底（返回 fail，run 不挂）。**`reuseOutput: true`：第一轮不重跑执行者**，直接拿上一版产出送审（人把关用它，见 §3.5） |
 | `route` | `route(map: Record<string, Handle>, prompt?: string) => Handle` | 关键字路由（无命中 = 第一个） |
 
 **prompt 全部可选**（默认 `{{task}}`）。
@@ -85,6 +85,43 @@ interface EngineHooks {
 
 **message 永远是执行者的返回**（fail 时也能用——"不好但可用"的半成品）；
 审核意见看 `结果.guard?.message`。超轮不弄挂 run——编排代码自己兜底。
+
+### 3.5 人把关：`reuseOutput`（D134）
+
+**问题**（使用者真机编排）：① 机器把关跑完，② 让人把关时——
+
+```js
+const 写作 = agent('文章写作员')
+await loop(写作, agent('审查员', 判定), '{{task}}')                  // ① 机器把关
+await loop(写作, gate('请过目…'), '{{task}}', { maxRounds: 3 })      // ② 人把关
+```
+
+② 一进来就**先把「写作」跑一遍**（loop 的骨架是"先执行再把关"）⇒ 使用者刚在 ① 里审过的
+那一版**被悄悄换成新写的一版**，人确认的不是他看过的东西；而且白花一次额度。
+使用者原话："用户确认的 loop 由于'写作'先执行，导致有重新写的嫌疑"。
+
+**修法**：给 loop 一个开关
+
+```js
+// ③ 个参数直接给 opts 也行（prompt 用默认的 {{task}}）——新增的写法，最常用
+await loop(写作, gate('文章已完成，请过目…'), { maxRounds: 3, reuseOutput: true })
+
+// 想自己写重写轮的任务书，就还是位置参数
+await loop(写作, gate('文章已完成，请过目…'), '{{task}}', { maxRounds: 3, reuseOutput: true })
+```
+
+`'{{task}}'` 在**重写轮**才用得上（执行者收到的 = 原任务 + `[打回意见] 人的意见`）；
+第一次送审完全不经过它——所以用默认就行。
+
+语义：
+- **第一轮不提交执行 run**：拿执行者最近一次产出（`Handle.lastOutput`）送进把关。
+  通过 ⇒ 这一步 `done`；否决 ⇒ 带着意见真跑一轮重写，再问一次，最多 `maxRounds` 次；
+- 执行者还没有任何产出（比如 ① 没跑）⇒ **自动退化成"照旧先执行"**，不会拿空材料去问人；
+- ⚠️ 只作用于第一轮（否决之后当然要真写）。
+
+配套：步骤上新增 `rounds: [{ runIds, gate }]`（只有 loop 写）。因为第一轮没有执行 run，
+界面靠 `runIds` 两两配对会把"第 2 轮的执行"当成"第 1 轮的把关"；有了 `rounds`，
+运行画面直接照它画（老数据没有这个字段 ⇒ 退回配对）。
 
 ### 3.2 嵌套（惰性句柄）
 

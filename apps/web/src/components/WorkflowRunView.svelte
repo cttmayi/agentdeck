@@ -125,6 +125,7 @@
     .sort((a, b) => a.seq - b.seq)
     .map((st) =>
       buildCards(st, {
+        // ⚠️ `buildCards` 会读 `st.rounds`（引擎记下的轮次结构，D134）——直接透传整个 step
         statusOf: (rid) => execStatuses[rid],
         outputOf: (rid) => outputs[rid],
         nameOf: (rid) => agentNameOfRun(rid),

@@ -86,6 +86,16 @@ export interface Handle {
   judge?: 'parser' | 'human' | 'none'
   /** 展示名（界面用）。 */
   label?: string
+  /**
+   * 这条 Handle **最近一次的产出文本**（`agent` 每次跑完写在这里；gate / 复合句柄没有）。
+   *
+   * ★ 2026-11（D134）：`loop(..., { reuseOutput: true })` 要"先把**已经写好的那一版**
+   *   拿给人审，不要先重跑执行者"——它需要读到执行者上一版的产出，而句柄原来只记
+   *   `lastRunId`（会话锚点），没有正文。所以把正文也挂在句柄上（幂等：只是缓存一次文本）。
+   *
+   * ⚠️ 它是**最近一次**的产出：`reset()` 会清掉它（重置语义：不记得上一版了）。
+   */
+  lastOutput?: string
   /** 运行时重置（清 resume 锚点——复合 Handle 递归）。 */
   reset?: () => void
   /** thenable：`await handle` 触发 run（惰性句柄的执行入口）。 */
@@ -196,6 +206,18 @@ export interface WorkflowStep {
   prompt: string | null
   /** 这一步的 run（并行聚合时是多个）。 */
   runIds: RunId[]
+  /**
+   * ★ 2026-11（D134）：**轮次结构**（只有 `loop` 会写）。
+   *
+   * 为什么要有它：`runIds` 原来靠"两两配对"推轮次（执行、把关、执行、把关…），
+   * 而 `loop(..., { reuseOutput: true })` 的**第一轮没有执行 run**（直接拿上一版去问人）
+   * ——配对立刻错位：把第 2 轮的执行当成第 1 轮的把关。
+   * 所以引擎把"每一轮交了哪些 run + 这一轮的把关文案"如实记下来，界面照它画，
+   * 不用再猜。
+   *
+   * 老数据没有这个字段 ⇒ 界面退回配对（`loopRounds`），两边都能读。
+   */
+  rounds?: Array<{ runIds: RunId[]; gate: string | null }>
   /** gate 的等待文案。 */
   gateText: string | null
   status: 'pending' | 'running' | 'done' | 'failed' | 'waiting-human' | 'skipped'
