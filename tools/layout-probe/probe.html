@@ -3674,6 +3674,37 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           }
         })()
 
+        /**
+         * ★ 2026-11 使用者："编排代码的显示需要有代码高亮等专业编辑"。
+         *   量的不是"有个 textarea"（原来就有），而是**编辑器该有的那几样**：
+         *   行号列、语法高亮（原语 / 关键字 / 字符串上色）、两层字符对齐。
+         *   ⚠️ 对齐那一条按**字符数**间接验证：两层用同一套度量才可能"逐字对齐"，
+         *      探针里直接比 `line-height` 与 `font-family` 更稳（像素级比位置会被取整骗）。
+         */
+        facts['workflows.codeEditor'] = await (async () => {
+          const row = d().querySelector('.list-pane .wf-row')
+          if (!row) return null
+          click(row.querySelector('.list-row-main') ?? row)
+          const ok = await until(() => !!d().querySelector('.detail-pane .editor'), 60)
+          if (!ok) return { 编辑器: false }
+          const ed = d().querySelector('.detail-pane .editor')
+          const hl = ed.querySelector('.hl')
+          const ta = ed.querySelector('textarea')
+          const gutter = ed.querySelector('.gutter')
+          return {
+            编辑器: true,
+            行号: gutter ? gutter.querySelectorAll('span').length : 0,
+            原语着色: ed.querySelectorAll('.hl .tok-primitive').length,
+            关键字着色: ed.querySelectorAll('.hl .tok-keyword').length,
+            字符串着色: ed.querySelectorAll('.hl .tok-string').length,
+            行高一致: hl && ta ? getComputedStyle(hl).lineHeight === getComputedStyle(ta).lineHeight : false,
+            字体一致: hl && ta ? getComputedStyle(hl).fontFamily === getComputedStyle(ta).fontFamily : false,
+            不折行: hl && ta
+              ? getComputedStyle(hl).whiteSpace === 'pre' && getComputedStyle(ta).whiteSpace === 'pre'
+              : false,
+          }
+        })()
+
         // ⑦ 点一行 ⇒ 右栏是它（选中即编辑：标题 + 代码 + 动作）
         facts['workflows.selectShows'] = await (async () => {
           const row = d().querySelector('.list-pane .wf-row')

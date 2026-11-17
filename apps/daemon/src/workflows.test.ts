@@ -36,15 +36,22 @@ function freshRun(): WorkflowRun {
   }
 }
 
-test('★ 模板清单：七个固定模板都在（UI「从模板」入口的数据源）', () => {
+test('★ 模板清单：换成"真实场景"那一批（UI「从模板」入口的数据源）', () => {
+  /*
+   * ⚠️ 2026-11 使用者："『单组流程…人机把关』这些都是简单编排，并没有实际用途" ⇒ 七个
+   *   语法演示模板换成五个真实场景。这条原来钉的是旧 key 列表，现在钉新的一批——
+   *   更细的质量关（语法是否合法 / 有没有退场写法 / summary 是否齐全）在
+   *   `workflow-templates.test.ts` 里逐条量。
+   */
   const keys = WORKFLOW_TEMPLATES.map((t) => t.key)
-  for (const k of ['single-flow', 'sequential', 'parallel', 'loop', 'route', 'supervise', 'gate']) {
+  for (const k of ['weekly-report', 'review-rework', 'research-brief', 'batch-refactor', 'release-check']) {
     assert.ok(keys.includes(k), `模板 ${k} 必须存在`)
   }
-  // 模板代码用 v5 原语（agent 句柄 + flow/parallel/loop/route）
-  const loopTpl = WORKFLOW_TEMPLATES.find((t) => t.key === 'loop')!
+  // 模板代码用 v5 原语（agent 句柄 + flow/parallel/loop/route），并且都有人放行的写法
+  const loopTpl = WORKFLOW_TEMPLATES.find((t) => t.key === 'review-rework')!
   assert.match(loopTpl.code, /agent\(/)
   assert.match(loopTpl.code, /loop\(/)
+  assert.ok(WORKFLOW_TEMPLATES.some((t) => t.code.includes('reuseOutput')), '至少一条用人放行')
 })
 
 test('★ 编排存储往返（save → load）', async () => {

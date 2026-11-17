@@ -51,11 +51,11 @@
   import { Modal } from '@agentdeck/ui/components'
   import ListPane from '../components/ListPane.svelte'
   import ListRow from '../components/ListRow.svelte'
+  import CodeEditor from '../components/CodeEditor.svelte'
   import MainArea from '../components/MainArea.svelte'
   import DirPicker from '../components/DirPicker.svelte'
   import WorkflowRunView from '../components/WorkflowRunView.svelte'
   import { relativeTime } from '../lib/time.ts'
-  import { workflowRunStatusClass, workflowRunStatusKey } from '../lib/run-status.ts'
 
   /**
    * 右栏此刻是"新建"还是"某条编排的编辑"。
@@ -96,9 +96,6 @@
   $: visible = filter.trim() === ''
     ? $workflows
     : $workflows.filter((w) => w.name.toLowerCase().includes(filter.trim().toLowerCase()))
-  $: history = $workflowRuns
-    .filter((r) => r.workflowId === selectedId)
-    .sort((a, b) => b.updatedAt - a.updatedAt)
   /**
    * 右栏是否有东西（窄屏据此决定"列表让位"）。
    *
@@ -158,11 +155,6 @@
     formTemplateKey = null
     formError = ''
     runOpen = false
-  }
-
-  /** 进运行画面（子路由）：返回按钮恒回定义页（「编排任务」页已随 D132 删掉）。 */
-  function openRun(runId: string): void {
-    location.hash = `#/workflows/run/${runId}`
   }
 
   /** 窄屏返回（`MainArea` 的 `.back-to-list`）：右栏收掉，回到列表。 */
@@ -372,15 +364,21 @@
 
       {#snippet body()}
         {#if creating}
-          <!-- 从模板起步：模板 → 名字 → 代码。顺序与"先有骨架、再起名、再改"一致 -->
+          <!--
+            从模板起步：模板 → 名字 → 代码。
+            ★ 2026-11 使用者："这些都是简单编排，并没有实际用途，建议给实际有用的编排"
+              ⇒ 模板改成**真实场景**（周报流水线 / 写完自动复查 / 并行调研 / 批量改造 /
+              发布前检查），每张卡带一句"它做什么"，点一下就把代码填进下面的编辑器。
+          -->
           <div class="wf-tpl-row">
             {#each templates as tpl (tpl.key)}
               <button
                 type="button"
-                class="btn {formTemplateKey === tpl.key ? 'btn--primary' : 'btn--ghost'}"
+                class="wf-tpl {formTemplateKey === tpl.key ? 'active' : ''}"
                 onclick={() => pickTemplate(tpl)}
               >
-                {tpl.name}
+                <span class="wf-tpl-name">{tpl.name}</span>
+                <span class="wf-tpl-summary">{$t(`workflows.template.${tpl.key}` as never)}</span>
               </button>
             {/each}
           </div>
@@ -399,43 +397,27 @@
         {#if detailOpen}
           <div class="field">
             <label for="wf-code">{$t('workflows.codeLabel')}</label>
-            <textarea
+            <!-- ★ 2026-11 使用者："编排代码的显示需要有代码高亮等专业编辑" ⇒ CodeEditor
+                 （语法高亮 + 行号 + Tab 缩进；零依赖，见组件顶部说明） -->
+            <CodeEditor
               id="wf-code"
-              class="mono"
-              rows={creating ? 12 : 14}
               bind:value={formCode}
+              rows={creating ? 12 : 16}
               placeholder={$t('workflows.codePlaceholder')}
-            ></textarea>
+              ariaLabel={$t('workflows.codeLabel')}
+            />
           </div>
           {#if formError}
             <div class="notice bad">{formError}</div>
           {/if}
 
-          <!-- 该编排的历史：按时间倒序，点一条进运行画面（编排的运行同时也在「任务」页里） -->
-          {#if selected && !creating && history.length > 0}
-            <h3 class="wf-history-head">{$t('workflows.runHistoryTitle')}</h3>
-            <ul class="list-stack">
-              {#each history as r (r.id)}
-                <ListRow rowClass="wf-run-row" onclick={() => openRun(r.id)}>
-                  {#snippet children()}
-                    <span class="wf-title">
-                      <span class="badge {workflowRunStatusClass(r.status)}"
-                        >{$t(workflowRunStatusKey(r.status))}</span
-                      >
-                      <span class="mono">{r.id.slice(-6)}</span>
-                    </span>
-                    <span class="wf-sub">
-                      <span class="faint">{relativeTime(r.updatedAt, Date.now())}</span>
-                      <span class="faint"
-                        >{$t('workflows.stepsHint')}
-                        {r.steps.filter((s) => s.status !== 'pending').length}/{r.steps.length}</span
-                      >
-                    </span>
-                  {/snippet}
-                </ListRow>
-              {/each}
-            </ul>
-          {/if}
+          <!--
+            ⚠️ 2026-11 使用者："去掉『运行历史』的显示"
+              这一段原来是"该编排跑过的运行"列表。删掉的理由：编排的每一次运行**都是
+              一条任务**，在「任务」页里按编排分组列着、点开就是同一个运行画面——
+              同一批数据在编排页再列一遍，只会让人分不清该看哪儿（与 D132 删「编排任务」
+              页同一条理由）。运行状态在任务页看，这里只管定义。
+          -->
         {/if}
       {/snippet}
     </MainArea>
@@ -512,13 +494,39 @@
     overflow: hidden;
     white-space: nowrap;
   }
+  /* 模板卡：名字 + 一句话说明（使用者："给实际有用的编排"——那就要让人一眼看出它做什么） */
   .wf-tpl-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
     gap: var(--sp-2);
-    flex-wrap: wrap;
     margin-bottom: var(--sp-3);
   }
-  .wf-history-head {
-    margin-top: var(--sp-4);
+  .wf-tpl {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+  }
+  .wf-tpl:hover {
+    background: var(--surface-hover);
+  }
+  .wf-tpl.active {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+  .wf-tpl-name {
+    font-weight: 600;
+    font-size: var(--fs-base);
+  }
+  .wf-tpl-summary {
+    color: var(--text-faint);
+    font-size: var(--fs-xs);
   }
 </style>

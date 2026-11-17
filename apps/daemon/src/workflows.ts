@@ -69,61 +69,139 @@ export interface WorkflowInlineAgent {
 export interface WorkflowTemplate {
   key: string
   name: string
-  /** 骨架代码（组 id 用占位符 `groupA/groupB/...`，保存时校验必须替换成真实组）。 */
+  /** 骨架代码（**语法必须合法**、只用现有原语——`templates.test.ts` 逐条编译检查）。 */
   code: string
+  /** 一句话说清它做什么（界面上当副标题，别让人靠读代码猜）。 */
+  summary: string
 }
 
-/** 固定模板清单（UI「从模板」入口）。 */
+/**
+ * 固定模板清单（UI「从模板」入口）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 2026-11 使用者：这批模板"并没有实际用途，建议给实际有用的编排"
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 旧的那七条（单组流程 / 顺序流水线 / 并行派活 / 评审返工 / 路由分流 / 协调者 / 人机把关）
+ * 是**语法演示**：读完知道原语怎么用，但真拿去做事还得自己从头写。而且其中两条
+ * 是**坏的**——`flow('inline:协调智能体')` 传的是字符串，而 `flow` 的入参是
+ * `Handle[]`（内部 `agents.map`）⇒ 一跑就炸。
+ *
+ * 新的五条都是**一件真实的活**，并且各自演示一个"真有用"的组合：
+ *   ① 流水线 + **人放行**（`reuseOutput`：不重写，直接问你）
+ *   ② 机器把关的返工循环 + 人放行（两个 loop 串起来）
+ *   ③ 并行调研 + 汇总 + 人放行（并行结果用 JS 拼，再交给一个 agent 收口）
+ *   ④ 并行改造 + 核验 + 人放行（多模块同时改、先核验冲突）
+ *   ⑤ 发布前多路检查 + 人拍板（每个检查项一个 agent，结论汇总）
+ *
+ * ⚠️ 代码里的 **agent 名字是占位**（"数据员"这类）：跑之前要在智能体页建同名智能体，
+ *    或者把名字换成你已经有的。模板开头的注释就是这么写的——**别让模板看起来能直接跑**。
+ * ⚠️ 每条都必须**语法合法、只用现有原语**：`templates.test.ts` 逐条编译检查，
+ *    并禁止 `inline:` / 组名这些已经退场的写法（老模板坏在这上面）。
+ */
 export const WORKFLOW_TEMPLATES: readonly WorkflowTemplate[] = [
   {
-    key: 'single-flow',
-    name: '单组流程',
-    code: `// 单组流程：一个智能体跑一次任务
-// {{task}} = 发起运行时填的任务描述（占位符，会被替换）
-await flow([agent('智能体名')], '{{task}}')`,
+    key: 'weekly-report',
+    name: '周报流水线（含你放行）',
+    code: `// 周报：取数 → 成稿 → 你过目
+// ⚠️ 把 agent('…') 里的名字换成你智能体页里真实的智能体
+const 取数 = agent('数据员')
+const 撰稿 = agent('撰稿员')
+
+// ① 取数 → 成稿（第二个人接着第一个人的产物写）
+await flow([取数, 撰稿], '{{task}}')
+
+// ② 你过目：**不重写**，直接把这一版摆到你面前；不满意就带着你的意见重写（最多 3 次）
+await loop(撰稿, gate('这版周报可以发了吗？不满意请说明，我会打回重写'), {
+  maxRounds: 3,
+  reuseOutput: true,
+})`.trimEnd(),
+    summary: '两个人接力写完，再让你放行',
   },
   {
-    key: 'sequential',
-    name: '顺序流水线',
-    code: `// 顺序流水线：A 干完 B 接力（产物自动传递）
-await flow([agent('智能体A'), agent('智能体B')], '{{task}}')`,
-  },
-  {
-    key: 'parallel',
-    name: '并行派活',
-    code: `// 并行派活：分头干（同一任务 → 多个智能体）
-const 部分 = await parallel([agent('智能体A'), agent('智能体B')], '{{task}}')
-// 聚合 = JS 拼 + 一个 agent
-const 汇总 = 部分.map((x) => x.message).join('\n\n')
-await flow([agent('合并智能体')], '合并成一份：\n' + 汇总)`,
-  },
-  {
-    key: 'loop',
-    name: '评审返工',
-    code: `// 评审返工：执行者 ↔ 把关者，审不过就重做（最多 2 次重写）
-const 写作 = agent('执行智能体')
-const 审查 = agent('审核智能体', (意见) =>
+    key: 'review-rework',
+    name: '写完自动复查（不过就重写）',
+    code: `// 写完自动复查：机器把关在前、你放行在后
+// ⚠️ 把 agent('…') 里的名字换成你智能体页里真实的智能体
+const 开发 = agent('开发')
+const 复查 = agent('代码审查员', (意见) =>
   意见.includes('不通过') ? { result: 'fail', message: 意见 } : { result: 'pass' })
-await loop(写作, 审查, '{{task}}', { maxRounds: 2 })`,
+
+// ① 写 ↔ 复查：不通过就带着意见重写（最多 3 轮）
+await loop(开发, 复查, '{{task}}', { maxRounds: 3 })
+
+// ② 机器过了再给你看：不重写，只等你决定
+await loop(开发, gate('改完了，请过目'), { maxRounds: 2, reuseOutput: true })`.trimEnd(),
+    summary: '机器先挑一遍毛病，再交给你',
   },
   {
-    key: 'route',
-    name: '路由分流',
-    code: `// 路由分流：按任务描述里的关键字选智能体（无命中 = 第一个）
-await route({ 代码: agent('代码智能体'), 写作: agent('写作智能体') }, '{{task}}')`,
+    key: 'research-brief',
+    name: '并行调研 → 汇总成一份',
+    code: `// 并行调研：两个人分头查，再合成一份交给你
+// ⚠️ 把 agent('…') 里的名字换成你智能体页里真实的智能体
+const 甲 = agent('调研员甲')
+const 乙 = agent('调研员乙')
+const 汇总 = agent('报告撰写员')
+
+// ① 分头查（同一任务，两个人各查一路）
+const 两路 = await parallel([甲, 乙], '{{task}}')
+const 材料 = 两路
+  .map((r) => (typeof r.message === 'string' ? r.message : ''))
+  .filter((s) => s.trim() !== '')
+  .join('\\n\\n')
+
+// ② 合成一份（并行结果由 JS 拼好，再交给一个人收口）
+await flow([汇总], '把下面几路材料整理成一份报告：\\n\\n' + 材料)
+
+// ③ 你过目
+await loop(汇总, gate('报告可以发了吗'), { maxRounds: 3, reuseOutput: true })`.trimEnd(),
+    summary: '两路并行查，一份汇总给你',
   },
   {
-    key: 'supervise',
-    name: '协调者',
-    code: `// 协调者：拆任务 + 汇总（二期实现，先用 flow 兜底）
-await flow('inline:协调智能体', '{{task}}')`,
+    key: 'batch-refactor',
+    name: '批量改造（并行改 + 核验冲突）',
+    code: `// 批量改造：几个模块同时改，改完先核验有没有互相踩
+// ⚠️ 把 agent('…') 里的名字换成你智能体页里真实的智能体
+const 模块A = agent('模块A负责人')
+const 模块B = agent('模块B负责人')
+const 模块C = agent('模块C负责人')
+const 核验 = agent('合并核验员')
+
+// ① 三路同时改
+const 三路 = await parallel([模块A, 模块B, 模块C], '{{task}}')
+const 清单 = 三路
+  .map((r) => (typeof r.message === 'string' ? r.message : ''))
+  .filter((s) => s.trim() !== '')
+  .join('\\n\\n')
+
+// ② 核验 + 给合并顺序
+await flow([核验], '下面几路改动是否互相冲突？给出合并顺序与风险点：\\n\\n' + 清单)
+
+// ③ 你决定要不要合
+await gate('改动清单与合并顺序在这，确认后你自己合并')`.trimEnd(),
+    summary: '多模块并行改，先核验再交给你',
   },
   {
-    key: 'gate',
-    name: '人机把关',
-    code: `// 人机把关：干完你拍板（gate 可确认，也可否决并打回重写）
-await flow('inline:智能体名', '{{task}}')
-await gate('结果请你过目')`,
+    key: 'release-check',
+    name: '发布前检查（多路结论汇总）',
+    code: `// 发布前检查：几个检查项并行跑，最后合成一句"能不能发"
+// ⚠️ 把 agent('…') 里的名字换成你智能体页里真实的智能体
+const 检查 = [agent('测试员'), agent('安全审查员'), agent('文档校对')]
+const 收口 = agent('发布协调员')
+
+// ① 各查各的
+const 结论 = await parallel(检查, '{{task}}')
+const 汇总材料 = 结论
+  .map((r) => (typeof r.message === 'string' ? r.message : ''))
+  .filter((s) => s.trim() !== '')
+  .join('\\n\\n')
+
+// ② 合成一句结论
+await flow([收口], '把下面几项检查结论汇总成"能不能发布"+ 阻塞项：\\n\\n' + 汇总材料)
+
+// ③ 你拍板
+await gate('可以发布了吗')`.trimEnd(),
+    summary: '测试 / 安全 / 文档并行查，你来放行',
   },
 ]
 

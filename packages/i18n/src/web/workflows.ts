@@ -40,8 +40,38 @@ export const workflowsText = {
     en: 'The selected workflow is edited here — code, run, history.',
   },
   'workflows.backToList': { zh: '← 返回编排列表', en: '← Back to workflows' },
-  'workflows.runHistoryTitle': { zh: '运行历史', en: 'Run history' },
+  /*
+   * ⚠️ 2026-11 使用者："去掉『运行历史』的显示" ⇒ 编排页右栏不再列该编排的运行。
+   *   `workflows.runHistoryTitle` 与 `workflows.stepsHint`（那一段的"步骤 N/M"）
+   *   随之删——留着是死词条。运行状态在「任务」页看（编排的每次运行都是一条任务）。
+   */
   'workflows.templatesLabel': { zh: '从模板', en: 'From template' },
+  /*
+   * ★ 2026-11 使用者："这些都是简单编排，并没有实际用途，建议给实际有用的编排"。
+   *   模板换成五个**真实场景**（见 `apps/daemon/src/workflows.ts` 的 `WORKFLOW_TEMPLATES`），
+   *   每张卡下面那句说明就是这几个词条——**照着"它替你干什么"写**，不是照着原语名字写。
+   *   ⚠️ 词条 key 必须与模板的 `key` 一致（`workflows.template.<key>`）。
+   */
+  'workflows.template.weekly-report': {
+    zh: '两个人接力写完，再让你放行',
+    en: 'Two agents write it, then you sign off',
+  },
+  'workflows.template.review-rework': {
+    zh: '机器先挑一遍毛病，再交给你',
+    en: 'A reviewer loops until it passes, then you decide',
+  },
+  'workflows.template.research-brief': {
+    zh: '两路并行查，一份汇总给你',
+    en: 'Two parallel researchers, one merged brief',
+  },
+  'workflows.template.batch-refactor': {
+    zh: '多模块并行改，先核验再交给你',
+    en: 'Parallel edits, conflict check, then you approve',
+  },
+  'workflows.template.release-check': {
+    zh: '测试 / 安全 / 文档并行查，你来放行',
+    en: 'Tests, security and docs in parallel — you release',
+  },
   'workflows.nameLabel': { zh: '名字', en: 'Name' },
   'workflows.nameRequired': { zh: '先给编排起个名字', en: 'Give the workflow a name first' },
   'workflows.codeRequired': { zh: '编排代码不能为空', en: 'Workflow code cannot be empty' },
@@ -54,7 +84,6 @@ export const workflowsText = {
   'workflows.confirmDelete': { zh: '删除这个编排？', en: 'Delete this workflow?' },
   'workflows.run': { zh: '运行', en: 'Run' },
   'workflows.updated': { zh: '更新于 {time}', en: 'Updated {time}' },
-  'workflows.stepsHint': { zh: '步骤', en: 'steps' },
   'workflows.sourceTemplate': { zh: '模板', en: 'Template' },
   'workflows.sourceManual': { zh: '手写', en: 'Manual' },
   'workflows.sourceAi': { zh: 'AI 生成', en: 'AI' },
