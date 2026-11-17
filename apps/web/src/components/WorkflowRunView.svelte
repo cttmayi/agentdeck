@@ -33,6 +33,7 @@
     loopRounds,
     needsFetch,
     runCardBody,
+    stepPreview,
     stepSummaryRunId,
   } from '../lib/workflow-cards.ts'
   import RunLog from './RunLog.svelte'
@@ -190,8 +191,14 @@
     if (out === undefined || out.trim() === '') {
       return isRunTerminal(execStatuses[rid]) ? $t('workflows.noOutput') : $t('workflows.stepWorking')
     }
-    const first = (out.split('\n')[0] ?? '').trim()
-    return first.length > 72 ? `${first.slice(0, 72)}…` : first
+    /*
+     * ★ 2026-11 使用者："『步骤卡头只放摘要（第一行）』这个不对，需求多放几行。
+     *   也建议换行显示。"
+     *   所以这里返回的是**多行预览**（前 3 行、限 180 字，末尾补 `…` 表示后面还有），
+     *   由卡头用 `white-space: pre-wrap` 换行显示——不再是一行 + 省略号。
+     *   判据收在 `lib/workflow-cards.ts#stepPreview`（有单测）。
+     */
+    return stepPreview(out).text
   }
 
   /**
@@ -404,17 +411,24 @@
             {#each [...run.steps].sort((a, b) => a.seq - b.seq) as st (st.seq)}
               <li class="wf-out {st.status === 'running' ? 'on' : ''}">
                 <button type="button" class="wf-out-head" onclick={() => toggleStep(st.seq)}>
-                  <span class="badge {workflowStepStatusClass(st.status)}">{$t(workflowStepStatusKey(st.status))}</span>
-                  <!--
-                    ★ 2026-11 使用者："比如执行 LOOP，当前的卡片就看不出来是 LOOP"。
-                    卡头原来只有**状态**（完成 / 进行中），看不出这一步是哪种原语。
-                    加一个**类型**小标签：与状态徽标刻意长得不一样（状态彩色带圆点、
-                    类型灰框无圆点），否则会被读成"把关循环是一种状态"。
-                  -->
-                  <span class="wf-out-kind">{$t(workflowStepKindKey(st.kind))}</span>
-                  <span class="wf-out-title">
-                    {st.label}
-                    <span class="wf-out-result">— {resultSummary(st)}</span>
+                  <span class="wf-out-main">
+                    <span class="wf-out-line">
+                      <span class="badge {workflowStepStatusClass(st.status)}">{$t(workflowStepStatusKey(st.status))}</span>
+                      <!--
+                        ★ 2026-11 使用者："比如执行 LOOP，当前的卡片就看不出来是 LOOP"。
+                        卡头原来只有**状态**（完成 / 进行中），看不出这一步是哪种原语。
+                        加一个**类型**小标签：与状态徽标刻意长得不一样（状态彩色带圆点、
+                        类型灰框无圆点），否则会被读成"把关循环是一种状态"。
+                      -->
+                      <span class="wf-out-kind">{$t(workflowStepKindKey(st.kind))}</span>
+                      <span class="wf-out-label">{st.label}</span>
+                    </span>
+                    <!--
+                      ★ 2026-11 使用者："需求多放几行，也建议换行显示"——
+                      这里是**多行、可换行**的产出预览（`white-space: pre-wrap`），
+                      不是"一行 + 省略号"。收起时卡头就是这张卡的全部内容。
+                    -->
+                    <span class="wf-out-result">{resultSummary(st)}</span>
                   </span>
                   <span class="wf-out-run mono faint">{lastRunId(st) ? lastRunId(st)!.slice(-8) : ''}</span>
                   <span class="wf-out-toggle">
@@ -602,7 +616,8 @@
   }
   .wf-out-head {
     display: flex;
-    align-items: center;
+    /* ★ 2026-11：卡头有了多行预览 ⇒ 顶对齐（原来居中，多行时徽标会飘在中间） */
+    align-items: flex-start;
     gap: 8px;
     width: 100%;
     padding: 8px 12px;
@@ -620,17 +635,40 @@
   .wf-out-head:hover {
     background: var(--surface-hover);
   }
-  .wf-out-title {
+  /* 卡头左半边：第一行是「状态 + 类型 + 步骤名」，下面是**多行预览** */
+  .wf-out-main {
     flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .wf-out-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .wf-out-label {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-weight: 600;
   }
+  /*
+   * ★ 预览：**多行、可换行**（使用者 2026-11："需求多放几行。也建议换行显示"）。
+   *   `pre-wrap` 保住换行，`overflow-wrap: anywhere` 让超长的中文/URL 也断得开
+   *   ——只写 `break-word` 时，一整串没有空格的串仍会撑出界。
+   */
   .wf-out-result {
     color: var(--text-faint);
     font-weight: 400;
+    font-size: var(--fs-sm);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: calc(1.5em * 4);
+    overflow: hidden;
   }
 
   .wf-out-run {

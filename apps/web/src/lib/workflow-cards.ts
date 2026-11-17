@@ -153,3 +153,42 @@ export function logExpanded(
   if (manual !== undefined) return manual
   return !isRunTerminal(status)
 }
+
+/**
+ * 收起态卡头那块「最后往下的产出」预览：**取前几行、并限制总字数**。
+ *
+ * 使用者 2026-11："'步骤卡头只放摘要（第一行）'，这个不对，需求多放几行。也建议换行显示。"
+ *
+ * 所以这里返回的是**多行**文本（不是第一行 + 省略号），由界面用 `white-space: pre-wrap`
+ * 换行显示。两个上限各管一件事：
+ *   · `maxLines`（默认 3）：一屏里可能有好几步，预览太长会把列表撑散；
+ *   · `maxChars`（默认 180）：Markdown 里一句话可以很长，光按行数限不住高度。
+ *
+ * 截断时在末尾补 `…`（并如实标 `truncated: true`）——**不静默截**：
+ * 收起的卡头只是入口，完整内容在展开后的正文里。
+ */
+export function stepPreview(
+  output: string | undefined,
+  maxLines = 3,
+  maxChars = 180,
+): { text: string; truncated: boolean } {
+  if (output === undefined) return { text: '', truncated: false }
+  const all = output.replace(/\r\n/g, '\n').split('\n')
+  // 去掉行尾空格；空行保留（Markdown 的段落靠它分段），但**开头/结尾的空行**去掉
+  let lines = all.map((l) => l.replace(/\s+$/, ''))
+  while (lines.length > 0 && lines[0]!.trim() === '') lines.shift()
+  while (lines.length > 0 && lines[lines.length - 1]!.trim() === '') lines.pop()
+  if (lines.length === 0) return { text: '', truncated: false }
+
+  let truncated = false
+  if (lines.length > maxLines) {
+    lines = lines.slice(0, maxLines)
+    truncated = true
+  }
+  let text = lines.join('\n')
+  if (text.length > maxChars) {
+    text = text.slice(0, maxChars)
+    truncated = true
+  }
+  return { text: truncated ? `${text}…` : text, truncated }
+}

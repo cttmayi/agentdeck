@@ -9,6 +9,7 @@ import {
   loopRounds,
   needsFetch,
   runCardBody,
+  stepPreview,
   stepSummaryRunId,
 } from './workflow-cards.ts'
 
@@ -114,5 +115,33 @@ describe('编排运行画面：每个 run 一张卡片', () => {
     // 人点过：一律听人的（刷新轮询不许把它收回去，也不许悄悄展开）
     assert.equal(logExpanded(true, 'completed'), true)
     assert.equal(logExpanded(false, 'running'), false)
+  })
+
+  test('★★ 收起态卡头预览**多行、可换行**（不是第一行 + 省略号）', () => {
+    const out = [
+      '# 周报（第 2 版）',
+      '',
+      '本周完成：编排页按规范重排、运行画面按 run 渲染。',
+      '',
+      '## 风险',
+      '1. 编排页规范重排与 run 视图改动同一天合并可能互相踩。',
+    ].join('\n')
+    const p = stepPreview(out)
+    // 前 3 行（含空行——Markdown 靠它分段），且没有"只取第一行"
+    assert.equal(p.text.split('\n')[0], '# 周报（第 2 版）')
+    // 第三行也在（多行预览），末尾补一个省略号表示"后面还有"
+    assert.ok(p.text.split('\n')[2]!.startsWith('本周完成：编排页按规范重排'))
+    assert.equal(p.truncated, true, '还有后面的行 ⇒ 如实标"截了"')
+    assert.ok(p.text.endsWith('…'))
+    // 短输出：原样、不截
+    assert.deepEqual(stepPreview('短'), { text: '短', truncated: false })
+    // 单行超长：按字数截（按行数限不住高度）
+    const long = 'x'.repeat(500)
+    const cut = stepPreview(long)
+    assert.equal(cut.truncated, true)
+    assert.equal(cut.text.length, 181, '180 字 + 一个省略号')
+    // 没有产出 / 只有空白
+    assert.deepEqual(stepPreview(undefined), { text: '', truncated: false })
+    assert.deepEqual(stepPreview('\n\n  \n'), { text: '', truncated: false })
   })
 })
