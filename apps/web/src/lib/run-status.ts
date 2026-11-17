@@ -96,7 +96,6 @@ export const WORKFLOW_STEP_STATUS_KEY: Record<string, WebTextId> = {
 export const WORKFLOW_STEP_KIND_KEY: Record<string, WebTextId> = {
   flow: 'workflows.stepKindFlow',
   parallel: 'workflows.stepKindParallel',
-  aggregate: 'workflows.stepKindAggregate',
   loop: 'workflows.stepKindLoop',
   route: 'workflows.stepKindRoute',
   gate: 'workflows.stepKindGate',

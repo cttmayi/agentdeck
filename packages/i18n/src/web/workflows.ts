@@ -76,12 +76,22 @@ export const workflowsText = {
   'workflows.stepDone': { zh: '完成', en: 'Done' },
   'workflows.stepFailed': { zh: '失败', en: 'Failed' },
   'workflows.stepWaitingHuman': { zh: '等你确认', en: 'Waiting for you' },
-  'workflows.stepKindFlow': { zh: '组跑', en: 'Flow' },
+  /*
+   * ⚠️ 2026-11（使用者："比如执行 LOOP，当前的卡片就看不出来是 LOOP"）：这几条
+   *   原来只出现在**左栏步骤链**那一列，中间那张卡片上看不出这一步是什么原语。
+   *   现在卡片头也挂上它们，所以词也得说人话——顺手把三个陈旧/含混的词改对：
+   *     · `flow` 原来叫「组跑」（组早退场了）⇒ **流水线**；
+   *     · `loop` 原来叫「评审返工」（判"不通过"才返工，容易读成"这一步在返工"）⇒ **把关循环**；
+   *     · `gate` 原来是英文裸词「gate」⇒ **等人确认**。
+   * ⚠️ `stepKindAggregate`（聚合）**删掉**：`WorkflowStep.kind` 的类型里曾经有
+   *   `'aggregate'`，但**引擎没有任何原语产出它**（`flow` / `parallel` / `loop` /
+   *   `route` / `gate` 五个原语，没有 aggregate）——一条永远不会被渲染的词条。
+   */
+  'workflows.stepKindFlow': { zh: '流水线', en: 'Flow' },
   'workflows.stepKindParallel': { zh: '并行', en: 'Parallel' },
-  'workflows.stepKindAggregate': { zh: '聚合', en: 'Aggregate' },
-  'workflows.stepKindLoop': { zh: '评审返工', en: 'Loop' },
+  'workflows.stepKindLoop': { zh: '把关循环', en: 'Loop' },
   'workflows.stepKindRoute': { zh: '路由', en: 'Route' },
-  'workflows.stepKindGate': { zh: 'gate', en: 'Gate' },
+  'workflows.stepKindGate': { zh: '等人确认', en: 'Confirm' },
   'workflows.pause': { zh: '暂停', en: 'Pause' },
   'workflows.resume': { zh: '继续', en: 'Resume' },
   'workflows.confirm': { zh: '确认', en: 'Confirm' },
@@ -99,6 +109,16 @@ export const workflowsText = {
    */
   'workflows.loopExecLabel': { zh: '执行者', en: 'Runner' },
   'workflows.loopGuardLabel': { zh: '把关者', en: 'Guard' },
+  /** loop 卡每行名字后面那一小句：第几轮、是执行还是把关。 */
+  'workflows.loopExecMeta': { zh: '第 {n} 轮 · 执行', en: 'round {n} · run' },
+  'workflows.loopGuardMeta': { zh: '第 {n} 轮 · 把关', en: 'round {n} · guard' },
+  /**
+   * 每张 Agent 卡片右上角那颗「日志」按钮（2026-11 使用者定稿）：
+   * "卡片内部右上角有一个按钮来决定是否要展开日志……这样并行多个 Agent 的时候，
+   *  我可以分开查看其日志。"
+   */
+  // 开关状态靠箭头（▸ / ▾）表达，词条只有一份——两条同文的词就是噪音。
+  'workflows.log': { zh: '日志', en: 'Log' },
   'workflows.loopReviewing': { zh: '（把关中…）', en: '(checking…)' },
   'workflows.expand': { zh: '展开过程', en: 'Show log' },
   'workflows.collapse': { zh: '收起过程', en: 'Hide log' },

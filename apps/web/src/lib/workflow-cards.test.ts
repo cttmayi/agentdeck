@@ -5,9 +5,11 @@ import { join } from 'node:path'
 import {
   TERMINAL_RUN_STATUSES,
   isRunTerminal,
+  logExpanded,
   loopRounds,
   needsFetch,
   runCardBody,
+  stepSummaryRunId,
 } from './workflow-cards.ts'
 
 /**
@@ -85,5 +87,32 @@ describe('编排运行画面：每个 run 一张卡片', () => {
     assert.equal(runCardBody('failed', '   '), 'empty')
     // ⚠️ 反过来：**非终态的空产出绝不能说"没有产出"**——那是假话，与"已启动"矛盾
     assert.notEqual(runCardBody('running', ''), 'empty')
+  })
+
+  test('★★ 卡头摘要取「往下交的那份」：loop 是执行者，不是把关者', () => {
+    // 两轮都跑完：[执行1, 把关1, 执行2, 把关2] ⇒ 往下交的是**执行2**
+    assert.equal(stepSummaryRunId({ kind: 'loop', runIds: ['e1', 'g1', 'e2', 'g2'] }), 'e2')
+    // 正在跑第二轮执行：[执行1, 把关1, 执行2] ⇒ 还是执行者的那条
+    assert.equal(stepSummaryRunId({ kind: 'loop', runIds: ['e1', 'g1', 'e2'] }), 'e2')
+    // 第一轮刚跑完执行、把关刚提交：[执行1, 把关1] ⇒ 执行1
+    assert.equal(stepSummaryRunId({ kind: 'loop', runIds: ['e1', 'g1'] }), 'e1')
+    // 只有一条 ⇒ 它自己（刚提交、还没有把关）
+    assert.equal(stepSummaryRunId({ kind: 'loop', runIds: ['e1'] }), 'e1')
+    // flow / parallel 分支：流水线最后一级
+    assert.equal(stepSummaryRunId({ kind: 'flow', runIds: ['a', 'b', 'c'] }), 'c')
+    assert.equal(stepSummaryRunId({ kind: 'parallel', runIds: ['only'] }), 'only')
+    // gate 没有 run ⇒ 由调用方改显示等确认的文案
+    assert.equal(stepSummaryRunId({ kind: 'gate', runIds: [] }), null)
+  })
+
+  test('★★ 日志默认只展开「正在跑」的那条；人点过的以人为准', () => {
+    assert.equal(logExpanded(undefined, 'running'), true)
+    assert.equal(logExpanded(undefined, 'queued'), true)
+    assert.equal(logExpanded(undefined, undefined), true, '还没取到状态 ⇒ 当成在跑，亮出来')
+    assert.equal(logExpanded(undefined, 'completed'), false)
+    assert.equal(logExpanded(undefined, 'failed'), false)
+    // 人点过：一律听人的（刷新轮询不许把它收回去，也不许悄悄展开）
+    assert.equal(logExpanded(true, 'completed'), true)
+    assert.equal(logExpanded(false, 'running'), false)
   })
 })

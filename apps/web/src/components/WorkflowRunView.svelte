@@ -26,7 +26,14 @@
   } from '../lib/run-status.ts'
   import { agents, issues } from '../lib/stores.ts'
   import { go } from '../lib/view.ts'
-  import { loopRounds, needsFetch, runCardBody } from '../lib/workflow-cards.ts'
+  import {
+    isRunTerminal,
+    logExpanded,
+    loopRounds,
+    needsFetch,
+    runCardBody,
+    stepSummaryRunId,
+  } from '../lib/workflow-cards.ts'
   import RunLog from './RunLog.svelte'
   import WorkDirTree from './WorkDirTree.svelte'
 
@@ -134,7 +141,9 @@
         return rows
       })
     }
-    if ((st.kind === 'parallel' || st.kind === 'aggregate') && st.runIds.length > 1) {
+    // ⚠️ `parallel` **每个分支各自一步**（引擎在分支里 nextStep），所以这里通常只有一条；
+    //    留着这个分支是为了"一条步骤里挤了多条 run"的其它情形（历史数据）也能分开显示。
+    if (st.kind === 'parallel' && st.runIds.length > 1) {
       return st.runIds.map((runId) => ({ runId, role: 'sub' as const, round: 0 }))
     }
     const rid = lastRunId(st)
@@ -159,20 +168,43 @@
     if (role === 'exec') return $t('workflows.loopExecLabel')
     return runId.slice(-8)
   }
-  function stepOutput(st: WorkflowStep): string | null {
-    const rid = lastRunId(st)
-    return rid && outputs[rid] ? outputs[rid]! : null
-  }
   function toggleStep(seq: number): void {
     expandedSeq = expandedSeq === seq ? null : seq
   }
-  /** 卡片标题上的「最后结果」摘要（使用者 2026-11：结果放标题上）。 */
+  /**
+   * 卡片标题上的「最后结果」摘要（使用者 2026-11：结果放标题上）。
+   *
+   * ⚠️ 取的是「**往下交的那份产出**」，不是"最后一条 run"：
+   *   · loop 的 `runIds` 是 `[执行1, 把关1, 执行2, 把关2, …]`，最后一条是**把关者**
+   *     ⇒ 用它会让卡头显示"通过 / 不通过"这种意见，而不是被交下去的产物。
+   *     使用者原话："loop 如果成功，就应该显示写作者的输出。"
+   *   · gate 没有 run ⇒ 显示等确认的那句文案。
+   *   判据收在 `lib/workflow-cards.ts#stepSummaryRunId`（有单测）。
+   */
   function resultSummary(st: WorkflowStep): string {
-    if (st.status === 'running' || st.status === 'pending') return $t('workflows.stepWorking')
-    const out = stepOutput(st)
-    if (!out) return $t('workflows.noOutput')
+    if (st.kind === 'gate') return `"${st.gateText ?? ''}"`
+    const rid = stepSummaryRunId(st)
+    if (rid === null) return $t('workflows.stepWorking')
+    const out = outputs[rid]
+    if (out === undefined || out.trim() === '') {
+      return isRunTerminal(execStatuses[rid]) ? $t('workflows.noOutput') : $t('workflows.stepWorking')
+    }
     const first = (out.split('\n')[0] ?? '').trim()
     return first.length > 72 ? `${first.slice(0, 72)}…` : first
+  }
+
+  /**
+   * 日志展开状态：**每条 run 一个**（使用者："并行多个 Agent 的时候，我可以分开查看其日志"）。
+   *
+   * `undefined` = 人没动过 ⇒ 按默认（**正在跑的那条自动展开**，跑完自动收起）。
+   * 人点过之后一直是那个状态：2s 轮询刷新不会把它收回去。
+   */
+  let openLogs: Record<string, boolean> = {}
+  function isLogOpen(runId: string): boolean {
+    return logExpanded(openLogs[runId], execStatuses[runId])
+  }
+  function toggleRunLog(runId: string): void {
+    openLogs = { ...openLogs, [runId]: !isLogOpen(runId) }
   }
   /** 展开态：手动展开（expandedSeq）优先；默认运行中/等确认自动展开，执行完收起。 */
   function isExpanded(st: WorkflowStep): boolean {
@@ -372,6 +404,13 @@
               <li class="wf-out {st.status === 'running' ? 'on' : ''}">
                 <button type="button" class="wf-out-head" onclick={() => toggleStep(st.seq)}>
                   <span class="badge {workflowStepStatusClass(st.status)}">{$t(workflowStepStatusKey(st.status))}</span>
+                  <!--
+                    ★ 2026-11 使用者："比如执行 LOOP，当前的卡片就看不出来是 LOOP"。
+                    卡头原来只有**状态**（完成 / 进行中），看不出这一步是哪种原语。
+                    加一个**类型**小标签：与状态徽标刻意长得不一样（状态彩色带圆点、
+                    类型灰框无圆点），否则会被读成"把关循环是一种状态"。
+                  -->
+                  <span class="wf-out-kind">{$t(workflowStepKindKey(st.kind))}</span>
                   <span class="wf-out-title">
                     {st.label}
                     <span class="wf-out-result">— {resultSummary(st)}</span>
@@ -433,20 +472,53 @@
                         终态且确实没有才画「（还没有产出）」）；
                       · 名字 —— 这条 run 真正的 agent 名字，取不到按角色退回通用说法。
                   -->
+                  {#if agentRows(st).length === 0}
+                    <!-- gate 这类"没有 run"的步骤：正文就是那句等确认的文案（不画空列表） -->
+                    <div class="wf-out-body">
+                      <p class="wf-out-gate">"{st.gateText ?? ''}"</p>
+                    </div>
+                  {:else}
                   <ol class="wf-loop-rounds">
                     {#each agentRows(st) as row (row.runId)}
                       <li class="wf-round">
-                        <div class="wf-round-tag">{runTitle(row.runId, row.role)}</div>
+                        <div class="wf-round-head">
+                          <div class="wf-round-tag">
+                            <!-- 这是**这条 run** 的状态（不是步骤的）——用 run 那一族词条 -->
+                            <span class="badge {workflowRunStatusClass(execStatuses[row.runId] ?? '')}">
+                              {$t(workflowRunStatusKey(execStatuses[row.runId] ?? 'queued'))}
+                            </span>
+                            <span class="wf-round-name">{runTitle(row.runId, row.role)}</span>
+                            {#if row.role === 'guard'}
+                              <span class="faint">{$t('workflows.loopGuardMeta', { n: String(row.round + 1) })}</span>
+                            {:else if row.role === 'exec'}
+                              <span class="faint">{$t('workflows.loopExecMeta', { n: String(row.round + 1) })}</span>
+                            {/if}
+                          </div>
+                          <!--
+                            ★ 2026-11 使用者："卡片内部右上角有一个按钮来决定是否要展开日志……
+                              这样并行多个 Agent 的时候，我可以分开查看其日志。"
+                            每颗按钮只管**这一条 run**（`toggleRunLog(row.runId)`），
+                            展开状态也按 run 存（`openLogs`）——两个 Agent 互不影响。
+                          -->
+                          <button
+                            type="button"
+                            class="btn btn--ghost btn--sm"
+                            onclick={() => toggleRunLog(row.runId)}
+                          >
+                            {isLogOpen(row.runId) ? '▾ ' : '▸ '}{$t('workflows.log')}
+                          </button>
+                        </div>
                         <div class="wf-round-box">{runBody(row.runId, row.role)}</div>
+                        {#if isLogOpen(row.runId)}
+                          <!-- 只有**展开了**才挂 RunLog：没展开就不发那一路 SSE -->
+                          <div class="wf-round-log">
+                            <RunLog runId={row.runId} fill />
+                          </div>
+                        {/if}
                       </li>
                     {/each}
                   </ol>
-                {/if}
-
-                {#if isExpanded(st) && lastRunId(st)}
-                  <div class="wf-out-log">
-                    <RunLog runId={lastRunId(st)!} fill />
-                  </div>
+                  {/if}
                 {/if}
               </li>
             {/each}
@@ -550,6 +622,25 @@
   .wf-out-run {
     font-size: var(--fs-sm);
     color: var(--text-faint);
+  }
+  /* 步骤**类型**标签：灰框、无圆点——与彩色带点的状态徽标分开两种信息 */
+  .wf-out-kind {
+    flex: 0 0 auto;
+    font-size: var(--fs-2xs);
+    color: var(--text-dim);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    padding: 0 var(--sp-1) 0;
+    font-size: var(--fs-2xs);
+    white-space: nowrap;
+  }
+  .wf-round-head {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+  .wf-round-log {
+    margin-top: 4px;
   }
   .wf-out-toggle {
     font-size: var(--fs-sm);

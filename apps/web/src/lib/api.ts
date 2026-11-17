@@ -226,7 +226,9 @@ export interface WorkflowTemplate {
 /** 编排运行里的一步（一次"组跑" / 一个 gate 站）。 */
 export interface WorkflowStep {
   seq: number
-  kind: 'flow' | 'parallel' | 'aggregate' | 'loop' | 'route' | 'gate'
+  /* ⚠️ 2026-11：`'aggregate'` 删了——`WorkflowStep.kind` 的类型里曾有它，但引擎
+   *   的五个原语（flow / parallel / loop / route / gate）**没有任何一个产出**它。 */
+  kind: 'flow' | 'parallel' | 'loop' | 'route' | 'gate'
   label: string
   nodeId: string | null
   prompt: string | null

@@ -102,3 +102,54 @@ export function runCardBody(
   if (output !== undefined && output.trim() !== '') return 'text'
   return isRunTerminal(status) ? 'empty' : 'running'
 }
+
+/**
+ * 这个步骤**往下交**的是哪一条 run 的产出——卡头那行摘要就取它的第一个行。
+ *
+ * 使用者 2026-11："没有外围卡片在收起的时候，需要显示最后往下的输出，比如 loop
+ * 如果成功，就应该显示写作者的输出。"
+ *
+ * 所以判据不是"最后一条 run"（那会取到 loop 的**把关者**意见），而是"**流向下一步**
+ * 的那份产出"：
+ *
+ *   · `loop`：runIds 是 `[执行1, 把关1, 执行2, 把关2, …]`，引擎 `return` 出去的是
+ *     执行者的产物 ⇒ 取**最后一个偶数位**（最后一次执行）；
+ *   · `gate`：这一步不产生 run（人确认）⇒ `null`，调用方改显示等确认的那句文案；
+ *   · 其它（flow / route / 单 agent / parallel 分支）：取**最后一条**（流水线最后一级）。
+ *
+ * ⚠️ `parallel` 每个分支**各自一步**（引擎在每个分支里 `nextStep`），所以它自己的
+ *    步骤里只有一条 run ⇒ 走"最后一条"那一支，天然正确。
+ */
+export function stepSummaryRunId(step: {
+  kind: string
+  runIds: readonly string[]
+}): string | null {
+  if (step.runIds.length === 0) return null
+  if (step.kind === 'loop') {
+    // 最后一个"执行"位（偶数下标 0,2,4…）：奇数长度时最后一条就是执行
+    const lastIndex = step.runIds.length - 1
+    return step.runIds[lastIndex % 2 === 0 ? lastIndex : lastIndex - 1]!
+  }
+  return step.runIds[step.runIds.length - 1]!
+}
+
+/**
+ * 这条 run 的日志现在该不该展开。
+ *
+ * @param manual 人手动设过的状态（`true` 展开 / `false` 收起 / `undefined` 没动过）
+ * @param status 这条 run 的状态（`undefined` = 还没取到）
+ *
+ * 使用者 2026-11 定的默认："**只自动展开'正在跑'的那一条**"——所以：
+ *   · 人点过 ⇒ 一律听人的（点了就一直是那个状态，刷新轮询不会把它收回去）；
+ *   · 没点过 ⇒ **非终态自动展开**（正在跑的那条），终态自动收起。
+ *
+ * ⚠️ 用"非终态"而不是"等于 running"：`queued` / `dispatched` / `waiting_local_directory`
+ *    也都是"还没结束"，它们同样应该把日志亮出来（否则刚提交的那两拍是空的）。
+ */
+export function logExpanded(
+  manual: boolean | undefined,
+  status: string | undefined | null,
+): boolean {
+  if (manual !== undefined) return manual
+  return !isRunTerminal(status)
+}
