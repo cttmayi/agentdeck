@@ -307,6 +307,7 @@ export interface CardLookups {
     noOutput: string
     loopReviewing: string
     roundTitle: (n: number) => string
+    stepWaitingHuman: string
     execMeta: (n: number) => string
     guardMeta: (n: number) => string
     stageMeta: (i: number, total: number) => string
@@ -407,17 +408,38 @@ export function buildCards(
     })
   }
 
+  /**
+   * 卡头那块预览。
+   *
+   * ★★ 2026-11 使用者："loop 还没有完毕，就有 loop 卡片的输出显示了。"
+   *    —— 对的，而且这是**假信息**：loop 的语义是"执行 → 把关 → 不过就重写，
+   *    直到通过"，中途那一版是**草稿**，不是这一步的产出。贴在卡头上，读起来像
+   *    "这一步已经交出品了 / 已经过了"。
+   *
+   *    所以规则收成一句：**产出预览只属于"已经交出东西"的步骤**——
+   *      · `done` / `failed` ⇒ 产出（失败时最后那份是排查线索，也要给）；
+   *      · 还在等（`pending` / `running`）⇒ 「（进行中…）」，不贴产出；
+   *      · `waiting-human` ⇒ **只给"等你确认"那句**（问的是"你要不要放行"，
+   *        不是"它交出了什么"）。要看内容就展开——里面每张 Agent 卡是实时的。
+   *    ⚠️ 这条只约束**步骤卡头**；展开后每个 Agent 卡的实时文字照旧（如实显示它正在写什么），
+   *       两件事不冲突：卡头说"这一步的结论"，卡片说"这一条 run 的过程"。
+   */
+  const finished = step.status === 'done' || step.status === 'failed'
+  const waiting = step.status === 'waiting-human'
+
   const summaryId = stepSummaryRunId(step)
   const out = summaryId === null ? undefined : look.outputOf(summaryId)
   const perRun = summaryId === null ? undefined : look.statusOf(summaryId)
-  const preview =
-    step.kind === 'gate'
-      ? `"${step.gateText ?? ''}"`
-      : out !== undefined && out.trim() !== ''
-        ? stepPreview(out).text
-        : isRunTerminal(perRun)
-          ? look.text.noOutput
-          : look.text.stepWorking
+  const preview = (() => {
+    if (step.kind === 'gate' || waiting) {
+      const text = (step.gateText ?? '').trim()
+      return text === '' ? look.text.stepWaitingHuman : `"${text}"`
+    }
+    if (!finished) return look.text.stepWorking
+    if (out !== undefined && out.trim() !== '') return stepPreview(out).text
+    // 终态但没有产出：只有 run 也终态时"没有产出"才是实话（run 可能还在收尾）
+    return isRunTerminal(perRun) ? look.text.noOutput : look.text.stepWorking
+  })()
 
   return {
     kind: 'step',

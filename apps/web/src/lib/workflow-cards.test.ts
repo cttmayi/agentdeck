@@ -173,6 +173,7 @@ describe('编排运行画面：每个 run 一张卡片', () => {
       nameOf: (id: string) => `agent-${id}`,
       text: {
         stepWorking: '跑着', noOutput: '没产出', loopReviewing: '把关中',
+        stepWaitingHuman: '等你确认',
         roundTitle: (n: number) => `第${n}轮`,
         execMeta: (n: number) => `E${n}`, guardMeta: (n: number) => `G${n}`,
         stageMeta: (i: number, t: number) => `${i}/${t}`,
@@ -221,5 +222,41 @@ describe('编排运行画面：每个 run 一张卡片', () => {
       look,
     )
     assert.deepEqual(((gate as any).children ?? []).map((c: any) => c.kind), ['gate'])
+  })
+
+  test('★★ loop 没跑完就不许贴产出（卡头只给"进行中 / 等你确认"）', () => {
+    const look = {
+      statusOf: (id: string) => ({ e1: 'completed' }[id] ?? 'running'),
+      // 注意：**有产出**（第 1 轮写完了），但 loop 还没完
+      outputOf: (id: string) => (id === 'e1' ? '# 周报（第 1 轮草稿）' : ''),
+      nameOf: () => '小周',
+      text: {
+        stepWorking: '（正在跑…）', noOutput: '（还没有产出）', loopReviewing: '（把关中…）',
+        stepWaitingHuman: '等你确认',
+        roundTitle: (n: number) => `第${n}轮`,
+        execMeta: (n: number) => '执行', guardMeta: (n: number) => '把关',
+        stageMeta: (i: number, t: number) => `${i}/${t}`,
+        execLabel: '执行者', guardLabel: '把关者',
+      },
+    }
+    // 还在跑（第 2 轮进行中）⇒ 卡头**不许**出现草稿正文
+    const running = buildCards(
+      { seq: 0, kind: 'loop', label: '把关循环', status: 'running', gateText: null, runIds: ['e1', 'g1', 'e2'] },
+      look,
+    ) as any
+    assert.equal(running.preview, '（正在跑…）')
+    assert.ok(!running.preview.includes('草稿'), '未终结的 loop 卡头不许贴产出')
+    // 跑完了 ⇒ 才贴最后那份产出
+    const done = buildCards(
+      { seq: 0, kind: 'loop', label: '把关循环', status: 'done', gateText: null, runIds: ['e1', 'g1'] },
+      look,
+    ) as any
+    assert.ok(done.preview.includes('草稿'))
+    // 等人确认 ⇒ 只给"等你确认"那句（不是产出）
+    const waiting = buildCards(
+      { seq: 1, kind: 'loop', label: '把关循环', status: 'waiting-human', gateText: '可以发了吗', runIds: ['e1'] },
+      look,
+    ) as any
+    assert.equal(waiting.preview, '"可以发了吗"')
   })
 })

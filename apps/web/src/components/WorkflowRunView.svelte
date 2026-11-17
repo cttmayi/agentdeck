@@ -132,6 +132,7 @@
           stepWorking: $t('workflows.stepWorking'),
           noOutput: $t('workflows.noOutput'),
           loopReviewing: $t('workflows.loopReviewing'),
+          stepWaitingHuman: $t('workflows.stepWaitingHuman'),
           roundTitle: (n) => $t('workflows.loopRound', { n: String(n) }),
           execMeta: (n) => $t('workflows.loopExecMeta', { n: String(n) }),
           guardMeta: (n) => $t('workflows.loopGuardMeta', { n: String(n) }),
