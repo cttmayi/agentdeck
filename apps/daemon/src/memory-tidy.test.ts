@@ -25,6 +25,7 @@ import {
 } from './memory-tidy.ts'
 import type { MemoryEntry, MemoryKind } from '@agentdeck/protocol'
 import { MEMORY_TIDY_INSTRUCTIONS } from './builtin-drafter.ts'
+import { MEMORY_TEXT_MAX } from './memory.ts'
 
 describe('对话正文：整段、按轮、人说的与它回的都在', () => {
   test('★ 每一轮都有人那一句与它那一句，轮次带序号', () => {
@@ -74,7 +75,19 @@ describe('规矩住在智能体的身份里（分批第 244 批）', () => {
     for (const kind of ['preference', 'fact', 'lesson', 'commitment']) {
       assert.ok(MEMORY_TIDY_INSTRUCTIONS.includes(kind), `身份里要提到 ${kind}`)
     }
-    assert.match(MEMORY_TIDY_INSTRUCTIONS, /最多 12 条/)
+    /*
+     * ⚠️ 2026-11（D144）：原来是硬编码的 `/最多 12 条/`——常量一改，指令漏改会报一句
+     *   "身份里没写最多 12 条"，而真正该看的是"指令里的数字与 `TIDY_MAX_CANDIDATES` 不一致"。
+     *   现在从常量派生，红的时候直接看出是哪一边变了。
+     */
+    assert.ok(
+      MEMORY_TIDY_INSTRUCTIONS.includes(`最多 ${String(TIDY_MAX_CANDIDATES)} 条`),
+      `身份里的条数上限要与 TIDY_MAX_CANDIDATES（${String(TIDY_MAX_CANDIDATES)}）一致`,
+    )
+    assert.ok(
+      MEMORY_TIDY_INSTRUCTIONS.includes(`${String(MEMORY_TEXT_MAX)} 字`),
+      `身份里的单条长度要与 MEMORY_TEXT_MAX（${String(MEMORY_TEXT_MAX)}）一致`,
+    )
     assert.match(MEMORY_TIDY_INSTRUCTIONS, /JSON 数组/)
     assert.match(MEMORY_TIDY_INSTRUCTIONS, /凭据|token|密钥/)
     // ★ 使用者当场指出的那条（"我只说了一句话，理论上不该提取到记忆"）

@@ -148,6 +148,7 @@ import {
   DRAFTER_NAME,
   effectiveInstructions,
   ensureBuiltinAgents,
+  type EnsureDrafterResult,
   ensureBuiltinDrafter,
   ensureBuiltinMemoryTidy,
   DRAFTER_SKILL_SLUG,
@@ -1220,6 +1221,30 @@ function parseEnvMap(
  * ⚠️ 别再把它加回来：一旦 skill 又能声明动作，"谁能改状态"就又有了第二个出处。
  */
 
+/**
+ * 启动对账要写进日志的**内置岗位清单**（顺序 = 日志顺序）。
+ *
+ * ★ 2026-11（D144）：这里原来漏了「编排生成者」（D135 加的那一条）——它被建出来时
+ *   **一行日志都没有**，而"某个内置被重建 / 被修复"正是靠这条日志才看得见
+ *   （使用者改过的指令不会被动，但"平台刚动了它"这件事得说一声）。
+ *
+ * ⚠️ 新增一个内置岗位必须在这里加一行：`builtin-role-identity.test.ts` 有一条判据按
+ *    `ensureBuiltinAgents()` 的返回**逐项**核对，漏了当场红（而不是等到某天发现日志里少一条）。
+ */
+export function builtinAccountingRows(
+  builtin: Awaited<ReturnType<typeof ensureBuiltinAgents>>,
+): ReadonlyArray<readonly [string, EnsureDrafterResult, string]> {
+  return [
+    ['内置起草者', builtin.drafter, '沉淀这条链用的'],
+    // ★ 分批第 244 批：「整理记忆」用的那一条（与起草者同一套对账）
+    ['内置记忆整理者', builtin.memoryTidy, '「整理记忆」用的'],
+    // ★ 2026-11 设计定稿：「智能体生成者」——在聊天里问岗位、出岗位卡的那一条
+    ['内置智能体生成者', builtin.agentMaker, '「确认生成智能体」用的'],
+    ['内置编排生成者', builtin.workflowMaker, '「确认采纳编排」用的'],
+    // ★ D135/D144：「编排生成者」——在聊天里问流程、出编排代码的那一条
+  ]
+}
+
 export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   const warn = options.onWarn ?? ((m: string) => console.warn(`[warn] ${m}`))
   const info = options.onInfo ?? ((m: string) => console.log(m))
@@ -1838,14 +1863,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     }
   }
 
+
   const builtin = await ensureBuiltinAgents(store, workspaceId)
-  for (const [label, r, why] of [
-    ['内置起草者', builtin.drafter, '沉淀这条链用的'],
-    // ★ 分批第 244 批：「整理成记忆」用的那一条（与起草者同一套对账）
-    ['内置记忆整理者', builtin.memoryTidy, '「整理成记忆」用的'],
-    // ★ 2026-11 设计定稿：「智能体生成者」——在聊天里问岗位、出岗位卡的那一条
-    ['内置智能体生成者', builtin.agentMaker, '「确认生成智能体」用的'],
-  ] as const) {
+  for (const [label, r, why] of builtinAccountingRows(builtin)) {
     if (r.action === 'created') {
       info(`已建立${label}（${why}，可在「智能体」页查看与编辑）`)
     } else if (r.action === 'healed') {

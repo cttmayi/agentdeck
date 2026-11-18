@@ -54,7 +54,7 @@ import {
  */
 const LEGACY_REVIEWER_NAME = 'Skill 审核者（内置）'
 const LEGACY_REVIEWER_INSTRUCTIONS = '你是平台内置的审核者：只指出哪里不合格，不要重写产出。'
-import { startDaemon } from './server.ts'
+import { startDaemon, builtinAccountingRows } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 const WS = wsId('ws-builtin-role')
@@ -191,16 +191,42 @@ describe('智能体生成者（agent-maker）的对账（2026-11 设计定稿 §
     })
   })
 
-  test('★ 全量对账三件套都建出来（ensureBuiltinAgents 的返回形状）', async () => {
+  test('★ 全量对账**四件套**都建出来（ensureBuiltinAgents 的返回形状）', async () => {
     await withStore(async (store) => {
       const result = await ensureBuiltinAgents(store, WS)
       assert.equal(result.drafter.action, 'created')
       assert.equal(result.memoryTidy.action, 'created')
       assert.equal(result.agentMaker.action, 'created')
+      // ★ 2026-11（D144）：这一条原来叫"三件套"——D135 加了「编排生成者」之后没跟上，
+      //   于是"新内置有没有被建出来"这件事没人守。
+      assert.equal(result.workflowMaker.action, 'created')
       const all = await store.listAgents(WS)
-      assert.ok(all.some((a) => builtinKindOf(a) === 'agent-maker'), '智能体生成者要在')
-      assert.ok(all.some((a) => builtinKindOf(a) === 'memory-tidy'), '记忆整理者要在')
-      assert.ok(all.some((a) => builtinKindOf(a) === 'drafter'), '起草者要在')
+      for (const [kind, label] of [
+        ['drafter', '起草者'],
+        ['memory-tidy', '记忆整理者'],
+        ['agent-maker', '智能体生成者'],
+        ['workflow-maker', '编排生成者'],
+      ] as const) {
+        assert.ok(all.some((a) => builtinKindOf(a) === kind), `${label}要在`)
+      }
+    })
+  })
+
+  test('★★★ 启动对账日志**逐项覆盖**每个内置岗位（漏一个就红）', async () => {
+    /*
+     * ★ 2026-11（D144）：「编排生成者」被建出来时**一行日志都没有**——它会话式地
+     *   凭空出现（使用者改过的指令不会被覆盖，但"平台刚建/刚修了它"这件事该说一声）。
+     *   这条判据按 `ensureBuiltinAgents()` 的**返回键**逐项核对日志清单，
+     *   以后再加一个内置岗位、忘了加日志，当场红。
+     */
+    await withStore(async (store) => {
+      const result = await ensureBuiltinAgents(store, WS)
+      const rows = builtinAccountingRows(result)
+      const logged = new Set(rows.map((r) => r[1]))
+      for (const [key, value] of Object.entries(result)) {
+        assert.ok(logged.has(value), `日志清单里缺了 ${key}（新增内置岗位要加一行）`)
+      }
+      assert.equal(rows.length, Object.keys(result).length, '清单条数要等于内置岗位数')
     })
   })
 })
