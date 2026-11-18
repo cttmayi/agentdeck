@@ -127,6 +127,23 @@
 > scoped 样式），不是手抄一份——`tests/ui-style.test.ts` 有一条判据盯着它：
 > 真文件改了而范例没同步 ⇒ `pnpm run check` 变红。
 
+#### 2.6.0 外层网格：三列，中间那个把手不手写
+
+```svelte
+<div class="split-layout" data-list-key="xxx" data-list-label={$t('shell.resizeList')} use:listGrip>
+  <!-- 列表栏（ListPane） -->
+  <!-- ★ 这里的位置是**把手**：由 `use:listGrip` 动作自己插进来，模板里不要手写 -->
+  <!-- 详情栏（MainArea） -->
+</div>
+```
+
+`.split-layout` 是**三列**：`列表 | 把手 | 详情`（`var(--list-w) var(--grip-w) minmax(0,1fr)`）。
+`.split-grip` **不要手写**——`lib/list-grip.ts` 会插一个，手写第二个会叠在同一格里。
+
+⚠️ **漏掉把手 = 详情栏掉进第 2 列（6px 宽）**，整块主区看着像空的（2026-11 这份范例的
+第一版就是这么错的，而且"两栏并排"还量得对——因为只比了左沿坐标，没比宽度）。
+可用 Svelte 动作的页面不会踩这个坑；手写 HTML 的演示页必须自己补一个。
+
 #### 2.6.1 骨架（结构层面：一行都不许自己写）
 
 ```svelte
@@ -307,6 +324,10 @@ if (!(await askConfirm({ ... }))) return
 - **渲染**：`pnpm run probe:layout` 的 `列表栏骨架（D61）` / `行内细节（D65）` 两组，
   采样页表是 `run.mjs` 顶部的 `LIST_PAGES`。**新增列表页必须往那张表里加一行**，
   否则它只有自己写给自己的判据（= 自证），那一整类缺陷就抓不到了。
+- **范例页自己也会量**：`list-page-demo.html` 顶部有一条自检（17 项，加载时在浏览器里真的量一遍——
+  两栏并排**且详情栏够宽**、栏头 51px 无标题、`ul` 缩进 0/符号 none/行距 4、行高底线 64、
+  长标题单行裁切、正文自滚、栏脚贴底、无横向溢出）。不通过就红着脸写在页面最上面，
+  不用等人看出来。
 - 两组判据量的都是**等式**（五页互相相等）：栏头高 / 行盒 / hover 底色 /
   行内标题字号字重 / 徽标形状，加上两条较新的等式：
   - `skeleton.listBox`：`ul` 的 `padding-left` = 0、`list-style` = none、行距 4px、

@@ -2437,7 +2437,7 @@ a > button { width: 100%; }
       .demo-toolbar .demo-spacer { flex: 1; }
       /* 产品的一屏：这里是唯一"假"的一层——把 shell 装进一个框里好截图 */
       .demo-screen {
-        height: 34rem; overflow: hidden; position: relative;
+        height: 52rem; overflow: hidden; position: relative;
         border: 1px solid var(--line-strong); border-radius: var(--radius);
         box-shadow: var(--shadow-2); background: var(--bg);
       }
@@ -2525,6 +2525,9 @@ a > button { width: 100%; }
         <code>docs/design/ui-style.md</code> §2.6。
       </p>
 
+      <!-- 自检条：加载后在浏览器里**真的量一遍**（量法与探针同一套）。不通过就红着脸写在最上面 -->
+      <div id="demo-selfcheck" class="notice" role="status" aria-live="polite">正在自检…</div>
+
       <div class="demo-toolbar">
         <button type="button" class="btn btn--secondary btn--sm" id="demo-pins-toggle">隐藏标注编号</button>
         <button type="button" class="btn btn--secondary btn--sm" id="demo-empty-toggle">看右栏空态</button>
@@ -2561,6 +2564,12 @@ a > button { width: 100%; }
           </nav>
 
           <main class="main">
+            <!--
+              ⚠️ 网格是 **三列**：`列表 | 把手 | 详情`。那个 `.split-grip` 在产品里由
+                 `use:listGrip` 动作**插进来**（`lib/list-grip.ts`），模板里不要手写——
+                 但演示页没有 Svelte 动作，所以这里照它插进来的样子写一个。
+                 **漏了它，详情栏会掉进第 2 列（6px 宽）**——整块主区看着像空的。
+            -->
             <section class="split-layout with-detail">
               <!-- ─────────── 左栏：ListPane（计数 + 搜索 + 五态）─────────── -->
               <section class="pane list-pane">
@@ -2619,6 +2628,8 @@ a > button { width: 100%; }
                   </ul>
                 </div>
               </section>
+
+              <button type="button" class="split-grip" role="separator" aria-orientation="vertical" aria-label="拖动调整列表宽度"></button>
 
               <!-- ─────────── 右栏：MainArea（栏头 + 正文 + 栏脚 + 空态）─────────── -->
               <!--
@@ -2922,6 +2933,60 @@ a > button { width: 100%; }
 
     <script>
 
+      /*
+       * ══════════════════════════════════════════════════════════════════
+       * 页内自检：把"这一屏该成立的事"在浏览器里**真的量一遍**
+       * ══════════════════════════════════════════════════════════════════
+       *
+       * 为什么要有它：2026-11 这一份范例**第一版就是错的**——`.split-layout` 是三列网格
+       * （列表 | 把手 | 详情），而把手由产品里的 `use:listGrip` 动作**插进来**；演示页
+       * 没有那个动作，我漏写了把手 ⇒ 详情栏掉进第 2 列（6px 宽），整块主区看着像空的。
+       * 当时我"量过"says sideBySide=true（只比了左沿坐标）——**坐标对不代表栏目有宽度**。
+       * 所以这里把宽度也量上，并且**写在页面上**：错了当场红，不用等人看出来。
+       */
+      function selfCheck() {
+        const q = (sel) => document.querySelector(sel)
+        const qa = (sel) => [...document.querySelectorAll(sel)]
+        const R = (el) => (el ? el.getBoundingClientRect() : null)
+        const C = (el) => (el ? getComputedStyle(el) : null)
+        const rows = qa('.pane-body > ul.list-stack > .list-row')
+        const body = q('.detail-pane > .pane-body.detail-scroll')
+        const foot = q('.detail-pane > .main-panel-foot')
+        const longTitle = qa('.demo-title').find((t) => t.textContent.includes('特别长'))
+        const checks = [
+          ['两栏并排', (R(q('.detail-pane'))?.left ?? 0) > (R(q('.list-pane'))?.left ?? 0) + 40],
+          ['详情栏够宽（≥320px）', (R(q('.detail-pane'))?.width ?? 0) >= 320],
+          ['把手在中间且很窄（≤10px）', (R(q('.split-grip'))?.width ?? 99) <= 10],
+          ['栏头带 51px', Math.round(R(q('.list-pane > .pane-head'))?.height ?? 0) === 51],
+          ['栏头带没有标题', !q('.list-pane > .pane-head h2')],
+          ['搜索框在栏头里', !!q('.list-pane > .pane-head input')],
+          ['行容器 ul 缩进 0', C(q('.pane-body > ul.list-stack'))?.paddingLeft === '0px'],
+          ['行容器没有项目符号', C(q('.pane-body > ul.list-stack'))?.listStyleType === 'none'],
+          [
+            '行距 4px',
+            rows.length > 1 &&
+              Math.round(R(rows[1]).top - R(rows[0]).bottom) === 4,
+          ],
+          ['行高底线 64px', C(rows[0])?.minHeight === '64px'],
+          ['长标题被裁成一行', !!longTitle && longTitle.scrollWidth > longTitle.clientWidth + 1],
+          ['正文有高度（≥200px）', Math.round(R(body)?.height ?? 0) >= 200],
+          ['正文是自滚容器（overflow-y: auto）', C(body)?.overflowY === 'auto'],
+          ['正文内容没有被裁掉（首屏装得下）', !!body && body.scrollHeight <= R(body).height + 2],
+          ['栏脚贴住面板底', !!foot && Math.abs(R(foot).bottom - R(q('.detail-pane')).bottom) < 2],
+          ['栏脚只有一颗主操作', qa('.detail-pane > .main-panel-foot .btn--primary').length === 1],
+          ['没有横向溢出', document.documentElement.scrollWidth <= window.innerWidth + 1],
+        ]
+        const bad = checks.filter(([, ok]) => !ok).map(([name]) => name)
+        const box = q('#demo-selfcheck')
+        if (!box) return
+        box.className = 'notice ' + (bad.length === 0 ? 'good' : 'bad')
+        box.innerHTML =
+          bad.length === 0
+            ? '<b>自检通过 ' + checks.length + '/' + checks.length + '</b>：两栏并排且详情够宽、栏头 51px 无标题、' +
+              'ul 无缩进 / 无符号 / 行距 4px、行高底线 64px、长标题单行裁切、正文自滚、栏脚贴底、无横向溢出。'
+            : '<b>自检未通过（' + bad.length + ' 项）</b>：' + bad.join('、')
+      }
+
       // 演示工具：标注编号显示/隐藏、亮暗色切换（产品里由 lib/theme.ts 打在 <html> 上）
       const pins = () => document.querySelectorAll('.demo-pin');
       let pinsOn = true;
@@ -2946,6 +3011,8 @@ a > button { width: 100%; }
         root.setAttribute('data-theme', dark ? 'light' : 'dark');
         e.currentTarget.textContent = dark ? '切到暗色' : '切到亮色';
       });
+
+      selfCheck()
 
       // 点图例里的编号 ⇒ 闪一下对应元素（找得到就够，别做成高亮框抢视线）
       document.querySelectorAll('.demo-legend li').forEach((li, i) => {
