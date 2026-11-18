@@ -139,6 +139,8 @@ import type { WebTextId } from '@agentdeck/i18n'
    */
   $: selected = list.find((x) => x.id === selectedId) ?? null
   $: detailOpen = $schedForm !== null || selected !== null
+  // 只有「选中了某条、且不在表单里」时栏头才有副题；否则不传 sub，栏头不多一行空白。
+  $: showSub = selected !== null && $schedForm === null
   $: detailTitle = $schedForm
     ? $t($schedForm.mode === 'create' ? 'schedules.createTitle' : 'schedules.updateTitle')
     : (selected?.name ?? '')
@@ -565,6 +567,21 @@ import type { WebTextId } from '@agentdeck/i18n'
     现在换成标准控件 `MainArea`：窄屏返回、空态、滚动容器都由它给；没选中任何一条时
     右栏说的是「选一条看详情」，不再是"还没有定时任务"（那是假话——左栏明明列着）。
   -->
+  {#snippet schedSub()}
+    {@const s = selected}
+    {#if s !== null}
+      <span class="pill">{s.humanCron}</span>
+      {#if s.enabled && s.nextRunAt !== null}
+        <span class="muted">{$t('schedules.next')} {relativeTime(s.nextRunAt, Date.now())}</span>
+      {:else if !s.enabled}
+        <span class="faint">{$t('schedules.disabled')}</span>
+      {/if}
+      {#if s.triggerCount > 0}
+        <span class="muted">{$t('schedules.triggeredCount', { n: s.triggerCount })}</span>
+      {/if}
+    {/if}
+    {/snippet}
+
   <MainArea
     empty={!detailOpen}
     emptyTitle={$t('schedules.pickHint')}
@@ -573,21 +590,12 @@ import type { WebTextId } from '@agentdeck/i18n'
     onBack={closeDetail}
     title={detailTitle}
     bodyClass="detail-scroll"
+    sub={showSub ? schedSub : undefined}
   >
-    {#snippet sub()}
-      {@const s = selected}
-      {#if s !== null && !$schedForm}
-        <span class="pill">{s.humanCron}</span>
-        {#if s.enabled && s.nextRunAt !== null}
-          <span class="muted">{$t('schedules.next')} {relativeTime(s.nextRunAt, Date.now())}</span>
-        {:else if !s.enabled}
-          <span class="faint">{$t('schedules.disabled')}</span>
-        {/if}
-        {#if s.triggerCount > 0}
-          <span class="muted">{$t('schedules.triggeredCount', { n: s.triggerCount })}</span>
-        {/if}
-      {/if}
-    {/snippet}
+    <!--
+      2026-11（D139）：`sub` **只在真有内容时传**（看 `showSub`）——给一个「表单态什么
+      都不渲染」的 snippet，栏头会多出一行空白（标题看着偏高、按钮离标题更远）。
+    -->
 
     {#snippet actions()}
       {@const s = selected}
@@ -851,7 +859,6 @@ import type { WebTextId } from '@agentdeck/i18n'
           {#if formError}
             <div class="notice bad grid-full">{formError}</div>
           {/if}
-
 
         </div>
     {:else if selected !== null}

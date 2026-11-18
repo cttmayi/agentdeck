@@ -1639,7 +1639,6 @@
 
 
 <MainArea
-  headClass="detail-head"
   backLabel={backLabel}
   onBack={onback}
   title={$t('crystallize.title')}

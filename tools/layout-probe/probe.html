@@ -3600,6 +3600,57 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           return { 文案: t, 说选一条: !!t && t.includes('选一条'), 说没有: !!t && t.includes('还没有') }
         })()
 
+        /*
+         * ══════════════ 栏头：副题空着时**不许**多占一行（D139）══════════════
+         *
+         * 起因（使用者："主区的 Title 细节有问题，和 demo 不同，默认是 2 行"）：`MainArea`
+         * 的栏头原来把 h2 与 `.detail-sub` 当两个网格子项、动作靠 `grid-row: 1 / span 2`
+         * 跨行对齐 ⇒ **副题有没有内容会改变栏头行数与按钮的垂直位置**：空副题时栏头多出
+         * 一行空白（实测 59px），标题看着偏高、动作离标题更远。
+         * 现在：标题与副题包进 `.detail-head-main` 一个格子；调用处**只在有内容时传 sub**。
+         *
+         * 量法只用**新建表单**这一屏（顶栏那颗按钮就够，不依赖任何夹具）：
+         * 栏头必须是**单行**（≤52px：上下内距 16+12 + 行高 22 = 50）、不许有 `.detail-sub`、
+         * 标题与动作同一水平中线。
+         */
+        facts['schedules.headFormSingleRow'] = await (async () => {
+          const newBtn = [...d().querySelectorAll('.topbar .page-actions button')].find(
+            (b) => (text(b) ?? '').includes('新建'),
+          )
+          if (!newBtn) {
+            errors.push('headFormSingleRow：顶栏没有「新建」（这一条量不到）')
+            return null
+          }
+          click(newBtn)
+          const shown = await until(
+            () => (d().querySelector('.detail-pane .detail-head h2')?.textContent ?? '').includes('新建'),
+            60,
+          )
+          if (!shown) {
+            errors.push('headFormSingleRow：点了「新建」栏头没出现')
+            return null
+          }
+          await wait(200)
+          const head = d().querySelector('.detail-pane .detail-head')
+          const h2 = head.querySelector('h2')
+          const acts = head.querySelector('.detail-actions')
+          const hr = h2.getBoundingClientRect()
+          const ar = acts.getBoundingClientRect()
+          const out = {
+            栏头类: head.className,
+            用detailHead: head.classList.contains('detail-head'),
+            栏头高: Math.round(head.getBoundingClientRect().height),
+            有副题: !!head.querySelector('.detail-sub'),
+            标题动作中线差: Math.round((hr.top + hr.height / 2) - (ar.top + ar.height / 2)),
+          }
+          const cancel = [...(head.querySelectorAll('.detail-actions button') ?? [])].find(
+            (b) => (text(b) ?? '').trim() === '取消',
+          )
+          if (cancel) click(cancel)
+          await wait(200)
+          return out
+        })()
+
         // ── 编排（2026-11 立项；2026-11 D133 按「页面基本规范」重排之后重量）──
         //
         // 这一页曾经是**自己一套**：左栏栏头写着大标题 + 一颗「新建」、右栏手写

@@ -21,11 +21,27 @@
    */
   let {
     head, // Snippet 栏头完全接管（聊天改名形态用；给了就忽略结构化栏头 props）
-    headClass = 'pane-head', // 结构化栏头 wrapper 的 class（任务传 detail-head）
+    /**
+     * 结构化栏头 wrapper 的 class。
+     *
+     * ⚠️ 2026-11（D139）：默认值原来是 `'pane-head'`，而 `.detail-head` 那一整套（两列网格、
+     *    动作轨道、标题省略号）都挂在 `.detail-head` 上 ⇒ **没显式传这个 prop 的页面
+     *    一直在用 `.pane-head`**（标题与动作不是左右两列、动作没有轨道），看起来与范例
+     *    那一屏完全不同。使用者报的就是这个："主区的 Title 细节有问题，和 demo 不同"。
+     *    现在默认 `'detail-head'`：结构化栏头的默认长相就是那一套；要别的形状再显式传
+     *    （任务页的新建态就是 `'detail-head create-head'`）。
+     */
+    headClass = 'detail-head',
     backLabel, // 返回按钮文案（给了才显示）
     onBack, // () => void 返回回调
     title, // string 栏头标题（h2）
-    sub, // Snippet 栏头副题（.detail-sub 里的徽标/元信息）
+    /**
+     * 栏头副题（`.detail-sub` 里的徽标 / 元信息）。
+     *
+     * ⚠️ **只在真有内容时传**：给一个"有时什么都不渲染"的 snippet，栏头会多出一行空白
+     *    （D139 的缺陷）。条件渲染要写在调用处：`sub={hasSub ? subSnippet : undefined}`。
+     */
+    sub,
     actions, // Snippet 栏头右侧动作（删除/重命名等）
     empty = false, // 是否空态
     emptyContent, // Snippet 空态内容（各视图空态文案不同，给了优先）
@@ -62,12 +78,21 @@
           {backLabel}
         </button>
       {/if}
-      {#if title}
-        <h2>{title}</h2>
-      {/if}
-      {#if sub}
-        <p class="detail-sub">{@render sub()}</p>
-      {/if}
+      <!--
+        ★ 2026-11（D139）：标题与副题包进**同一个格子**（`.detail-head-main`）。
+        改之前它们是两个网格子项，`.detail-actions` 又靠 `grid-row: 1 / span 2` 跨两行对齐
+        ——于是"副题有没有内容"会改变整个栏头的行数与按钮的垂直位置（空副题 ⇒ 栏头
+        多出一行空白，标题看着偏高、按钮离标题更远）。
+        现在动作对齐的是**文字块**，与副题几行无关。
+      -->
+      <div class="detail-head-main">
+        {#if title}
+          <h2>{title}</h2>
+        {/if}
+        {#if sub}
+          <p class="detail-sub">{@render sub()}</p>
+        {/if}
+      </div>
       <!--
         ★ 分批第 197 批：动作渲进一个**有名字的容器**（`.detail-actions`）。
         改之前它是一串裸元素，而 `.detail-head` 是块级流——于是"页头动作"永远掉在标题与副题

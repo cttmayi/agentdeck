@@ -1218,19 +1218,30 @@ hr {
   white-space: nowrap;
 }
 
+/* 标题 + 副题：**同一个格子**（D139 起由 `MainArea` 包一层 `.detail-head-main`）。
+   为什么改：原来 h2 与 .detail-sub 是两个网格子项、动作靠 `grid-row: 1 / span 2` 跨行
+   对齐——于是"副题有没有内容"会改变栏头的行数与按钮的垂直位置：副题空着时栏头多出
+   一行空白，标题看着偏高、按钮离标题更远（实测单行 50px 的房间被撑成 59px）。 */
+.detail-head .detail-head-main {
+  grid-column: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 /* 副题：一行、超了省略——它是最先该让位的东西（动作与标题都比它重要） */
 .detail-head .detail-sub {
-  grid-column: 1;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-/* 动作：右列、跨两行、永远不换到自己那一行上 */
+/* 动作：右列、与**文字块**垂直居中（不跨行数——它与副题几行无关） */
 .detail-head .detail-actions {
   grid-column: 2;
-  grid-row: 1 / span 2;
+  align-self: center;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -1362,9 +1373,13 @@ hr {
   white-space: nowrap;
 }
 
-/* 窄屏的返回按钮独占第一行 */
+/* 窄屏的返回按钮独占第一行。
+   ⚠️ D139：`justify-self: start` + 不拉满——拉满时窄屏栏头会变成"一条整宽横条 +
+   标题一行 + 副题一行 + 右侧动作"，实测 153px 高，按钮还离文字很远。 */
 .detail-head .back-to-list {
   grid-column: 1 / -1;
+  justify-self: start;
+  width: auto;
 }
 
 .detail-sub {
