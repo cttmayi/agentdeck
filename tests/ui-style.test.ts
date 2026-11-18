@@ -228,6 +228,58 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
     assert.deepEqual(bad, [], '行容器的重置只能有一处（app.css `.list-stack`）')
   })
 
+  test('★★ 样式范例（docs/design/list-page-demo.html）里嵌的 CSS 必须与真文件逐字相同', async () => {
+    /*
+     * ★ 2026-11（D136）：使用者要一份"以后照着抄"的 HTML 范例。范例若像设计稿那样
+     * **手抄一份令牌**，它迟早与真文件漂开——使用者照着它抄反而抄进旧样式（这个仓库
+     * 已经栽过"三页各写一份同样的六行 CSS"）。
+     *
+     * 所以范例里的第一段 `<style>` 是**从真文件逐字嵌入**的（`app.css` + `ListRow` /
+     * `ListPane` 的 scoped 样式），这条判据盯着它：真文件改了而范例没重新生成 ⇒ 红。
+     * 重新生成的办法写在范例文件头（把真文件内容贴进那两对 `==== BEGIN/END ====`
+     * 之间即可；`BEGIN`/`END` 标记本身不许改）。
+     */
+    const demo = await readFile(join(REPO_ROOT, 'docs/design/list-page-demo.html'), 'utf8')
+    const grab = (begin: string, end: string): string => {
+      const i = demo.indexOf(begin)
+      const j = demo.indexOf(end)
+      assert.ok(i >= 0 && j > i, `范例里找不到标记：${begin}`)
+      return demo.slice(i + begin.length, j)
+    }
+    const same = (a: string, b: string): boolean =>
+      a.replace(/\r\n/g, '\n').trim() === b.replace(/\r\n/g, '\n').trim()
+
+    const appCss = await readFile(join(REPO_ROOT, APP_CSS), 'utf8')
+    const demoApp = grab(
+      '/* ==== BEGIN app.css（packages/ui/src/styles/app.css，逐字嵌入，别手改）==== */',
+      '/* ==== END app.css ==== */',
+    )
+    assert.ok(
+      same(appCss, demoApp),
+      '范例里的 app.css 与真文件不一致——把真文件重新贴进那对 BEGIN/END 标记之间',
+    )
+
+    const scopedOf = async (rel: string): Promise<string> => {
+      const text = await readFile(join(REPO_ROOT, rel), 'utf8')
+      const m = /<style>\n([\s\S]*)\n<\/style>/.exec(text)
+      assert.ok(m, `${rel} 里找不到 <style> 块`)
+      return m[1]!
+    }
+    const demoScoped = grab(
+      '/* ==== BEGIN 标准控件里的 scoped 样式（真实页面里免费拿到，这里只为了让 demo 长得一样）==== */',
+      '/* ==== END 标准控件 scoped 样式 ==== */',
+    )
+    for (const rel of [
+      'apps/web/src/components/ListRow.svelte',
+      'apps/web/src/components/ListPane.svelte',
+    ]) {
+      assert.ok(
+        demoScoped.includes((await scopedOf(rel)).trim()),
+        `范例里缺了 ${rel} 的 scoped 样式（或与真文件不一致）——重新贴一次`,
+      )
+    }
+  })
+
   test('`.small` 已改名 `.fs-xs`：不许再出现在 class 里', async () => {
     const files = await load()
     const bad: string[] = []
