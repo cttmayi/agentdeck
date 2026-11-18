@@ -381,7 +381,7 @@
           {/snippet}
         </ListRow>
       {/snippet}
-      <ul class="agent-list">
+      <ul class="list-stack agent-list">
         {#if builtinAgents.length > 0}
           <li class="agent-group-head-wrap">
             <button
@@ -546,13 +546,10 @@
     list-style: none;
   }
 
+  /* ⚠️ 2026-11：重置 + 行距在全局 `.list-stack`（markup：`class="list-stack
+     agent-list"`）。这里只留**这一页的形状差异**：内置/自建两段之间要留白。 */
   .agent-list {
-    list-style: none;
-    margin: 0 0 var(--sp-5);
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-1);
+    margin-bottom: var(--sp-5);
   }
 
   /**

@@ -177,6 +177,57 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
     )
   })
 
+  test('★★ 行容器只有一处定义：用 ListRow 的页面 `<ul>` 必须带 `list-stack`，且不许自己再写一份 reset', async () => {
+    /*
+     * ★ 2026-11（D136）：这条判据是"编排列表整列右移 40px"那次的产物。
+     *
+     * 起因不是有人写错了值，而是**同一件事被写了两遍**：定时任务页把 `ul` 的 reset
+     * 写进 `Schedules.svelte` 的 scoped `<style>`（修它自己"左边空出一大截"那次），
+     * 而 Svelte 的 scoped 样式**不跨文件**——编排页用了同一个类名 `list-stack`，
+     * 照样吃浏览器默认的 `padding-left: 40px`。
+     *
+     * 所以从结构上钉死：**行容器**（承载 `ListRow` 的那个 `<ul>`）的样式只能在
+     * `app.css` 的 `.list-stack` 里，页面只能写 `class="list-stack …"`。
+     * 这条能拦住"新列表页忘了重置 / 又抄一份"，而那正是探针量不到的：探针量的是
+     * **这一次**的页面长什么样，抓不到"下一个页面会不会犯同一个错"。
+     *
+     * ⚠️ 只扫**用 ListRow 的文件**：`.mat-list` / `.var-list` / `.history-list` 那些是
+     *    面板内的小列表，不是行容器（它们各自的形状是内容的一部分）。
+     */
+    const files = await load()
+    const bad: string[] = []
+    /** 注释行不算（注释里写 `<ul>` 是在讲历史，这个仓库到处都是）。 */
+    const isComment = (t: string): boolean =>
+      t.startsWith('*') || t.startsWith('/*') || t.startsWith('//') || t.startsWith('<!--')
+    for (const [file, text] of files) {
+      if (!file.endsWith('.svelte')) continue
+      if (!text.includes('<ListRow')) continue
+      for (const [i, line] of text.split('\n').entries()) {
+        // ① 承载 ListRow 的 <ul> 必须带 list-stack
+        if (/<ul\b/.test(line) && !isComment(line.trim())) {
+          const cls = /class="([^"]*)"/.exec(line)
+          const names = (cls?.[1] ?? '').split(/\s+/).filter(Boolean)
+          if (!names.includes('list-stack')) {
+            bad.push(`${file}:${i + 1}  ${line.trim()}  ⇒ 用 ListRow 的 <ul> 必须带 list-stack`)
+          }
+        }
+      }
+      // ② 同一个文件里不许再为列表容器声明 reset（选择器指 ul 或 *-list）
+      for (const rule of rulesOf(text)) {
+        if (rule.selector.startsWith('@')) continue
+        const isListContainer =
+          /(^|[\s,>])ul\b/.test(rule.selector) || /-list(?:\.|\s|,|$)/.test(rule.selector)
+        if (!isListContainer) continue
+        if (/(^|[\s;{])list-style\s*:/.test(rule.body)) {
+          bad.push(
+            `${file}:${rule.line}  ${rule.selector} ⇒ 列表容器的 reset 只在 app.css 的 .list-stack 里`,
+          )
+        }
+      }
+    }
+    assert.deepEqual(bad, [], '行容器的重置只能有一处（app.css `.list-stack`）')
+  })
+
   test('`.small` 已改名 `.fs-xs`：不许再出现在 class 里', async () => {
     const files = await load()
     const bad: string[] = []

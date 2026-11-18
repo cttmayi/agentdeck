@@ -10293,13 +10293,57 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         {
           const sk = {
             headH: {}, searchInHead: {}, rowH: {}, delInset: {}, titleInHead: {},
-            title: {}, chip: {}, rowBox: {}, hover: {},
+            title: {}, chip: {}, rowBox: {}, hover: {}, listBox: {}, rowMetrics: {},
           }
+          /**
+           * ★ 2026-11（D136）：采样页从 **3 页扩到 5 页**——加了定时任务与编排。
+           *
+           * ⚠️ 这是「编排列表风格不对」那次的根因：这一节的采样表是 D61–D66
+           *   统一时存在的那三页，之后**新增的列表页从来没进过这张表**，于是
+           *   "新页面是否与邻居一致"根本没有判据——新页面只有我为它**同时写的**
+           *   自有判据（例如 `workflows.row` 量"两行结构/标题单行/行高≥64"，
+           *   三条全过，而整行缩进 40px 它看不见）。自己写判据验证自己写的页面
+           *   等于自证。往后**任何新增的列表页都必须先进这张表**。
+           */
           const skPages = [
             { key: 'chat', hash: '#/chat', rows: '.conv-row', titleSel: '.conv-title', chipSel: null },
             { key: 'tasks', hash: '#/tasks', rows: '.task-row', titleSel: '.task-title', chipSel: '.stage-tag' },
             { key: 'agents', hash: '#/agents', rows: '.agent-row', titleSel: '.agent-line strong', chipSel: '.badge' },
+            { key: 'schedules', hash: '#/schedules', rows: '.sched-row', titleSel: '.sched-title', chipSel: null },
+            { key: 'workflows', hash: '#/workflows', rows: '.wf-row', titleSel: '.wf-title', chipSel: '.badge' },
           ]
+          /*
+           * ⚠️ 骨架/行内细节对比要求**每页都有行**。定时任务那一段的夹具是"量完就删"的，
+           *   到这里列表已经空了——第一版没补，于是 `schedules` 的 rowH / listBox /
+           *   title / rowBox 全是"没量到"，而"没量到"在判据里等于**假绿**（曾经就这么
+           *   绿过：`workflows` 那一页缩进 40px、行距 0，五页对比里它根本不参与）。
+           *   所以这里造一条，量完删掉。
+           */
+          const skSchedIds = []
+          {
+            const execId = new URLSearchParams(location.search).get('chainExecutor') ?? ''
+            if (!execId) {
+              errors.push('骨架对比：拿不到夹具执行者 id（schedules 那几页会没量到）')
+            } else {
+              // 两条：一条量行距（行距要两条紧邻的兄弟行才量得到），另一条当备份
+              for (const name of ['探针骨架夹具一', '探针骨架夹具二']) {
+                const res = await f.contentWindow.fetch('/api/schedules', {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({
+                    name,
+                    cron: '0 9 * * *',
+                    executorType: 'agent',
+                    executorId: execId,
+                    taskText: 'x',
+                  }),
+                })
+                if (res.status === 201) skSchedIds.push((await res.json()).id)
+                else errors.push(`骨架对比：造定时任务夹具失败（HTTP ${res.status}）`)
+              }
+            }
+          }
+
           for (const pg of skPages) {
             f.contentWindow.location.hash = pg.hash
             await until(() => f.contentWindow.location.hash === pg.hash, 40)
@@ -10360,6 +10404,26 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             const first = d().querySelector('.list-pane ' + pg.rows)
             sk.rowH[pg.key] = need(`列表行高（${pg.key}）`, () =>
               first ? Math.round(first.getBoundingClientRect().height) : null)
+            /*
+             * ★ 2026-11（D136）：行高的**令牌**（`min-height`）与"页内是否恒定"。
+             *
+             * 为什么不能只比行高：`--list-row-min-h` 的注释写着"内容更高时跟随内容——
+             * 统一的是这条底线，不是把内容压扁"。编排行的辅助信息里带一枚徽标，
+             * 实际高度 67px（聊天 64 / 智能体 65），那是**内容差异**不是缺陷；
+             * 而"令牌不一致"（比如某页把底线改成 56px）才是缺陷。所以拆成两条量：
+             *   · 底线：每页 `min-height` 必须 = 64px（令牌一致）；
+             *   · 恒定：同一页内任意两行高度差 ≤1px（列表是用来扫的，节奏不能抖）。
+             */
+            sk.rowMetrics[pg.key] = need(`行高令牌（${pg.key}）`, () => {
+              const rows = [...d().querySelectorAll('.list-pane ' + pg.rows)]
+              if (rows.length === 0) return null
+              const hs = rows.map((r) => Math.round(r.getBoundingClientRect().height))
+              return {
+                minH: getComputedStyle(rows[0]).minHeight,
+                spread: Math.max(...hs) - Math.min(...hs),
+                n: hs.length,
+              }
+            })
             // ── 行内细节（D65）：标题 / 徽标 / 行容器 / hover 三页统一 ──
             sk.title[pg.key] = need(`行内标题（${pg.key}）`, () => {
               const t = first?.querySelector(pg.titleSel)
@@ -10376,6 +10440,37 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             sk.rowBox[pg.key] = need(`行容器（${pg.key}）`, () => {
               const c = first ? getComputedStyle(first) : null
               return c ? { align: c.alignItems, gap: c.gap } : null
+            })
+            /*
+             * ★★ 2026-11（D136）：**行容器 `ul` 自身**的三件事——这一条是"编排列表风格
+             *   不对"那次的判据。以前量的是行（`.list-row`）里的东西，而行**被 ul 的
+             *   默认内距整体推开**这件事不在任何判据里：
+             *     · 缩进：`<ul>` 没重置 ⇒ 浏览器默认 `padding-left: 40px`，
+             *       整列右移 40px、行宽少 40px（定时任务与编排各犯过一次）；
+             *     · 行距：三个老页面是 `gap: var(--sp-1)`（4px），漏了就是 0；
+             *     · 行左沿：以 `.pane-body` 的**内容左缘**为基准，行应当从 0 开始
+             *       （pane 自己的内距不算——各页内距不同是合理的，缩进不是）。
+             */
+            sk.listBox[pg.key] = need(`行容器 ul（${pg.key}）`, () => {
+              const ul = first?.closest('ul')
+              if (!ul) return null
+              const c = getComputedStyle(ul)
+              const bodyEl = ul.closest('.pane-body') ?? ul.parentElement
+              const bc = bodyEl ? getComputedStyle(bodyEl) : null
+              const bodyContentLeft =
+                bodyEl.getBoundingClientRect().left + parseFloat(bc?.paddingLeft ?? '0')
+              const rows = [...ul.querySelectorAll(pg.rows)]
+              // 行距只在"两条行是紧邻兄弟"时量（分组视图里中间会夹着组头，那样量不到）
+              const gap =
+                rows.length >= 2 && rows[0].nextElementSibling === rows[1]
+                  ? Math.round(rows[1].getBoundingClientRect().top - rows[0].getBoundingClientRect().bottom)
+                  : null
+              return {
+                padLeft: c.paddingLeft,
+                listStyle: c.listStyleType,
+                gap,
+                inset: Math.round(first.getBoundingClientRect().left - bodyContentLeft),
+              }
             })
             sk.hover[pg.key] = need(`行 hover 底色（${pg.key}）`, () => {
               // D66：三页行 hover 统一在标准控件 ListRow 的 `.list-row:hover` 里
@@ -10408,7 +10503,13 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               })
             }
           }
+          for (const id of skSchedIds) {
+            await f.contentWindow.fetch(`/api/schedules/${encodeURIComponent(id)}`, {
+              method: 'DELETE',
+            })
+          }
           Object.assign(facts, {
+            'skeleton.rowMetrics': sk.rowMetrics,
             'skeleton.headH': sk.headH,
             'skeleton.searchInHead': sk.searchInHead,
             'skeleton.rowH': sk.rowH,
@@ -10416,6 +10517,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             'skeleton.headsTitleless': sk.titleInHead,
             'skeleton.separatorHeights': sk.separatorHeights,
             'skeleton.separatorNoHint': sk.separatorNoHint,
+            'skeleton.listBox': sk.listBox,
             'rowdetail.title': sk.title,
             'rowdetail.chip': sk.chip,
             'rowdetail.rowBox': sk.rowBox,

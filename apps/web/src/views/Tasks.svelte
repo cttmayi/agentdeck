@@ -920,7 +920,7 @@
       {/snippet}
       {#snippet rows()}
         {#if viewMode === 'group'}
-          <ul class="task-list task-list--grouped">
+          <ul class="list-stack task-list task-list--grouped">
             {#each groups as g (g.key)}
               <li class="task-group" data-task-group={g.key}>
                 <button
@@ -946,7 +946,7 @@
                不再分「需要注意 / 其余」两拨（分组视图按来源分组、平铺按时间，
                两个视图都不再做"需注意置顶"）。行上该显示的警告（执行失败等）仍在
                每行的标签/提示里。 -->
-          <ul class="task-list">
+          <ul class="list-stack task-list">
             {#each staged as { issue, info } (issue.id)}
               {@render row(issue, info)}
             {/each}
@@ -1369,15 +1369,8 @@
      按钮"，`li` 才装得下），而 `ul` 自带 `padding-inline-start: 40px` 与圆点
      标记——不归零的话整列内容会**整体右移 40px 并多出一排圆点**（实测的表现
      就是"内容怎么靠右了"）。与聊天页 `.conv-list` 同一处理。 */
-  .task-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    /* D66：行距与聊天/智能体一致（原来 2px vs var(--sp-1)） */
-    gap: var(--sp-1);
-  }
+  /* ⚠️ 2026-11：重置 + 行距移到全局 `.list-stack`（markup：`class="list-stack
+     task-list"`）——六个列表页同一份，不再各写六行。 */
 
   /* ★ 整行可点 + 右侧独立删除按钮（与「智能体」「聊天」两栏同形）：
        `li` 容器里放主按钮（flex:1）+ 兄弟删除按钮。 */
@@ -1460,7 +1453,19 @@
     padding: 0 var(--sp-3) var(--sp-2);
     flex-wrap: wrap;
   }
-  .task-list--grouped .task-group { margin-bottom: var(--sp-2); }
+  /*
+   * ⚠️ 2026-11（D136）：分组视图里的行原来**没有行距**（0px），而平铺视图/聊天/智能体
+   *   都是 `var(--sp-1)`——因为 `.list-stack` 的 `gap` 只作用于它的**直接子项**，
+   *   而分组视图里那些子项是 `.task-group`，行在组内是普通块级堆叠。
+   *   结果：同一个列表，换个视图行与行就贴在一起（hover 框互相咬住）。
+   *   判据是探针 `skeleton.listBox`（五页行距都是 4px）。
+   */
+  .task-list--grouped .task-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    margin-bottom: var(--sp-2);
+  }
   .group-head {
     display: flex;
     align-items: center;

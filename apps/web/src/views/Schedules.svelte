@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte'
-  import ListRow from '../components/ListRow.svelte'
+  import ListPane from '../components/ListPane.svelte'
+import ListRow from '../components/ListRow.svelte'
   import PromptField from '../components/PromptField.svelte'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import {
@@ -127,6 +128,14 @@ import type { WebTextId } from '@agentdeck/i18n'
   $: executor = executorAgents.find((a) => a.id === formAgentId) ?? null
   $: executorName = executor?.name ?? null
   $: enabledCount = list.filter((s) => s.enabled).length
+  /*
+   * 搜索（D136）：栏头带的搜索框按**名字**过滤。
+   * ⚠️ 只按名字、不按 cron 人话：那一栏是"什么时候跑"，人搜它的时候多半在找
+   *    "那个每天跑的"，而他记得住的是名字。`emptyFiltered` 与 `empty` 分开说
+   *    （有东西但没搜到 vs 真的一条都没有）由 ListPane 负责。
+   */
+  let filter = ''
+  $: visible = list.filter((s) => s.name.toLowerCase().includes(filter.trim().toLowerCase()))
 
   // ── 新建 / 编辑 ──
   // ── 顶栏动作（与智能体/聊天/任务同款：主操作在顶栏 page-actions，
@@ -458,70 +467,73 @@ import type { WebTextId } from '@agentdeck/i18n'
   data-list-label={$t('shell.resizeList')}
   use:listGrip
 >
-  <!-- ══════════ 左栏：列表 ══════════ -->
-  <section class="pane list-pane">
-    <header class="pane-head">
-      <div>
-        <h2>{$t('schedules.listTitle')}</h2>
-        <p class="hint">{$t('schedules.enabledCount', { enabled: enabledCount, total: list.length })}</p>
-      </div>
-    </header>
-
-    <div class="pane-body">
-      {#if loading && list.length === 0}
-        <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
-        <div class="skeleton" style="width:70%"></div>
-      {:else if loadError}
-        <div class="notice bad">{loadError}</div>
-      {:else if list.length === 0}
-        <div class="empty">
-          <strong>{$t('schedules.empty')}</strong>
-        </div>
-      {:else}
-        <ul class="list-stack">
-          {#each list as s (s.id)}
-            <ListRow
-              rowClass="sched-row"
-              active={s.id === selectedId}
-              onclick={() => {
-                selectedId = s.id
-                closeForm()
-              }}
-            >
-              {#snippet children()}
-                <span class="sched-title">{s.name}</span>
-                <span class="sched-sub">
-                  <span class="sched-cron">{s.humanCron}</span>
-                  {#if s.enabled && s.nextRunAt !== null}
-                    <span class="sched-next">{$t('schedules.next')} {relativeTime(s.nextRunAt, Date.now())}</span>
-                  {:else if !s.enabled}
-                    <span class="faint">{$t('schedules.disabled')}</span>
-                  {/if}
-                  {#if s.lastTriggerAt !== null && s.records.length > 0}
-                    <span class="sched-last">
-                      {$t('schedules.last')} {relativeTime(s.lastTriggerAt, Date.now())}
-                      <span class="badge {recordBadgeClass(s.records[0]!.status)}">
-                        {$t(recordStatusKey(s.records[0]!.status))}
-                      </span>
+  <!-- ══════════ 左栏：列表（标准控件 ListPane：计数 + 搜索 + 五态）══════════ -->
+  <!--
+    ⚠️ 2026-11（D136）：这里原来是**手搭的栏头**——`<h2>所有定时任务</h2>` + 一行
+    「N 个启用 · 共 M 个」，既**没有搜索框**，栏头又比别的页高（84px vs 51px，
+    因为它走的是全局 `.pane-head` 的 padding 而不是 `.list-toolbar`）。
+    同一条规范（D61~D66：栏头带只有计数 + 搜索、不带标题、主操作在顶栏）在
+    编排页是照着重排的，这一页当时漏了——探针的跨页对比只量三页，量不到它
+    （理由写在 `tools/layout-probe/run.mjs` 的 `LIST_PAGES` 上）。
+  -->
+  <ListPane
+    countLabel={$t('schedules.enabledCount', { enabled: enabledCount, total: list.length })}
+    searchPlaceholder={$t('schedules.search')}
+    {filter}
+    onFilter={(v) => (filter = v)}
+    loading={loading && list.length === 0}
+    loadError={loadError}
+    empty={list.length === 0}
+    emptyTitle={$t('schedules.empty')}
+    emptyHint={$t('schedules.emptyHint')}
+    emptyFiltered={list.length > 0 && visible.length === 0}
+    emptyFilteredTitle={$t('schedules.emptyFiltered')}
+    emptyFilteredHint={$t('schedules.emptyFilteredHint')}
+  >
+    {#snippet rows()}
+      <ul class="list-stack">
+        {#each visible as s (s.id)}
+          <ListRow
+            rowClass="sched-row"
+            active={s.id === selectedId}
+            onclick={() => {
+              selectedId = s.id
+              closeForm()
+            }}
+          >
+            {#snippet children()}
+              <span class="sched-title">{s.name}</span>
+              <span class="sched-sub">
+                <span class="sched-cron">{s.humanCron}</span>
+                {#if s.enabled && s.nextRunAt !== null}
+                  <span class="sched-next">{$t('schedules.next')} {relativeTime(s.nextRunAt, Date.now())}</span>
+                {:else if !s.enabled}
+                  <span class="faint">{$t('schedules.disabled')}</span>
+                {/if}
+                {#if s.lastTriggerAt !== null && s.records.length > 0}
+                  <span class="sched-last">
+                    {$t('schedules.last')} {relativeTime(s.lastTriggerAt, Date.now())}
+                    <span class="badge {recordBadgeClass(s.records[0]!.status)}">
+                      {$t(recordStatusKey(s.records[0]!.status))}
                     </span>
-                  {/if}
-                </span>
-              {/snippet}
-              {#snippet action()}
-                <button
-                  type="button"
-                  class="switch {s.enabled ? 'on' : ''}"
-                  title={$t('schedules.enabledTitle')}
-                  onclick={() => void toggleEnabled(s)}
-                  aria-label={$t('schedules.enabledTitle')}
-                ></button>
-              {/snippet}
-            </ListRow>
-          {/each}
-        </ul>
-      {/if}
-    </div>
-  </section>
+                  </span>
+                {/if}
+              </span>
+            {/snippet}
+            {#snippet action()}
+              <button
+                type="button"
+                class="switch {s.enabled ? 'on' : ''}"
+                title={$t('schedules.enabledTitle')}
+                onclick={() => void toggleEnabled(s)}
+                aria-label={$t('schedules.enabledTitle')}
+              ></button>
+            {/snippet}
+          </ListRow>
+        {/each}
+      </ul>
+    {/snippet}
+  </ListPane>
 
   <!-- ══════════ 右栏 ══════════ -->
   <section class="pane-body schedules-main">
@@ -895,15 +907,10 @@ import type { WebTextId } from '@agentdeck/i18n'
 </div>
 
 <style>
-  /* 2026-11（使用者："列表 item 宽度不对，左边空出一大截"）：`ul.list-stack`
-     继承了浏览器默认 `padding-left: 40px`（别的页面的列表 ul 都显式重置了，
-     定时任务页漏了）——行从 40px 处开始、只占 ul 内容宽，左边空一大截。
-     与聊天页 `.conv-list` 同款重置：list-style none + margin/padding 0。 */
-  ul.list-stack {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
+  /* ⚠️ 2026-11：这里原来有一份 `ul.list-stack` 的页面内重置（"左边空出一大截"那次
+     修的）。Svelte 的 scoped 样式**不跨文件**，所以它只对定时任务页生效——编排页
+     用了同一个类名却照样吃浏览器默认的 40px 缩进。现在那份在 `app.css`（全局，
+     一处定义、六页照抄），页面里不许再写。 */
   .sched-title {
     /* ★ 310 批同款规矩（使用者报过"标题被拉成两行还带省略号"）：行内元素上
        overflow/text-overflow 不生效——必须 block + max-width:100%，省略号才有
@@ -917,7 +924,7 @@ import type { WebTextId } from '@agentdeck/i18n'
   }
   .sched-sub {
     display: flex;
-    gap: 0.6rem;
+    gap: var(--sp-2);
     font-size: var(--fs-xs);
     color: var(--text-faint);
     overflow: hidden;

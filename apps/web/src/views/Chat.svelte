@@ -994,7 +994,7 @@
     emptyFilteredHint={$t('chat.emptyFilteredHint')}
   >
     {#snippet rows()}
-      <ul class="conv-list">
+      <ul class="list-stack conv-list">
         {#each visibleConversations as conversation (conversation.id)}
           <ListRow
             rowClass="conv-row"
@@ -1606,14 +1606,9 @@
       选中框因此看起来"宽度不够"。去掉 max-width，让列表栏占满自己的列（与
       Agents/Tasks 同一档 416px）。
   */
-  .conv-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-1);
-  }
+  /* ⚠️ 2026-11：`.conv-list` 自己的重置**删了**（重置 + 行距现在只在
+     `app.css` 的 `.list-stack` 里，markup 是 `class="list-stack conv-list"`）。
+     六个列表页各写一份同样的六行 = 第六份迟早只改了一半。 */
 
   /* ★ 整行可点 + 右侧独立删除按钮（与「智能体」那栏的 `.agent-row` 同形）。
        按钮里套按钮是非法结构，所以容器是 `li`，里面放主按钮 + 兄弟删除按钮。 */

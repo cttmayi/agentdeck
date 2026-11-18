@@ -12,7 +12,12 @@ export const schedulesText = {
   'schedules.navHint': { zh: '到点自动跑', en: 'Run on a schedule' },
   'schedules.title': { zh: '定时任务', en: 'Schedules' },
   'schedules.titleHint': { zh: '触发的任务在「任务」页查看', en: 'Triggered tasks show up in Tasks' },
-  'schedules.listTitle': { zh: '所有定时任务', en: 'All schedules' },
+  // ⚠️ 2026-11（D136）：`schedules.listTitle`（「所有定时任务」）删了——栏头带
+  // 按 D61~D66 **不带标题**（页名已经在顶栏，栏标题与它一字不差时就是噪音）。
+  'schedules.search': { zh: '搜索任务名…', en: 'Search schedule names…' },
+  'schedules.emptyHint': { zh: '到点会自动跑起来的任务，都在这里。', en: 'Tasks that run on their own all live here.' },
+  'schedules.emptyFiltered': { zh: '没有匹配的定时任务', en: 'No matching schedules' },
+  'schedules.emptyFilteredHint': { zh: '换个关键词试试。', en: 'Try another keyword.' },
   'schedules.enabledCount': { zh: '{enabled} 个启用 · 共 {total} 个', en: '{enabled} enabled · {total} total' },
   'schedules.empty': { zh: '还没有定时任务。到点会自动跑起来的任务，从这里建。', en: 'No schedules yet. Tasks that run on their own start here.' },
   'schedules.next': { zh: '下次', en: 'Next' },

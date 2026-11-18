@@ -512,11 +512,18 @@
   }
   .wf-sub {
     display: flex;
+    align-items: center;
     gap: var(--sp-2);
     font-size: var(--fs-xs);
     color: var(--text-faint);
     overflow: hidden;
     white-space: nowrap;
+  }
+  /* ⚠️ 与定时任务页 `.sched-sub > *` 同一条教训（那一页量到过：长 cron 人话把行
+     撑宽、省略号不生效）：flex 子项默认 `min-width: auto` 不收缩，子项里那段
+     "更新于 x 分钟前"变长时会把整行顶出去。子项可收缩，截断才真的发生。 */
+  .wf-sub > * {
+    min-width: 0;
   }
   /* 模板卡：名字 + 一句话说明（使用者："给实际有用的编排"——那就要让人一眼看出它做什么） */
   .wf-tpl-row {

@@ -824,6 +824,26 @@ hr {
 
 /* ══════════════ 列表行壳（D66 标准控件 ListRow / ListPane）══════════════ */
 
+/* ── 行容器（`<ul class="list-stack">`）：**全局只此一份**（2026-11）──
+   重置 + 行距。缺了它，`<ul>` 吃浏览器默认 `padding-left: 40px` ⇒ 整列行右移
+   40px、行宽少 40px。这个缺陷在**两个页面各犯过一次**（定时任务："列表 item 宽度
+   不对，左边空出一大截"；编排：同样的问题，因为第一次的修法写进了
+   `Schedules.svelte` 的 scoped `<style>`，而 Svelte 的 scoped 样式**不跨文件**，
+   下一个用同名类的页面照样中招）。所以它现在在全局：一处定义、六页照抄。
+
+   ⚠️ 页面**不许**再写 reset（`list-style` / `padding` / `margin` 三行），也不许
+   自创 `.*-list` 做同一件事——`tests/ui-style.test.ts` 机器拦着。形状上的差异
+   （比如智能体页需要底部留白）用页面的类叠加上去，不覆盖这里。 */
+.list-stack {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  /* 行距与聊天/任务/智能体同一档（D66 定 `--sp-1`，原来是 2px vs 它的漂移） */
+  gap: var(--sp-1);
+}
+
 /* 行盒 + 主按钮 + 行盒的 hover/选中态样式在 `ListRow.svelte` 的 scoped 样式里
    （行盒类 `.list-row` 只有它会用）。这里只剩 **动作按钮**（`.list-row-action`）：
 

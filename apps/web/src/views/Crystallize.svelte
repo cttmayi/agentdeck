@@ -307,7 +307,7 @@
       <div class="skeleton" style="width:70%"></div>
     {/snippet}
     {#snippet rows()}
-      <ul class="crystal-list">
+      <ul class="list-stack crystal-list">
         {#each filtered as row (row.runId)}
           <ListRow
             rowClass="crystal-row"
@@ -421,14 +421,8 @@
   }
 
   /* ── 行内容（壳不在这里：hover / 选中框 / 行高下限归 ListRow） ── */
-  .crystal-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-1);
-  }
+  /* ⚠️ 2026-11：重置 + 行距在全局 `.list-stack`（markup：`class="list-stack
+     crystal-list"`）。 */
   .crystal-title {
     overflow: hidden;
     text-overflow: ellipsis;

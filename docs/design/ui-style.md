@@ -99,7 +99,7 @@
 | 详情头 | `.detail-head` + `.detail-sub` + `.detail-actions` | 动作按钮 ≥2 个时自动画分组轨道。所有「标题 + 元信息 + 动作」的头都用它（聊天栏头 313 批已并入，不要再自己写 flex 补丁） |
 | 空态 | `.empty`（可带 `strong` + `p`） | 别自己拼居中的灰字 |
 | 详情/栏头两行 | 栏头这类"标题 + 一串元信息"的地方同样两行：第一行 **标题 + 动作按钮**，第二行 **元信息**（执行者 / 轮数 / 技能 / 时间）。元信息元素写 `flex: 0 0 100%` 强制独占一行 | 312 批：聊天的栏头原来是"标题 + 改名 + 文章写作员 · 2 轮"三样挤一行，长标题与元信息互相抢宽度。与"列表行两行"同一条注意力顺序 |
-| 列表行两行 | 列表行（聊天/任务/智能体）一律 **两行结构**：第一行 = 标题（`<span class="…-title">`），第二行 = 辅助信息（执行者 / 轮数 / 时间 / 阶段，`<span class="…-sub">`）。两行都由 `.list-row-main`（`display:flex; flex-direction:column`）自然堆叠，**不许把辅助信息挤进标题那一行**；标题单行省略、辅助信息也单行省略 | 311 批：使用者原话——"类似任务的类似，一行主 Title，一行辅助信息的格式"。注意力顺序是"先认这是哪一条，再看它什么状态"；挤在一行时两者互相抢宽度，长标题会把辅助信息挤没 |
+| 列表行两行 | 列表行（聊天/任务/智能体/沉淀/定时任务/编排）一律 **两行结构**：第一行 = 标题（`<span class="…-title">`），第二行 = 辅助信息（执行者 / 轮数 / 时间 / 阶段，`<span class="…-sub">`）。两行都由 `.list-row-main`（`display:flex; flex-direction:column`）自然堆叠，**不许把辅助信息挤进标题那一行**；标题单行省略、辅助信息也单行省略 | 311 批：使用者原话——"类似任务的类似，一行主 Title，一行辅助信息的格式"。注意力顺序是"先认这是哪一条，再看它什么状态"；挤在一行时两者互相抢宽度，长标题会把辅助信息挤没。**照抄的地方见 §2.6**（连 CSS 一起） |
 | 单行省略 | 列表标题一类要"一行 + 省略号"的元素必须 **`display: block` + `max-width: 100%` + `overflow: hidden` + `text-overflow: ellipsis` + `white-space: nowrap`** 五件套 | 310 批：行内元素上 `overflow`/`text-overflow` 不生效，`nowrap` 只挡换行*算法*，中文长标题在窄栏里仍会被顶成两行、末尾却还挂着省略号（使用者报的） |
 | 混排行 | 短控件（勾选）+ 长控件（标签+输入）同排时 **`align-items: flex-end`** | 308 批：`center` 会让勾选浮在中间、`flex-start` 贴着顶边——两者高度差大时都不像同一行。新写这类行照这条来 |
 | 提示条 | `.notice` + `.bad` / `.warn` / `.good` | 一句话；更长的进 body |
@@ -111,6 +111,131 @@
 
 `SettingsPanel.svelte` 是"主区面板"的共享外壳（`section.main-panel` + 头部返回 + body + foot），
 新加一个设置页 = **用它 + 写内容**，不要自己再拼一遍头部和返回按钮。
+
+### 2.6 列表页范例：照抄这一份，不要自己发明
+
+> 用途：新写一个「左边一列、右边看详情」的页面时，**从这份骨架开始**，把行内容换掉即可。
+> 它只拼装**现有的标准控件**（`ListPane` / `ListRow` / `MainArea` / `Modal` / `confirm`），
+> 类和令牌全部来自 `app.css`——这里没有任何"看起来像"的自定义形状。
+>
+> 给使用者：下次看到某一页风格不统一，直接说「按 ui-style.md §2.6 的列表页范例改」即可。
+
+#### 2.6.1 骨架（结构层面：一行都不许自己写）
+
+```svelte
+<ListPane
+  countLabel={$t('xxx.listCount', { count: items.length })}
+  searchPlaceholder={$t('common.search')}
+  {filter}
+  onFilter={(v) => (filter = v)}
+  loading={$loading['xxx']}
+  loadError={$loadError['xxx'] ?? null}
+  empty={items.length === 0}
+  emptyTitle={$t('xxx.empty')}
+  emptyHint={$t('xxx.emptyHint')}
+  emptyFiltered={items.length > 0 && visible.length === 0}
+  emptyFilteredTitle={$t('xxx.emptyFiltered')}
+  emptyFilteredHint={$t('xxx.emptyFilteredHint')}
+>
+  {#snippet rows()}
+    <!-- ★ 行容器只有这一种写法：list-stack 在 app.css 里（重置 + 4px 行距） -->
+    <ul class="list-stack">
+      {#each visible as item (item.id)}
+        <ListRow rowClass="xxx-row" active={item.id === selectedId} onclick={() => selectOne(item)}>
+          {#snippet children()}
+            <span class="xxx-title" title={item.name}>{item.name}</span>
+            <span class="xxx-sub">
+              <span class="badge">{$t(sourceKey(item))}</span>
+              <span class="faint">{$t('xxx.updated', { time: relativeTime(item.updatedAt, Date.now()) })}</span>
+            </span>
+          {/snippet}
+          {#snippet action()}
+            <!-- 需要行内动作时只放这一颗（危险色由 .list-row-action 给） -->
+            <button type="button" class="list-row-action" title={...} aria-label={...} onclick={...}>×</button>
+          {/snippet}
+        </ListRow>
+      {/each}
+    </ul>
+  {/snippet}
+</ListPane>
+
+<MainArea
+  empty={!detailOpen}
+  emptyTitle={$t('xxx.pickHint')}
+  emptyHint={$t('xxx.pickHintHint')}
+  backLabel={detailOpen ? $t('xxx.backToList') : undefined}
+  onBack={closeDetail}
+  title={creating ? $t('xxx.createTitle') : selected?.name ?? ''}
+  bodyClass="detail-scroll"
+>
+  <!-- 详情内容 -->
+</MainArea>
+```
+
+顶栏动作、删除确认、浮层一律走现成的：
+
+```svelte
+$: setPageActions('xxx', [
+  { id: 'new', label: $t('common.create'), kind: 'primary', icon: 'plus', onActivate: startCreate },
+  { id: 'refresh', label: $t('common.refresh'), kind: 'ghost', icon: 'refresh', onActivate: () => void refresh() },
+])
+onDestroy(() => clearPageActions('xxx'))
+
+// 删除：平台居中对话框（不是 window.confirm）
+if (!(await askConfirm({ ... }))) return
+// 表单：Modal；写入成功后 loadXxx()（界面跟着数据走）
+```
+
+#### 2.6.2 页面自己的 `<style>` 里**只许**写这两块
+
+行内容的两行结构（第一行标题、第二行辅助信息），逐条抄——**六页一字不差**：
+
+```css
+/* 第一行：标题必须“单行 + 省略号”五件套（行内元素上 overflow/text-overflow 不生效） */
+.xxx-title {
+  display: block;
+  max-width: 100%;
+  font-weight: 600;      /* 与 .conv-title / .task-title / .sched-title / .wf-title 同档 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 第二行：辅助信息——字色/字号**显式写**（不写就从行里继承，两页会长出两种灰） */
+.xxx-sub {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  white-space: nowrap;
+}
+/* flex 子项默认 min-width:auto 不收缩 ⇒ 长内容会把行顶出去、省略号失效 */
+.xxx-sub > * { min-width: 0; }
+```
+
+**不许做的**（每一条都真的犯过）：
+
+| 别写 | 为什么 | 该用什么 |
+|---|---|---|
+| `ul { list-style:none; margin:0; padding:0; display:flex; … }` / `.xxx-list { … }` | Svelte 的 scoped 样式**不跨文件**：下一个用同名类的页面照样吃浏览器默认的 `padding-left: 40px`（定时任务、编排各中招一次） | `<ul class="list-stack">`（app.css，一处定义）；`tests/ui-style.test.ts` 机器拦着 |
+| 自己拼右栏的 `detail-head` / `detail-body` | 窄屏返回、空态、滚动容器都在 `MainArea` 里，少一样就是"窄屏进去一片空白、没有出口" | `MainArea` |
+| `window.confirm` / 手搭 `.modal` 浮层 | 全站只有一种确认框、一种浮层（Esc / 遮罩 / 关闭只实现一次） | `askConfirm` / `Modal` |
+| 栏头里放标题或按钮 | 栏头带只有「计数 + 搜索」，主操作在顶栏（D61~D66） | `ListPane` + `setPageActions` |
+| 给标题加 `font-size` / 换 `font-weight` | 五页标题同一档（14/600），差一档就是"这一页看起来不一样" | 跟上面那段抄 |
+| 行内塞第三种信息层（三层以上） | 列表是拿来扫的：**先认是哪一条，再看它什么状态** | 多的信息进 `title` 与右栏 |
+
+#### 2.6.3 自证：怎么知道"和邻居一样"
+
+- **静态**：`pnpm run check`（含 `tests/ui-style.test.ts` 那条"行容器只有一处定义"）。
+- **渲染**：`pnpm run probe:layout` 的 `列表栏骨架（D61）` / `行内细节（D65）` 两组，
+  采样页表是 `run.mjs` 顶部的 `LIST_PAGES`。**新增列表页必须往那张表里加一行**，
+  否则它只有自己写给自己的判据（= 自证），那一整类缺陷就抓不到了。
+- 两组判据量的都是**等式**（五页互相相等）：栏头高 / 行高 / 行内标题字号字重 /
+  徽标形状 / 行盒 / hover 底色，以及 `skeleton.listBox`（`ul` 的缩进、符号、行距、
+  行左沿）。
+
 
 ---
 
@@ -159,6 +284,8 @@
 
 ## 6. 加一个新控件 / 新页面的顺序
 
+0. **新写一个列表页**（左列 + 右详情）⇒ 直接照抄 **§2.6 的列表页范例**，
+   连 `<style>` 那两块一起抄。范例里的每一行都来自现有控件，不要"照着样子另写一份"。
 1. 在 §2 里找**最接近的那一族**。找得到 ⇒ 直接用，别改它。
 2. 找不到 ⇒ 问自己：它是"一句话能做的事"（→ 按钮族新变体）还是"一块有形状的内容"（→ 结构性控件）。
 3. 需要新的**档位**（比如第三种控件高度）⇒ 先在 `app.css` 的令牌区加令牌，
@@ -179,6 +306,11 @@
 | `style.pageStyles` + `style.btnUniform` | 六个页面里同一类按钮（**变体 + 尺寸**）的**字号**必须一致 |
 | `style.badgeUniform` | 徽标在各页的圆角 / 字号 / 内距必须一致 |
 | `style.rowTitleUniform` | 列表行标题在各页是同一档字号 |
+| `skeleton.*` / `rowdetail.*` / `skeleton.listBox` | **五个列表页**（`LIST_PAGES`：聊天 / 任务 / 智能体 / 定时任务 / 编排）的栏头高、行高、行内标题、徽标、行盒、hover、**行容器 ul 的缩进与行距**——每一项都是**五页互相相等的等式**，不是单页的性质 |
+
+⚠️ **新增一个列表页必须往 `tools/layout-probe/run.mjs` 顶部的 `LIST_PAGES` 加一行。**
+漏了它，新页面就只剩"我为它同时写的自有判据"——那是自证：编排页整列缩进 40px、
+行距 0 的那一版，探针 562 项全绿。
 
 ⚠️ 只比**字号**，不比高度：同一类按钮的高度跟着内容走（只有图标的、带两行标签的、
 被父容器拉伸的），拿高度当判据立刻一片假红（第一版就这么写的）。

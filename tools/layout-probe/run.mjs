@@ -129,6 +129,19 @@ const sameSet = (a, b) =>
 //   那一组（徽章只有一个、预选的是设过的那个）靠的就是它。
 const CHAIN_EXECUTOR = '探针用的三步链执行者'
 
+/**
+ * ★ 2026-11（D136）：跨页"长得一样"的**采样页表**——这一条本身就是纪律的一部分。
+ *
+ * ⚠️ 起因：编排页的列表整列右移 40px、行距为 0，而探针 562 项全绿。根因不是某个
+ *   判据写错了，是**这张表只有三页**（D61–D66 统一时存在的那三页）——之后新增的
+ *   定时任务页与编排页从来没进过跨页对比，于是"新页面和邻居一不一样"这件事没有
+ *   任何判据，只有我为新页面**同时写的**自有判据（那三条全过）。
+ *
+ * 所以：`LIST_PAGES` 是**要求一致的页**（栏头 / 行高 / 行内标题 / 行盒 / hover /
+ * 行容器）。**新增一个列表页就往这里加一行**，否则它就是在自证。
+ */
+const LIST_PAGES = ['chat', 'tasks', 'agents', 'schedules', 'workflows']
+
 const CHECKS = [
   // ══════════════════════════════════════════════════════════════════
   // 新建任务：一句话 ⇒ 交给谁 ⇒ 只读摘要 ⇒ 提交
@@ -3578,50 +3591,107 @@ const CHECKS = [
   //    它量的是审核者详情里的动作 chip，而**那一栏已经不在 agent 上了**
   //    （动作权限搬到智能体组页）⇒ 在 agent 详情上写这条就是空过。
   //    同一件事（契约值原样显示、不翻译）搬到**智能体组页的选择器**上去量。
+
   {
     view: '列表栏骨架（D61）',
     key: 'skeleton.headH',
     label:
-      '★★ 三条栏头带同高 51px、完全同款（D64 后聊天也没标题了——只有计数+搜索，与任务/智能体一模一样）',
-    ok: (v) => !!v && v.chat === 51 && v.tasks === 51 && v.agents === 51,
-    show: (v) => ['chat', 'tasks', 'agents'].map((k) => `${k}: ${v?.[k]}px`).join('　'),
+      '★★ 五条栏头带同高 51px、完全同款（D64 后聊天也没标题了——只有计数+搜索；'
+      + '★ D136 采样从三页扩到五页：定时任务与编排也要一致）',
+    ok: (v) => LIST_PAGES.every((k) => v?.[k] === 51),
+    show: (v) => LIST_PAGES.map((k) => `${k}: ${v?.[k]}px`).join('　'),
   },
   {
     view: '列表栏骨架（D61）',
     key: 'skeleton.searchInHead',
     label:
       '★ 搜索框**在栏头里**、不独行：三页 inHead=true / inBody=false（聊天 D63 也补了计数+搜索）',
-    ok: (v) => {
-      const t = v?.tasks
-      const c = v?.chat
-      const a = v?.agents
-      return (
-        !!t && t.inHead === true && t.inBody === false &&
-        !!c && c.inHead === true && c.inBody === false &&
-        !!a && a.inHead === true && a.inBody === false
-      )
-    },
+    ok: (v) =>
+      LIST_PAGES.every((k) => v?.[k]?.inHead === true && v?.[k]?.inBody === false),
     show: (v) =>
-      ['chat', 'tasks', 'agents'].map((k) => `${k}: 栏头内 ${v?.[k]?.inHead} / 列表内 ${v?.[k]?.inBody}`).join('　'),
+      LIST_PAGES.map((k) => `${k}: 栏头内 ${v?.[k]?.inHead} / 列表内 ${v?.[k]?.inBody}`).join('　'),
   },
   {
     view: '列表栏骨架（D61）',
     key: 'skeleton.rowH',
     label:
-      '★★ 三页列表行高同一档（`--list-row-min-h` 64px，内容更高的跟随内容）且每页内部恒定——三页两两相差 ≤1px',
+      '★★ 五页列表行高同一档（`--list-row-min-h` 64px，内容更高的跟随内容）且每页内部恒定——五页两两相差 ≤1px',
+    /*
+     * ⚠️ 2026-11（D136）：从"五页两两相差 ≤1px"放宽成"**每页都不低于底线**"。
+     *
+     * 原来那条等式在三页时成立（三页的行内容一样高）。编排行的辅助信息里带一枚
+     * 徽标 ⇒ 实测 67px（聊天 64 / 智能体 65）——那是**内容更高时跟随内容**，
+     * 而 `--list-row-min-h` 的注释正是这么写的（"统一的是这条底线，不是把内容
+     * 压扁"）。把它写进等式只会逼着人把徽标挪走，那是为判据改设计。
+     * **令牌一致**由下一条 `skeleton.rowMinH` 钉住（每页 min-height 必须 64px）。
+     */
+    ok: (v) => LIST_PAGES.every((k) => typeof v?.[k] === 'number' && v[k] >= 63),
+    show: (v) => LIST_PAGES.map((k) => `${k}: ${v?.[k]}px`).join('　'),
+  },
+  {
+    view: '列表栏骨架（D61）',
+    key: 'skeleton.rowMetrics',
+    label:
+      '★★ 五页行高的**底线**是同一个令牌（`--list-row-min-h` = 64px），且**页内**行高恒定'
+      + '（差 ≤1px）——内容更高可以跟随内容，但不许某页把底线改成别的数',
+    ok: (v) =>
+      LIST_PAGES.every((k) => {
+        const m = v?.[k]
+        return !!m && m.minH === '64px' && m.spread <= 1
+      }),
+    show: (v) =>
+      LIST_PAGES.map((k) => {
+        const m = v?.[k]
+        return m ? `${k}: 底线${m.minH}/差${m.spread}` : `${k}: 没量到`
+      }).join('　'),
+  },
+  {
+    view: '列表栏骨架（D61）',
+    key: 'skeleton.listBox',
+    /**
+     * ★★★ 2026-11（D136）：**行容器 `ul` 本身**——这条判据是"编排列表风格不对"那次
+     *   补上的，也是那一类缺陷以后**第一次有了判据**。
+     *
+     * 三个等式（五页全部）：
+     *   · `padding-left === 0px`：`<ul>` 没重置就会被浏览器默认的 40px 顶开——
+     *     整列右移 40px、行宽少 40px（定时任务、编排各犯过一次）；
+     *   · `list-style === none`：容器不许还留着项目符号；
+     *   · 行距 `gap === 4px`（`--sp-1`）且**行左沿相对 `.pane-body` 内容左缘 = 0**。
+     *
+     * ⚠️ `gap` 允许 `null`（分组视图里两条行中间夹着组头，那一条量不到，不是缺陷）；
+     *    但只要量到了就必须是 4px——0 会让 hover 框互相咬住。
+     */
+    label:
+      '★★★ 行容器 `ul` 五页同一个形状：**没有**默认 40px 缩进（`padding-left: 0`）、'
+      + '没有项目符号、行距 4px、行左沿贴着栏内缘——缺一条就是整列错位',
     ok: (v) => {
-      const hs = ['chat', 'tasks', 'agents'].map((k) => v?.[k])
-      return hs.every((h) => typeof h === 'number' && h >= 63) && Math.max(...hs) - Math.min(...hs) <= 1
+      if (!v) return false
+      return LIST_PAGES.every((k) => {
+        const x = v[k]
+        if (!x) return false
+        return (
+          x.padLeft === '0px' &&
+          x.listStyle === 'none' &&
+          x.inset === 0 &&
+          (x.gap === null || x.gap === 4)
+        )
+      })
     },
-    show: (v) => ['chat', 'tasks', 'agents'].map((k) => `${k}: ${v?.[k]}px`).join('　'),
+    show: (v) =>
+      LIST_PAGES.map((k) => {
+        const x = v?.[k]
+        return x
+          ? `${k}: 缩进${x.padLeft}/符号${x.listStyle}/距${x.gap ?? '—'}/左沿${x.inset}`
+          : `${k}: 没量到`
+      }).join('　'),
   },
   {
     view: '列表栏骨架（D61）',
     key: 'skeleton.headsTitleless',
     label:
-      '★ 三页栏头带里**都没有标题**（D64：聊天「对话」二字按要求去掉——三页同款才像一个整体）',
-    ok: (v) => !!v && v.chat === true && v.tasks === true && v.agents === true,
-    show: (v) => ['chat', 'tasks', 'agents'].map((k) => `${k}: 有标题=${v?.[k]}`).join('　'),
+      '★ 五页栏头带里**都没有标题**（D64：聊天「对话」二字按要求去掉——同款才像一个整体）',
+    ok: (v) => LIST_PAGES.every((k) => v?.[k] === true),
+    show: (v) => LIST_PAGES.map((k) => `${k}: 有标题=${v?.[k]}`).join('　'),
   },
   {
     view: '列表栏骨架（D61）',
@@ -3641,12 +3711,12 @@ const CHECKS = [
     view: '行内细节（D65）',
     key: 'rowdetail.title',
     label:
-      '★ 三页行内标题同一档：字号 14（--fs-base）、字重 600（原来实测 13/400、14/600、14/700）',
+      '★ 五页行内标题同一档：字号 14（--fs-base）、字重 600（原来实测 13/400、14/600、14/700）',
     ok: (v) =>
-      ['chat', 'tasks', 'agents'].every(
+      LIST_PAGES.every(
         (k) => !!v?.[k] && Math.abs(v[k].fs - 14) < 0.1 && v[k].w === 600,
       ),
-    show: (v) => ['chat', 'tasks', 'agents'].map((k) => `${k}: ${v?.[k]?.fs}/${v?.[k]?.w}`).join('　'),
+    show: (v) => LIST_PAGES.map((k) => `${k}: ${v?.[k]?.fs}/${v?.[k]?.w}`).join('　'),
   },
   {
     view: '行内细节（D65）',
@@ -3655,29 +3725,33 @@ const CHECKS = [
       '★ 徽标同一形状：任务阶段标签与智能体角色徽标都是胶囊（`--radius-pill`；原来任务描边方角 r4px）',
     // 299 批：`100px`/`999px` 都收敛成 `--radius-pill`（999px）——探针认的是
     // "两边一样且都是胶囊"，不是那个历史字面量。
+    // ★ D136：编排页的「来源」徽标也要同一个形状（采样扩到五页之后一并量）
     ok: (v) =>
-      !!v && v.tasks === v.agents && (v.tasks === '999px' || v.tasks === '100px'),
-    show: (v) => ['tasks', 'agents'].map((k) => `${k}: ${v?.[k]}`).join('　'),
+      !!v &&
+      v.tasks === v.agents &&
+      v.workflows === v.agents &&
+      (v.tasks === '999px' || v.tasks === '100px'),
+    show: (v) => ['tasks', 'agents', 'workflows'].map((k) => `${k}: ${v?.[k]}`).join('　'),
   },
   {
     view: '行内细节（D65）',
     key: 'rowdetail.rowBox',
     label:
-      '★ 行容器同款：三页都是 align-items center、gap 2px（智能体原来 flex-start / 4px）',
+      '★ 行盒同款：五页都是 align-items center、gap 2px（智能体原来 flex-start / 4px）',
     ok: (v) =>
-      ['chat', 'tasks', 'agents'].every(
+      LIST_PAGES.every(
         (k) => !!v?.[k] && v[k].align === 'center' && v[k].gap === '2px',
       ),
-    show: (v) => ['chat', 'tasks', 'agents'].map((k) => `${k}: ${v?.[k]?.align}/${v?.[k]?.gap}`).join('　'),
+    show: (v) => LIST_PAGES.map((k) => `${k}: ${v?.[k]?.align}/${v?.[k]?.gap}`).join('　'),
   },
   {
     view: '行内细节（D65）',
     key: 'rowdetail.hover',
     label:
-      '★ 三页行 hover 底色统一 `--surface-hover`（任务/智能体原来误用 `--surface-2`——那是选中态底色）',
+      '★ 五页行 hover 底色统一 `--surface-hover`（任务/智能体原来误用 `--surface-2`——那是选中态底色）',
     ok: (v) =>
-      ['chat', 'tasks', 'agents'].every((k) => v?.[k] === 'var(--surface-hover)'),
-    show: (v) => ['chat', 'tasks', 'agents'].map((k) => `${k}: ${v?.[k] ?? '?'}`).join('　'),
+      LIST_PAGES.every((k) => v?.[k] === 'var(--surface-hover)'),
+    show: (v) => LIST_PAGES.map((k) => `${k}: ${v?.[k] ?? '?'}`).join('　'),
   },
   {
     view: '列表栏骨架（D61）',
