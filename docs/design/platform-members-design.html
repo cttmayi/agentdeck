@@ -3,25 +3,23 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>内置岗位 → 平台成员配置（设计稿）</title>
+    <title>平台成员配置（草稿 v2）</title>
     <!--
       ══════════════════════════════════════════════════════════════════════
       这是什么
       ══════════════════════════════════════════════════════════════════════
 
-      2026-11，使用者："我不想用岗位这个属性来做很多不同分支，想脱离出一些单独的属性来配置。"
-      这份设计稿把那句话落成一张表：**把「岗位（builtinKind）」从"类型"降级为"一组可配属性"**，
-      于是——
+      2026-11 第二版草稿。上一版我把「素材 / 产出 / 采纳」也做成了智能体属性，使用者当场否了
+      三条，都对：
 
-        · 新增一个平台成员 = **表里加一行**（写指令 + 技能），不再复制 `ensureBuiltinXxx`；
-        · 「把起草者改成普通智能体」= 一次**有语义的动作**（detach），不再是手改数据；
-        · 今天散在 **6 处**、各摸一个字段的判据，全部改成**只读这张表**；
-        · “半内置”（`builtin: true` 但没有岗位）在数据里**表达不出来**。
+        · 素材与采纳是**发起那条流程**的职责，不是智能体的配置；
+        · 「产出落在哪个目录」是**指令里的约定**（生成者的指令里就写着 agent-draft/…）；
+        · name / instructions / skills 本来就是智能体自己的字段，不需要新属性。
 
-      ⚠️ 这一份是**设计稿，不是产品页面**。页面里的表格/卡片用的是真实设计系统
-         （下面第一段 `<style>` 是从 `app.css` 逐字嵌入的），所以颜色/圆角/字号就是产品里的。
+      所以这一版只剩**两个**平台属性（`owner` + `entries` 多选），其余搬进**动作注册表**
+      （代码里一行一个平台动作）。已拍板四条，见 §2。
 
-      ⚠️ 页面上标着 **待拍板** 的地方，是我还需要使用者点头的四件事。
+      ⚠️ 这是设计稿，不是产品页面；下面第一段 <style> 是从 app.css 逐字嵌入的。
     -->
     <style>
       /* ==== BEGIN app.css（packages/ui/src/styles/app.css，逐字嵌入，别手改）==== */
@@ -2518,7 +2516,7 @@ a > button { width: 100%; }
       /* ==== END app.css ==== */
     </style>
     <style>
-      /* ══ 只属于这份设计稿的排版（产品里没有这些类） ══ */
+      /* 只属于这份草稿的排版（产品里没有） */
       body { background: var(--bg); }
       .doc { max-width: 78rem; margin: 0 auto; padding: var(--sp-6) var(--sp-5) var(--sp-8); }
       .doc > h1 { font-size: var(--fs-2xl); margin: 0 0 var(--sp-2); }
@@ -2527,26 +2525,27 @@ a > button { width: 100%; }
         padding-bottom: var(--sp-1); border-bottom: 1px solid var(--line);
       }
       .doc > h3 { font-size: var(--fs-md); margin: var(--sp-4) 0 var(--sp-1); }
-      .doc > p, .doc .panel p { margin: 0 0 var(--sp-2); }
-      .doc > .lead { color: var(--text-dim); max-width: 62rem; }
+      .doc > p { margin: 0 0 var(--sp-2); }
+      .doc .lead { color: var(--text-dim); max-width: 62rem; }
       .doc .tag {
         display: inline-block; font-size: var(--fs-2xs); padding: 0 var(--sp-2);
         border-radius: var(--radius-pill); border: 1px solid var(--line-strong);
-        color: var(--text-faint); vertical-align: middle; margin-left: var(--sp-1);
+        color: var(--text-faint); vertical-align: middle;
       }
+      .doc .tag.yes { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+      .doc .tag.no { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
       .doc .tag.todo { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
-      .doc .tag.keep { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
       .doc table.table { font-size: var(--fs-xs); }
       .doc table.table td, .doc table.table th { vertical-align: top; }
-      .doc .mono { font-family: var(--font-mono); }
+      .doc .chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
       .doc pre.code {
-        margin: var(--sp-2) 0 0; padding: var(--sp-3);
-        background: var(--panel); border: 1px solid var(--line);
-        border-radius: var(--radius); font-family: var(--font-mono);
-        font-size: var(--fs-xs); line-height: 1.65; white-space: pre-wrap;
-        color: var(--text-dim);
+        margin: var(--sp-2) 0 0; padding: var(--sp-3); background: var(--panel);
+        border: 1px solid var(--line); border-radius: var(--radius);
+        font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.65;
+        white-space: pre-wrap; color: var(--text-dim);
       }
-      .doc .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(24rem, 1fr)); gap: var(--sp-3); }
+      .doc .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); gap: var(--sp-3); }
+      .doc .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--sp-3); }
       .doc .step { display: flex; gap: var(--sp-2); align-items: flex-start; }
       .doc .step .n {
         flex: 0 0 auto; width: 1.4rem; height: 1.4rem; border-radius: 50%;
@@ -2554,346 +2553,238 @@ a > button { width: 100%; }
         background: var(--accent-dim); color: var(--on-accent);
         font-size: var(--fs-2xs); font-weight: 700;
       }
-      .doc .kv { display: grid; grid-template-columns: 9rem minmax(0, 1fr); gap: var(--sp-1) var(--sp-2); }
+      .doc .mock { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--sp-3); }
+      .doc .mock .h { font-size: var(--fs-xs); color: var(--text-faint); margin: 0 0 var(--sp-2); }
+      .doc .kv { display: grid; grid-template-columns: 8rem minmax(0, 1fr); gap: var(--sp-1) var(--sp-2); }
       .doc .kv .k { color: var(--text-faint); font-size: var(--fs-xs); }
       .doc .kv .v { font-size: var(--fs-xs); }
-      .doc .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--sp-3); }
-      .doc .legend { display: flex; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--text-faint); }
+      .doc .strike { text-decoration: line-through; }
     </style>
   </head>
   <body>
     <div class="doc">
-      <h1>内置岗位 → <b>平台成员配置</b></h1>
+      <h1>平台成员配置 <span class="tag">草稿 v2</span></h1>
       <p class="lead">
-        把「岗位（<code class="mono">builtinKind</code>）」从<b>类型</b>降级为<b>一组可配属性</b>：
-        四个内置成员是同一种东西的四组配置，而不是四个 if 分支。
-        这一份只谈设计，<b>还没有动代码</b>。
+        目标一句话：<b>不再用「岗位（builtinKind）」做分支</b>，把平台的身份拆成
+        <b>两个可配属性</b>（<code class="mono">owner</code> + <code class="mono">entries</code> 多选），
+        其余交给<b>动作注册表</b>与智能体自己的字段。
       </p>
 
-      <div class="notice warn" style="margin-top: var(--sp-3)">
+      <div class="notice" style="margin-top: var(--sp-3)">
         <div>
-          <b>先看这个问题的真身</b>：今天 <code class="mono">builtin</code>（是不是平台的）与
-          <code class="mono">builtinKind</code>（是哪一个岗位）是<b>两个能各自变的字段</b>，
-          而判据各摸一个——只读认前者、派活/默认/聊天认后者。于是手改一次数据，就能造出
-          <b>“半内置”</b>：<code class="mono">builtin: true</code> + 没有岗位 ⇒ 改不了、删不掉、
-          却能被派活、还能当默认执行者。<b>属性化的目的就是让这种状态表达不出来。</b>
+          <b>本版删掉的（上一版我多设计的）</b>：
+          <span class="strike mono">material</span> ·
+          <span class="strike mono">produce</span> ·
+          <span class="strike mono">adopt</span> ·
+          <span class="strike mono">skills</span> ·
+          <span class="strike mono">label</span> ·
+          <span class="strike mono">dispatchable</span> ·
+          <span class="strike mono">instructions</span>
+          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
+            理由：素材 / 采纳属于<b>发起它的那条流程</b>；产出目录是<b>指令里的约定</b>；
+            name / instructions / skills 本来就是<b>智能体自己的字段</b>；`dispatchable` 并进 `entries`。
+          </p>
         </div>
       </div>
 
-      <h2>1. 属性表（8 个，分两组）</h2>
-      <p class="lead">
-        A 组回答“<b>谁能改它</b>”，B 组回答“<b>它怎么被用起来</b>”。
-        每个属性都对应今天的一处或几处分支——图上“今天对应”那一列就是它要替换掉的东西。
-      </p>
+      <h2>2. 已拍板（这一版按它画）</h2>
+      <div class="grid2">
+        <div class="panel"><b>① <code class="mono">workflow</code> 入口<b>两处都约束</b></span></b>
+          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">编辑器/生成者的候选名单要过滤，<b>引擎解析 <code class="mono">inline:名字</code> 时也要拒</b>——否则"看得到、跑起来报错"。</p>
+        </div>
+        <div class="panel"><b>② 动作 id 直接复用 <code class="mono">subject.type</code></b>
+          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0"><code class="mono">skill-draft</code> / <code class="mono">memory-tidy</code> / <code class="mono">agent-commit</code> / <code class="mono">workflow-commit</code>，不再发明第二套名字。</p>
+        </div>
+        <div class="panel"><b>③ 平台成员默认不给 <code class="mono">task</code> / <code class="mono">workflow</code></b>
+          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">起草者被派活会按"你是 skill 作者"跑偏；被编排引用同理。</p>
+        </div>
+        <div class="panel"><b>④ 一期只允许用户造 <code class="mono">owner=user</code></b>
+          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">自定义动作要发版。但相关入口 <b>显示出来、只是置灰</b>——见 §6。</p>
+        </div>
+      </div>
+
+      <h2>3. 表 1：成员配置（每个 agent 一份，是数据）</h2>
       <div class="table-wrap">
         <table class="table">
           <thead><tr><th>属性</th><th>值域</th><th>缺省</th><th>谁读它</th><th>今天对应什么</th></tr></thead>
           <tbody>
-<tr>
-      <td><code class="mono">owner</code><br><span class="faint fs-xs">A 归属</span></td>
-      <td class="mono fs-xs">platform | user</td>
-      <td class="mono fs-xs">user</td>
-      <td class="fs-xs">只读 / 不可删 / 不能当默认 / 不进任务下拉</td>
-      <td class="faint fs-xs">`builtin` + `builtinKind` 两个字段混用</td>
-    </tr>
-<tr>
-      <td><code class="mono">trigger</code><br><span class="faint fs-xs">B 流程</span></td>
-      <td class="mono fs-xs">chat | action | none</td>
-      <td class="mono fs-xs">none</td>
-      <td class="fs-xs">聊天放行；界面入口（哪颗按钮起它）</td>
-      <td class="faint fs-xs">`CHAT_CAPABLE_BUILTINS`、沉淀页/聊天页按钮</td>
-    </tr>
-<tr>
-      <td><code class="mono">material</code><br><span class="faint fs-xs">B 流程</span></td>
-      <td class="mono fs-xs">none | task-material | conversation</td>
-      <td class="mono fs-xs">none</td>
-      <td class="fs-xs">run 之前平台准备什么素材</td>
-      <td class="faint fs-xs">沉淀的 `material/`；`transcript.md` + `existing-memory.md`</td>
-    </tr>
-<tr>
-      <td><code class="mono">produce</code><br><span class="faint fs-xs">B 流程</span></td>
-      <td class="mono fs-xs">none | files:&lt;dir&gt; | reply-json</td>
-      <td class="mono fs-xs">none</td>
-      <td class="fs-xs">run 之后平台怎么读产出</td>
-      <td class="faint fs-xs">`skill/`、`agent-draft/`、`workflow-draft/`、`parseTidyOutput`</td>
-    </tr>
-<tr>
-      <td><code class="mono">adopt</code><br><span class="faint fs-xs">B 流程</span></td>
-      <td class="mono fs-xs">none | commit:&lt;校验器&gt; | pick</td>
-      <td class="mono fs-xs">none</td>
-      <td class="fs-xs">“确认”按钮出不出现、点下去做什么、谁校验</td>
-      <td class="faint fs-xs">三条 commit 路由 + 记忆候选面板</td>
-    </tr>
-<tr>
-      <td><code class="mono">skills</code><br><span class="faint fs-xs">B 流程</span></td>
-      <td class="mono fs-xs">slug[]</td>
-      <td class="mono fs-xs">[]</td>
-      <td class="fs-xs">启动播种的同有技能；每次 run 注入</td>
-      <td class="faint fs-xs">distilly / 3 份 / orchestration-authoring</td>
-    </tr>
-<tr>
-      <td><code class="mono">dispatchable</code><br><span class="faint fs-xs">B 流程</span></td>
-      <td class="mono fs-xs">boolean</td>
-      <td class="mono fs-xs">false</td>
-      <td class="fs-xs">能不能派业务任务 / 当默认执行者 / 出现在下拉</td>
-      <td class="faint fs-xs">今天恒 false，但**三处判据各写一遍**</td>
-    </tr>
-<tr>
-      <td><code class="mono">label / instructions</code><br><span class="faint fs-xs">B 流程</span></td>
-      <td class="mono fs-xs">string</td>
-      <td class="mono fs-xs">—</td>
-      <td class="fs-xs">界面展示的岗位名与说明；出厂身份</td>
-      <td class="faint fs-xs">`AgentDetail` 的 5 处 `builtinKind ===` if 链</td>
-    </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <h2>2. 四个内置成员 = 四行配置（外加“普通智能体”这一行）</h2>
-      <div class="legend" style="margin-bottom: var(--sp-2)">
-        <span class="badge badge--accent fs-xs">owner=platform</span>
-        <span class="badge in_progress fs-xs">trigger</span>
-        <span class="badge fs-xs">material / skills</span>
-        <span class="badge done fs-xs">produce / adopt</span>
-        <span class="badge badge--outline faint fs-xs">none / [] / false</span>
-      </div>
-      <div class="table-wrap">
-        <table class="table">
-          <thead><tr><th>成员</th><th>owner</th><th>trigger</th><th>material</th><th>produce</th><th>adopt</th><th>skills</th><th>dispatchable</th></tr></thead>
-          <tbody>
-<tr>
-      <td><b>沉淀起草者</b></td>
-      <td><span class="badge badge--accent fs-xs">platform</span></td>
-      <td><span class="badge in_progress fs-xs">action</span></td>
-      <td><span class="badge  fs-xs">task-material</span></td>
-      <td><span class="badge done fs-xs">files:skill/</span></td>
-      <td><span class="badge done fs-xs">commit</span></td>
-      <td><span class="badge  fs-xs">[distilly]</span></td>
-      <td><span class="badge badge--outline faint fs-xs">false</span></td>
-    </tr>
-<tr>
-      <td><b>记忆整理者</b></td>
-      <td><span class="badge badge--accent fs-xs">platform</span></td>
-      <td><span class="badge in_progress fs-xs">action</span></td>
-      <td><span class="badge  fs-xs">conversation</span></td>
-      <td><span class="badge done fs-xs">reply-json</span></td>
-      <td><span class="badge done fs-xs">pick</span></td>
-      <td><span class="badge badge--outline faint fs-xs">[]</span></td>
-      <td><span class="badge badge--outline faint fs-xs">false</span></td>
-    </tr>
-<tr>
-      <td><b>智能体生成者</b></td>
-      <td><span class="badge badge--accent fs-xs">platform</span></td>
-      <td><span class="badge in_progress fs-xs">chat</span></td>
-      <td><span class="badge badge--outline faint fs-xs">none</span></td>
-      <td><span class="badge done fs-xs">files:agent-draft/</span></td>
-      <td><span class="badge done fs-xs">commit</span></td>
-      <td><span class="badge  fs-xs">[×3]</span></td>
-      <td><span class="badge badge--outline faint fs-xs">false</span></td>
-    </tr>
-<tr>
-      <td><b>编排生成者</b></td>
-      <td><span class="badge badge--accent fs-xs">platform</span></td>
-      <td><span class="badge in_progress fs-xs">chat</span></td>
-      <td><span class="badge badge--outline faint fs-xs">none</span></td>
-      <td><span class="badge done fs-xs">files:workflow-draft/</span></td>
-      <td><span class="badge done fs-xs">commit</span></td>
-      <td><span class="badge  fs-xs">[orchestration-authoring]</span></td>
-      <td><span class="badge badge--outline faint fs-xs">false</span></td>
-    </tr>
-<tr>
-      <td><b>普通智能体</b></td>
-      <td><span class="badge badge--accent fs-xs">user</span></td>
-      <td><span class="badge badge--outline faint fs-xs">none</span></td>
-      <td><span class="badge badge--outline faint fs-xs">none</span></td>
-      <td><span class="badge badge--outline faint fs-xs">none</span></td>
-      <td><span class="badge badge--outline faint fs-xs">none</span></td>
-      <td><span class="badge badge--outline faint fs-xs">[]</span></td>
-      <td><span class="badge  fs-xs">true</span></td>
-    </tr>
+            <tr>
+              <td><code class="mono">owner</code></td>
+              <td class="mono fs-xs">platform | user</td>
+              <td class="mono fs-xs">user</td>
+              <td class="fs-xs">只读 / 不可删 / 启动自愈 / 出厂播种同有技能</td>
+              <td class="faint fs-xs">今天由 <code class="mono">builtin</code> + <code class="mono">builtinKind</code> 两个字段混着表达</td>
+            </tr>
+            <tr>
+              <td><code class="mono">entries</code><br><span class="faint fs-xs">多选</span></td>
+              <td class="mono fs-xs">Set&lt;chat | task | workflow | action:&lt;subject.type&gt;&gt;</td>
+              <td class="mono fs-xs">空</td>
+              <td class="fs-xs">谁能叫它、它出现在哪些候选里、哪些动作能起它</td>
+              <td class="faint fs-xs">散在 6 处（见 §5）</td>
+            </tr>
           </tbody>
         </table>
       </div>
       <p class="hint" style="margin-top: var(--sp-2)">
-        注意“普通智能体”这一行：它<b>不是特例</b>，而是同一张表里 owner=user 的那一行——
-        这正是“把它改成智能体”能变成一个普通动作的原因。
+        其余全部是智能体本来就有的字段：<code class="mono">name</code> / <code class="mono">instructions</code> /
+        <code class="mono">skills</code>（共享 <code class="mono">skillIds</code> + 独有目录）/ <code class="mono">model</code> /
+        <code class="mono">runtimeKey</code> / <code class="mono">memoryEnabled</code>。
+        <b>平台只是"播种默认 + 锁只读"，不再多一层属性。</b>
       </p>
 
-      <h2>3. 判据全部改成只读这张表</h2>
+      <h2>4. 表 2：动作注册表（代码里一行一个平台动作）</h2>
+      <p class="lead">上一版我塞进属性的「素材 / 产出 / 采纳」都在这里——它们是<b>流程</b>的事。</p>
       <div class="table-wrap">
         <table class="table">
-          <thead><tr><th>判据</th><th>今天写在哪</th><th>改后</th></tr></thead>
+          <thead><tr><th>id（= subject.type）</th><th>从哪发起</th><th>素材（平台准备）</th><th>产出（按指令里的约定读）</th><th>采纳与校验</th></tr></thead>
           <tbody>
-<tr><td>只读：改 / 删 / 恢复默认</td><td class="fs-xs"><code class="mono">server.ts</code> 三处 400（<code class="mono">builtin_agent_readonly</code>）</td><td class="mono fs-xs"><code class="mono">owner === "platform"</code></td></tr>
-<tr><td>派活 / 当默认 / 任务下拉</td><td class="fs-xs">三处，<b>判据各不相同</b>（<code class="mono">builtinKind === undefined</code> / <code class="mono">builtinKindOf !== null</code> / 无守卫）</td><td class="mono fs-xs"><code class="mono">dispatchable</code></td></tr>
-<tr><td>聊天放行</td><td class="fs-xs"><code class="mono">CHAT_CAPABLE_BUILTINS = [agent-maker, workflow-maker]</code></td><td class="mono fs-xs"><code class="mono">trigger === "chat"</code></td></tr>
-<tr><td>同有技能播种 + 注入</td><td class="fs-xs">三个模块各一份 <code class="mono">ensure*Skills</code></td><td class="mono fs-xs"><code class="mono">skills</code></td></tr>
-<tr><td>“确认”按钮 + 采纳路由 + 校验</td><td class="fs-xs">三条 commit 路由、两个面板</td><td class="mono fs-xs"><code class="mono">adopt</code></td></tr>
-<tr><td>启动对账 + 日志</td><td class="fs-xs">四份 <code class="mono">ensure*</code> + <code class="mono">builtinAccountingRows</code>（刚漏过一次）</td><td class="mono fs-xs">遍历配置表</td></tr>
-<tr><td>岗位名 / 说明 / 按钮出现</td><td class="fs-xs"><code class="mono">AgentDetail</code> 的 if 链</td><td class="mono fs-xs"><code class="mono">label</code> + <code class="mono">adopt</code></td></tr>
+          <tr><td><code class="mono">skill-draft</code></td><td class="fs-xs">沉淀页「开始起草」</td><td class="fs-xs"><code class="mono">material/</code>（素材 + 反馈）</td><td class="fs-xs"><code class="mono">skill/SKILL.md</code> + 支持文件</td><td class="fs-xs">「确认入库」→ 机械定检 → 技能库 + git</td></tr>
+          <tr><td><code class="mono">memory-tidy</code></td><td class="fs-xs">聊天页「整理记忆」</td><td class="fs-xs"><code class="mono">transcript.md</code> + <code class="mono">existing-memory.md</code></td><td class="fs-xs">回复里的 JSON 数组</td><td class="fs-xs">逐条勾选 → 出处核对 → 写记忆</td></tr>
+          <tr><td><code class="mono">agent-commit</code></td><td class="fs-xs">聊天页「确认生成智能体」</td><td class="fs-xs">无（素材在对话里）</td><td class="fs-xs"><code class="mono">agent-draft/agent-draft.md</code> + 配套技能</td><td class="fs-xs">解析岗位卡 → 技能校验 → 建智能体</td></tr>
+          <tr><td><code class="mono">workflow-commit</code></td><td class="fs-xs">聊天页「确认采纳编排」</td><td class="fs-xs">无</td><td class="fs-xs"><code class="mono">workflow-draft/workflow-draft.md</code></td><td class="fs-xs">三道校验 → 落 <code class="mono">source:ai</code> 编排</td></tr>
           </tbody>
         </table>
       </div>
-      <h3>改完的代码长什么样（同一个意思，一个分支）</h3>
-      <pre class="code">// 今天：同一个意思写六遍，各摸一个字段
-if (current.builtin === true) return 400                 // 只读
-if (agent.builtinKind !== undefined) skip                // 任务下拉
-if (builtinKindOf(agent) !== null) return 400            // 当默认
-const CHAT_CAPABLE = ['agent-maker', 'workflow-maker']   // 聊天
-if (!CHAT_CAPABLE.includes(kind)) return 400
-ensureBuiltinDrafter / ensureBuiltinMemoryTidy / …       // 对账 ×4
+      <p class="hint" style="margin-top: var(--sp-2)">
+        成员配置里的 <code class="mono">action:&lt;id&gt;</code> 就是这两张表之间<b>唯一的连接</b>。
+      </p>
 
-// 改后：从表里读
-if (cfg.owner === 'platform') return 400                 // 只读
-if (!cfg.dispatchable) skip                              // 任务下拉 + 当默认
-if (cfg.trigger !== 'chat') return 400                   // 聊天
-await reconcilePlatformMembers(store, workspaceId)       // 对账一份通用实现</pre>
+      <h2>5. 五个成员 = 五行配置（entries 多选）</h2>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>成员</th><th>owner</th><th>entries（实心 = 有 · 空心 = 没有）</th><th>说明</th></tr></thead>
+          <tbody>
+          <tr><td><b>沉淀起草者（内置）</b></td><td><span class="badge badge--accent fs-xs">platform</span></td><td><div class="chips"><span class="badge badge--outline faint fs-xs">chat</span> <span class="badge badge--outline faint fs-xs">task</span> <span class="badge badge--outline faint fs-xs">workflow</span> <span class="badge badge--accent fs-xs">action:skill-draft</span></div></td><td class="faint fs-xs">沉淀页那颗「开始起草」；不接任务、不进编排候选</td></tr>
+          <tr><td><b>记忆整理者（内置）</b></td><td><span class="badge badge--accent fs-xs">platform</span></td><td><div class="chips"><span class="badge badge--outline faint fs-xs">chat</span> <span class="badge badge--outline faint fs-xs">task</span> <span class="badge badge--outline faint fs-xs">workflow</span> <span class="badge badge--accent fs-xs">action:memory-tidy</span></div></td><td class="faint fs-xs">聊天页「整理记忆」；同上</td></tr>
+          <tr><td><b>智能体生成者（内置）</b></td><td><span class="badge badge--accent fs-xs">platform</span></td><td><div class="chips"><span class="badge badge--accent fs-xs">chat</span> <span class="badge badge--outline faint fs-xs">task</span> <span class="badge badge--outline faint fs-xs">workflow</span> <span class="badge badge--accent fs-xs">action:agent-commit</span></div></td><td class="faint fs-xs">既是聊天入口，又有「确认生成智能体」这个动作——多选的最小证据</td></tr>
+          <tr><td><b>编排生成者（内置）</b></td><td><span class="badge badge--accent fs-xs">platform</span></td><td><div class="chips"><span class="badge badge--accent fs-xs">chat</span> <span class="badge badge--outline faint fs-xs">task</span> <span class="badge badge--outline faint fs-xs">workflow</span> <span class="badge badge--accent fs-xs">action:workflow-commit</span></div></td><td class="faint fs-xs">同上（「确认采纳编排」）</td></tr>
+          <tr><td><b>普通智能体</b></td><td><span class="badge fs-xs">user</span></td><td><div class="chips"><span class="badge badge--accent fs-xs">chat</span> <span class="badge badge--accent fs-xs">task</span> <span class="badge badge--accent fs-xs">workflow</span></div></td><td class="faint fs-xs">默认三项全开；平台成员默认三项全关（除显式列出的）</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>6 处判据 → 只读这张表</h3>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>判据</th><th>今天</th><th>改后</th></tr></thead>
+          <tbody>
+          <tr><td>只读：改 / 删 / 恢复默认</td><td class="fs-xs"><code class="mono">server.ts</code> 三处 400</td><td class="fs-xs"><code class="mono">owner === "platform"</code></td></tr>
+          <tr><td>能当对话执行者</td><td class="fs-xs"><code class="mono">CHAT_CAPABLE_BUILTINS</code></td><td class="fs-xs"><code class="mono">entries.has('chat')</code></td></tr>
+          <tr><td>派任务 / 当默认 / 任务下拉</td><td class="fs-xs">三处**判据各不相同**，接口层无守卫</td><td class="fs-xs"><code class="mono">entries.has('task')</code></td></tr>
+          <tr><td>能被编排引用（候选 + 引擎解析）</td><td class="fs-xs">**完全没有门**（全量名单 <code class="mono">.find(name)</code>）</td><td class="fs-xs"><code class="mono">entries.has('workflow')</code>，**两处都查**</td></tr>
+          <tr><td>平台动作能叫它</td><td class="fs-xs">沉淀起草 / 整理记忆 / 两个采纳，各写一处</td><td class="fs-xs"><code class="mono">entries.has(`action:${id}`)</code></td></tr>
+          <tr><td>启动对账 + 日志</td><td class="fs-xs">四份 <code class="mono">ensure*</code> + <code class="mono">builtinAccountingRows</code></td><td class="fs-xs">按 <code class="mono">owner</code> 遍历</td></tr>
+          </tbody>
+        </table>
+      </div>
 
-      <h2>4. “把起草者改成普通智能体” = 一次有语义的动作</h2>
+      <h2>6. 「显示出来，只是置灰」（本版新纪律）</h2>
       <p class="lead">
-        不再是手改磁盘，而是 <code class="mono">POST /api/agents/:id/detach</code>。四步，每步都要有输出：
+        不可用的东西<b>不从列表里消失</b>，而是<b>显示 + 置灰 + 说明原因</b>——否则同一个下拉在不同人眼里长度都不一样，
+        人会以为"我的智能体少了"。
       </p>
       <div class="grid2">
-        <div class="panel">
-          <div class="step"><span class="n">1</span><div>
-            <b>引用检查</b>
-            <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
-              哪些对话把它当执行者、哪些对话里还有<b>待采纳的草稿</b>、哪些任务assignee是它。
-              在写库<b>之前</b>算出来——写完了再发现“那些按钮会失效”就晚了。
-            </p>
-          </div></div>
+        <div class="mock">
+          <p class="h">新建对话 · 执行者下拉（平台成员显示但不可选）</p>
+          <select aria-label="执行者">
+            <option>助手</option>
+            <option disabled>沉淀起草者（内置） — 平台成员，不参与对话</option>
+            <option disabled>记忆整理者（内置） — 平台成员，不参与对话</option>
+            <option>智能体生成者（内置）</option>
+            <option>编排生成者（内置）</option>
+          </select>
+          <p class="hint" style="margin: var(--sp-2) 0 0">
+            有 <code class="mono">chat</code> 的才可选；其余显示 + <code class="mono">disabled</code> + 一行原因。
+          </p>
         </div>
-        <div class="panel">
-          <div class="step"><span class="n">2</span><div>
-            <b>原子改写</b>
-            <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
-              <code class="mono">owner=user</code>，B 组属性<b>一起清空</b>。
-              不允许“只改一处”——半内置就是这么来的。
-            </p>
-          </div></div>
+        <div class="mock">
+          <p class="h">新建任务 · 交给谁（平台成员显示但不可选）</p>
+          <select aria-label="交给谁">
+            <option>助手（默认）</option>
+            <option disabled>沉淀起草者（内置） — 平台成员不接业务任务</option>
+            <option disabled>编排生成者（内置） — 平台成员不接业务任务</option>
+          </select>
+          <p class="hint" style="margin: var(--sp-2) 0 0">
+            判据是 <code class="mono">entries.has('task')</code>；<b>接口层同样要拒</b>（今天没有守卫）。
+          </p>
         </div>
-        <div class="panel">
-          <div class="step"><span class="n">3</span><div>
-            <b>对账补位</b>
-            <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
-              平台发现少了一个出厂成员 ⇒ 建回一条（日志说一句）。
-              从前的行为就是这个，只是现在它<b>有据可依</b>，不再是“手改之后的意外”。
-            </p>
-          </div></div>
+        <div class="mock">
+          <p class="h">编排编辑器 · 可引用的智能体</p>
+          <div class="chips">
+            <span class="badge fs-xs">助手</span>
+            <span class="badge fs-xs">撰稿员</span>
+            <span class="badge badge--outline faint fs-xs">沉淀起草者（内置）</span>
+            <span class="badge badge--outline faint fs-xs">编排生成者（内置）</span>
+          </div>
+          <p class="hint" style="margin: var(--sp-2) 0 0">
+            <code class="mono">entries.has('workflow')</code> 才有；<b>引擎解析时同样拒</b>（
+            <code class="mono">inline:沉淀起草者（内置）</code> ⇒ 400 并说明）。
+          </p>
         </div>
-        <div class="panel">
-          <div class="step"><span class="n">4</span><div>
-            <b>影响面给人看</b>
-            <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
-              把第 1 步的清单摆出来（尤其“这 2 条对话的『确认生成智能体』会失效”），
-              而不是让人之后自己撞上 400。
-            </p>
-          </div></div>
+        <div class="mock">
+          <p class="h">智能体页 · 新建（自定义平台成员）</p>
+          <div style="display: flex; gap: var(--sp-2)">
+            <button type="button" class="btn btn--primary">＋ 新建智能体</button>
+            <button type="button" class="btn btn--ghost" disabled title="一期不支持自定义平台成员（要发版）">
+              ＋ 新建平台成员
+            </button>
+          </div>
+          <p class="hint" style="margin: var(--sp-2) 0 0">
+            入口<b>显示但置灰</b>，<code class="mono">title</code> 说明为什么。
+          </p>
+        </div>
+      </div>
+      <div class="notice warn" style="margin-top: var(--sp-3)">
+        <div>
+          <b>与旧纪律的边界（要写进 ui-style，请你确认）</b>：仓库里有一条"按钮按条件出现、不搞置灰"
+          （编排页的那颗「确认生成智能体」就是按草稿存在与否出现）。两条<b>不冲突</b>，因为场景不同：
+          <br>· <b>动作按钮</b>：按条件出现（点了没反应比不出现更糟）；
+          <br>· <b>候选条目 / 入口</b>：显示 + 置灰 + 原因（列表长度必须稳定）。
         </div>
       </div>
 
-      <h2>5. 界面上它会是什么样</h2>
-      <p class="lead">智能体详情页里，内置成员多一张「平台成员」卡：属性只读展示 + 一个脱离入口。</p>
-      <div class="main-panel">
-        <div class="main-panel-head">
-          <h2>沉淀起草者（内置）</h2>
-          <span class="badge badge--accent fs-xs">平台成员</span>
-        </div>
-        <div class="main-panel-body">
-          <div class="kv">
-            <span class="k">owner</span><span class="v"><code class="mono">platform</code>（只读 · 不可删 · 不能当默认）</span>
-            <span class="k">trigger</span><span class="v"><code class="mono">action</code> —— 沉淀页那颗「开始起草」</span>
-            <span class="k">material</span><span class="v"><code class="mono">task-material</code> —— 每次起草前平台铺 <code class="mono">material/</code></span>
-            <span class="k">produce</span><span class="v"><code class="mono">files:skill/</code> —— 产出在约定的 <code class="mono">skill/SKILL.md</code></span>
-            <span class="k">adopt</span><span class="v"><code class="mono">commit</code> ——「确认入库」→ 校验 → 技能库 + git</span>
-            <span class="k">skills</span><span class="v"><code class="mono">distilly</code>（平台播种的同有技能）</span>
-            <span class="k">dispatchable</span><span class="v"><code class="mono">false</code> —— 不接业务任务</span>
-          </div>
-          <div class="notice warn" style="margin-top: var(--sp-3)">
-            <div>
-              <b>脱离为普通智能体</b>（会先查引用）：<br>
-              · 3 条沉淀任务会改用<b>重新出厂</b>的起草者；<br>
-              · 1 条对话里还有待采纳的草稿——脱离后「确认入库」会失效；<br>
-              · 它自己会变成可编辑、可删、可派活的普通智能体。
-            </div>
-          </div>
-          <div style="display: flex; gap: var(--sp-2); margin-top: var(--sp-3)">
-            <button type="button" class="btn btn--danger">脱离为普通智能体</button>
-            <button type="button" class="btn btn--ghost">取消</button>
-          </div>
-        </div>
+      <h2>7. 「把起草者改成普通智能体」= detach（保留）</h2>
+      <div class="grid2">
+        <div class="panel"><div class="step"><span class="n">1</span><div><b>引用检查</b>
+          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">哪些对话/任务/草稿指向它——写库<b>之前</b>算出来。</p></div></div></div>
+        <div class="panel"><div class="step"><span class="n">2</span><div><b>原子改写</b>
+          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0"><code class="mono">owner=user</code> + <code class="mono">entries=chat+task+workflow</code>，一次写完，不留半个配置。</p></div></div></div>
+        <div class="panel"><div class="step"><span class="n">3</span><div><b>对账补位</b>
+          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">平台发现少了一个出厂成员 ⇒ 建回一条（日志说一句）。</p></div></div></div>
+        <div class="panel"><div class="step"><span class="n">4</span><div><b>影响面给人看</b>
+          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">把第 1 步的清单摆出来（"这 2 条对话的『确认…』会失效"）。</p></div></div></div>
       </div>
       <p class="hint" style="margin-top: var(--sp-2)">
-        ⚠️ 卡上每一项都是<b>可点开看说明</b>的只读字段，不是表单——平台成员的配置改动走
-        <code class="mono">PATCH /api/agents/:id/platform-config</code>（带形态校验），不在这里手填。
+        有了 <code class="mono">owner</code> 这一个判据，"半内置"（<code class="mono">builtin: true</code> 却没有岗位）
+        在数据里<b>表达不出来</b>——它要么是 platform（配置成套），要么是 user。
       </p>
 
-      <h2>6. 配置形态校验（照 &lt;code class=mono&gt;runtime-table&lt;/code&gt; 的做法：缺了当场报错）</h2>
+      <h2>8. 迁移</h2>
       <div class="table-wrap">
         <table class="table">
-          <thead><tr><th>约束</th><th>违反时报什么</th></tr></thead>
+          <thead><tr><th>老数据</th><th>新配置</th><th>状态</th></tr></thead>
           <tbody>
-            <tr><td><code class="mono">owner=platform</code> 时 B 组必须成套（除 retired）</td><td>“平台成员缺少 &lt;属性&gt; —— 它跑不起来”</td></tr>
-            <tr><td><code class="mono">trigger=action</code> ⇒ <code class="mono">material≠none</code> 且 <code class="mono">produce≠none</code> 且 <code class="mono">adopt≠none</code></td><td>“由按钮发起的成员必须有素材、产出与采纳方式”</td></tr>
-            <tr><td><code class="mono">produce=files:x</code> ⇒ <code class="mono">adopt=commit</code></td><td>“文件产出必须有人点确认，否则没人知道它算不算完成”</td></tr>
-            <tr><td><code class="mono">adopt=pick</code> ⇒ <code class="mono">produce=reply-json</code></td><td>“逐条勾选只对『候选列表』有意义”</td></tr>
-            <tr><td><code class="mono">dispatchable=true</code> ⇒ <code class="mono">adopt=none</code></td><td>“能派活就必须不需要人收口——否则任务会永远停在等人确认”</td></tr>
+            <tr><td><code class="mono">builtin: true</code> + <code class="mono">builtinKind</code></td><td><code class="mono">owner=platform</code> + 该行的 entries</td><td><span class="tag yes">已定</span> 一次性、幂等</td></tr>
+            <tr><td><code class="mono">builtin: true</code> 但无 kind（半内置）</td><td>报损坏 + 拒绝服务，还是自动归 <code class="mono">owner=user</code>？</td><td><span class="tag todo">待拍板</span></td></tr>
+            <tr><td><code class="mono">skill-reviewer</code>（已下线）</td><td>归 <code class="mono">user</code>（可删）还是 <code class="mono">platform + entries=空</code>（只读、谁也进不去）？</td><td><span class="tag todo">待拍板</span></td></tr>
           </tbody>
         </table>
       </div>
 
-      <h2>7. 迁移（老数据怎么变成这张表）</h2>
-      <div class="table-wrap">
-        <table class="table">
-          <thead><tr><th>老数据</th><th>新属性</th><th>说明</th></tr></thead>
-          <tbody>
-            <tr><td><code class="mono">builtin: true</code> + <code class="mono">builtinKind: 'drafter'</code></td><td><code class="mono">owner=platform</code> + 第 2 节那一行</td><td>一次性、幂等；升级后老工作区自动对齐</td></tr>
-            <tr><td><code class="mono">builtin: true</code> 但<b>没有 kind</b>（半内置）</td><td><span class="tag todo">待拍板</span> 报损坏 + 拒绝服务，还是自动归为 <code class="mono">owner=user</code>？</td><td>我倾向“报出来 + 不服务”，让人决定</td></tr>
-            <tr><td><code class="mono">builtinKind: 'skill-reviewer'</code>（已下线）</td><td><span class="tag todo">待拍板</span>：<code class="mono">owner=user</code>（可删的普通智能体）或 <code class="mono">platform + trigger=none</code>（只读、标 retired）</td><td>影响老工作区那条记录的命运</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <h2>8. 还要你拍的四件事 <span class="tag todo">待拍板</span></h2>
-      <div class="grid2">
-        <div class="panel">
-          <b>① <code class="mono">owner</code> 够不够当唯一归属判据？</b>
-          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
-            只读、不可删全认它，“改成智能体”= <code class="mono">owner=user</code>。
-            我倾向够——否则又会回到“两个字段各管一半”。
-          </p>
-        </div>
-        <div class="panel">
-          <b>② <code class="mono">dispatchable</code> 要不要独立出来？</b>
-          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
-            今天平台成员一律不能派活，但<b>三处判据不一致</b>（其中一处根本没有守卫）。
-            我建议独立成属性、缺省 <code class="mono">false</code>。
-          </p>
-        </div>
-        <div class="panel">
-          <b>③ 出厂成员是“数据”还是“代码常量”？</b>
-          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
-            我建议：<b>代码提供出厂预置，库里存属性表</b>——升级能覆盖、用户改了能感知，
-            也不需要“新增成员要发版”这种限制。
-          </p>
-        </div>
-        <div class="panel">
-          <b>④ 已下线的 <code class="mono">skill-reviewer</code> 归哪边？</b>
-          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
-            A：<code class="mono">owner=user</code> ⇒ 变成可删的普通智能体；
-            B：<code class="mono">platform + trigger=none</code> ⇒ 只读、明确标“已下线”。
-          </p>
-        </div>
-      </div>
-
-      <h2>9. 我不建议属性化的部分（说清边界）</h2>
+      <h2>9. 不属性化的边界（说清，免得又长回去）</h2>
       <div class="notice">
         <div>
-          <b>产出的 schema 与落库实现</b>：skill 文件 / 岗位卡 / 编排代码 / 记忆候选 JSON——
-          这四样是不同的业务对象，硬套一个 schema 只会长回四个 <code class="mono">if</code>。
-          属性只负责<b>指过去</b>（<code class="mono">produce=files:agent-draft/</code>），
-          各自的读取与落库仍留在各自的 handler 里。
+          <b>产出的 schema 与落库实现</b>留在各自动作的 handler 里（skill 文件 / 岗位卡 / 编排代码 / 记忆候选 JSON 是四种不同的业务对象）；
+          <b>指令正文</b>留在 <code class="mono">instructions</code> 里（含"产出落在哪个目录"这条约定）。
+          属性只负责说"<b>谁能叫它</b>"，不负责说"叫了之后怎么干"。
         </div>
+      </div>
+
+      <h2>10. 还差两件待拍板</h2>
+      <div class="grid2">
+        <div class="panel"><b>① 半内置（builtin 在、无 kind）怎么处理？</b>
+          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">我建议：<b>报损坏 + 拒绝服务</b>，让人决定（自动归 user 会把一条"平台的东西"悄悄变成他的）。</p></div>
+        <div class="panel"><b>② 已下线的 <code class="mono">skill-reviewer</code> 归哪边？</b>
+          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">A：归 user ⇒ 变成可删的普通智能体；B：<code class="mono">platform + entries=∅</code> ⇒ 只读、谁也进不去、界面标"已下线"。</p></div>
       </div>
     </div>
   </body>
