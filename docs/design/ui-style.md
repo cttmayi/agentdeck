@@ -175,9 +175,77 @@
   title={creating ? $t('xxx.createTitle') : selected?.name ?? ''}
   bodyClass="detail-scroll"
 >
-  <!-- 详情内容 -->
+  {#snippet sub()}
+    <!-- 元信息：徽标 + 时间 + 轮数。它在栏头里自动落到标题下面那一行 -->
+    <span class="badge">{statusLabel}</span>
+    <span class="faint fs-xs">{$t('xxx.meta', { by, time })}</span>
+  {/snippet}
+
+  {#snippet actions()}
+    <!-- 栏头右侧动作（≥2 颗时自动画出分组轨道；主操作只有一颗 primary） -->
+    <button type="button" class="btn btn--ghost btn--sm" onclick={remove}>{$t('common.delete')}</button>
+  {/snippet}
+
+  <!-- 正文：全部用现成控件，页面不发明形状 -->
+  {#if error}<p class="notice bad">{error}</p>{/if}
+
+  <div class="field">
+    <label for="xxx-name">{$t('xxx.nameLabel')}</label>
+    <input id="xxx-name" type="text" bind:value={formName} autocomplete="off" />
+  </div>
+
+  <div class="field">
+    <label for="xxx-dir">{$t('newtask.workDirLabel')}</label>
+    <div class="workdir-row">
+      <input id="xxx-dir" type="text" bind:value={formWorkDir} />
+      <button type="button" class="btn btn--secondary" onclick={browse}>{$t('dirs.browse')}</button>
+    </div>
+    <p class="hint">{$t('newtask.workDirHintAfter1')}</p>
+  </div>
+
+  <!-- 折叠块：标题一行 + 右侧一句摘要，展开才是内容 -->
+  <div class="fold-section">
+    <button type="button" class="fold-head" aria-expanded={open} onclick={() => (open = !open)}>
+      <span class="chevron">{open ? '▾' : '▸'}</span>
+      <span class="fold-title">{$t('xxx.filesTitle')}</span>
+      <span class="fold-summary">{files.length} 个文件</span>
+    </button>
+    {#if open}
+      <div class="fold-body">
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>{$t('xxx.colFile')}</th><th>{$t('xxx.colSize')}</th><th>{$t('xxx.colWhen')}</th></tr></thead>
+            <tbody>
+              {#each files as f (f.path)}
+                <tr><td><code>{f.path}</code></td><td>{f.size}</td><td class="faint fs-xs">{f.when}</td></tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {/if}
+  </div>
+
+  {#snippet foot()}
+    <!-- 这一屏的主动作（栏脚）。反馈紧贴在它上面，按下就能看见 -->
+    <div class="main-panel-foot">
+      <span class="faint fs-xs">{$t('xxx.footNote')}</span>
+      <span style="flex: 1"></span>
+      <button type="button" class="btn btn--secondary" onclick={closeDetail}>{$t('common.cancel')}</button>
+      <button type="button" class="btn btn--primary" onclick={save}>{$t('xxx.save')}</button>
+    </div>
+  {/snippet}
 </MainArea>
 ```
+
+右栏（主区）永远是这四块，顺序固定：
+
+| # | 块 | 由谁给 | 要点 |
+|---|---|---|---|
+| ① | 栏头 | `MainArea` 的 `title` / `sub` / `actions` | 标题 + 动作在右列、元信息自动落第二行；窄屏「← 返回」也在它里面 |
+| ② | 正文 | `.pane-body` + 现成控件 | 字段 `.field`、提示条 `.notice`、折叠 `.fold-section`、表格 `.table-wrap > table.table`；**正文自己滚**，栏头栏脚不跟着滚 |
+| ③ | 栏脚 | `foot` snippet ＞ `.main-panel-foot` | 这一屏的主动作（只有一颗 `btn--primary`）；反馈紧贴它上面 |
+| ④ | 空态 | `empty` + `emptyTitle` / `emptyHint` | 没选中时"选一个"，不是一片空白 |
 
 顶栏动作、删除确认、浮层一律走现成的：
 

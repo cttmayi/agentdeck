@@ -10,6 +10,10 @@
       ══════════════════════════════════════════════════════════════════════
 
       **一个「左边一列、右边看详情」的页面的完整样子**（2026-11，D136）。
+      **右栏（主区）也补全了四块**：栏头（标题/动作/元信息）→ 正文（字段 / 提示条 /
+      折叠块 + 表格，全部现成控件）→ 栏脚（这一屏的主动作）→ 没选中时的空态。
+      工具条上的「看右栏空态」能切到最后那一块。
+
       新做一个这样的页面时，照这一屏抄：结构只拼现有的标准控件
       （Topbar / Sidebar / ListPane / ListRow / MainArea），页面自己的 CSS 只写
       「行内容」那两块（标题、辅助信息）。
@@ -2523,6 +2527,7 @@ a > button { width: 100%; }
 
       <div class="demo-toolbar">
         <button type="button" class="btn btn--secondary btn--sm" id="demo-pins-toggle">隐藏标注编号</button>
+        <button type="button" class="btn btn--secondary btn--sm" id="demo-empty-toggle">看右栏空态</button>
         <button type="button" class="btn btn--secondary btn--sm" id="demo-theme-toggle">切到暗色</button>
         <span class="demo-spacer"></span>
         <span class="faint fs-xs">下面这一屏就是产品里的样子（CSS 从真文件嵌入）</span>
@@ -2615,9 +2620,16 @@ a > button { width: 100%; }
                 </div>
               </section>
 
-              <!-- ─────────── 右栏：MainArea（栏头 + 正文）─────────── -->
+              <!-- ─────────── 右栏：MainArea（栏头 + 正文 + 栏脚 + 空态）─────────── -->
+              <!--
+                这是 `MainArea` 的四块：`detail-head`（标题/动作/元信息）→ `pane-body`
+                （正文，自己滚）→ 栏脚动作（`MainArea` 的 `foot` snippet）→ 没选中时的
+                `empty`。窄屏时左栏让位、这块占满，栏头左侧出现「← 返回」——三件事都在
+                组件里，页面不用管。工具条上的「看右栏空态」能切到最后那一块。
+              -->
               <section class="pane detail-pane">
-                <header class="detail-head">
+                <!-- ① 栏头：标题 + 动作（右列）+ 元信息（自动落第二行） -->
+                <header class="detail-head" data-demo-detail>
                   <h2 data-pin="4">第 12 周竞品周报（重跑）</h2>
                   <div class="detail-actions">
                     <button type="button" class="btn btn--ghost btn--sm">删除</button>
@@ -2627,11 +2639,90 @@ a > button { width: 100%; }
                     <span class="faint fs-xs">助手 · 12 分钟前 · 3 步</span>
                   </p>
                 </header>
-                <div class="pane-body detail-scroll">
-                  <p class="hint">这里放详情：表单（编辑态）、运行画面、或一段说明。窄屏时左栏让位、这块占满，
-                  栏头会出现「← 返回」——那两件事都在 <code>MainArea</code> 里，页面不用管。</p>
+
+                <!-- ② 正文：字段 / 提示条 / 折叠块 + 表格，全部是现成控件 -->
+                <div class="pane-body detail-scroll" data-pin="6" data-demo-detail>
+                  <p class="notice warn">
+                    这一份是重跑：素材与第 11 周相同，只换了排版。改完记得重新跑一次。
+                  </p>
+
+                  <div class="field">
+                    <label for="demo-name">名字</label>
+                    <input id="demo-name" type="text" value="第 12 周竞品周报（重跑）" autocomplete="off" />
+                  </div>
+
+                  <div class="field">
+                    <label for="demo-agent">交给谁</label>
+                    <select id="demo-agent">
+                      <option>助手（默认）</option>
+                      <option>采集员</option>
+                      <option>巡检员</option>
+                    </select>
+                  </div>
+
+                  <div class="field">
+                    <label for="demo-dir">工作目录</label>
+                    <div class="workdir-row">
+                      <input id="demo-dir" type="text" value="~/agentdeck-workspace/weekly-12" />
+                      <button type="button" class="btn btn--secondary">浏览…</button>
+                    </div>
+                    <p class="hint">留空即自动分配一个独立目录；填了就是它直接在那里干活。</p>
+                  </div>
+
+                  <!-- 折叠块：标题一行、右侧一句摘要，展开才是内容 -->
+                  <div class="fold-section">
+                    <button type="button" class="fold-head" aria-expanded="true">
+                      <span class="chevron">▾</span>
+                      <span class="fold-title">产出文件</span>
+                      <span class="fold-summary">3 个文件 · 18 KB</span>
+                    </button>
+                    <div class="fold-body">
+                      <div class="table-wrap">
+                        <table class="table">
+                          <thead>
+                            <tr><th>文件</th><th>大小</th><th>改于</th></tr>
+                          </thead>
+                          <tbody>
+                            <tr><td><code>weekly-12.md</code></td><td>12 KB</td><td class="faint fs-xs">12 分钟前</td></tr>
+                            <tr><td><code>sources.md</code></td><td>4 KB</td><td class="faint fs-xs">14 分钟前</td></tr>
+                            <tr><td><code>decision.md</code></td><td>2 KB</td><td class="faint fs-xs">14 分钟前</td></tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="fold-section">
+                    <button type="button" class="fold-head" aria-expanded="false">
+                      <span class="chevron">▸</span>
+                      <span class="fold-title">最近一次运行</span>
+                      <span class="fold-summary">2 分钟前 · 完成</span>
+                    </button>
+                    <div class="fold-body" hidden>
+                      <p class="hint" style="margin: 0">
+                        <span class="badge done">完成</span>
+                        3 步 · 用时 4 分 12 秒 · 输入 21.4k / 输出 3.1k tokens。
+                        详细日志在「任务」页点开这一条就能看到（运行画面是同一个组件）。
+                      </p>
+                    </div>
+                  </div>
                 </div>
-              </section>
+
+                <!-- ③ 栏脚：这一屏的主动作（`MainArea` 的 foot snippet；Skills/Settings 用的是同一款） -->
+                <div class="main-panel-foot" data-pin="7" data-demo-detail>
+                  <span class="faint fs-xs">改动只写在这一份上</span>
+                  <span style="flex: 1"></span>
+                  <button type="button" class="btn btn--secondary">取消</button>
+                  <button type="button" class="btn btn--primary">保存并运行</button>
+                </div>
+
+                <!-- ④ 没选中时的那一屏（`MainArea` 的 empty：说"选一个"，不是一片空白） -->
+                <div class="pane-body" hidden data-demo-empty>
+                  <div class="empty">
+                    <strong>选一份周报</strong>
+                    <p>左边点一条，就能在这里改它、看它的产出。</p>
+                  </div>
+                </div>
             </section>
           </main>
         </div>
@@ -2665,6 +2756,21 @@ a > button { width: 100%; }
           <div class="demo-legend-body">
             <b>详情头</b> <code>MainArea</code> ＞ <code>.detail-head</code> + <code>.detail-sub</code>
             <p>标题 + 动作在右、元信息自动落到第二行；窄屏返回按钮也在它里面。</p>
+          </div>
+        </li>
+        <li>
+          <span class="demo-pin">6</span>
+          <div class="demo-legend-body">
+            <b>正文</b> <code>.pane-body</code> + 现成控件
+            <p>字段 <code>.field</code>、提示条 <code>.notice</code>、折叠 <code>.fold-section</code>、
+            表格 <code>.table-wrap &gt; table.table</code>。正文自己滚（<code>overflow-y:auto</code>），栏头与栏脚不跟着滚。</p>
+          </div>
+        </li>
+        <li>
+          <span class="demo-pin">7</span>
+          <div class="demo-legend-body">
+            <b>栏脚动作</b> <code>.main-panel-foot</code>（<code>MainArea</code> 的 <code>foot</code>）
+            <p>这一屏的主动作放这里，只有一颗 <code>btn--primary</code>。反馈（<code>.notice</code>）紧贴在它上面。</p>
           </div>
         </li>
         <li>
@@ -2823,6 +2929,15 @@ a > button { width: 100%; }
         pinsOn = !pinsOn;
         pins().forEach((p) => (p.style.visibility = pinsOn ? 'visible' : 'hidden'));
         e.currentTarget.textContent = pinsOn ? '隐藏标注编号' : '显示标注编号';
+      });
+
+      // 「看右栏空态」：切到没选中时那一屏（MainArea 的 empty 分支）
+      let showEmpty = false;
+      document.getElementById('demo-empty-toggle').addEventListener('click', (e) => {
+        showEmpty = !showEmpty;
+        document.querySelectorAll('[data-demo-detail]').forEach((el) => (el.hidden = showEmpty));
+        document.querySelectorAll('[data-demo-empty]').forEach((el) => (el.hidden = !showEmpty));
+        e.currentTarget.textContent = showEmpty ? '看正常详情' : '看右栏空态';
       });
 
       const root = document.documentElement;
