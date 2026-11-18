@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { executorCandidates } from './newtask-chain.ts'
+import { blockedAssignees, executorCandidates } from './newtask-chain.ts'
 import type { Agent } from './api.ts'
 
 /*
@@ -47,5 +47,18 @@ describe('执行者候选', () => {
       executorCandidates(all).map((a) => a.id),
       ['e1', 'e2'],
     )
+    /*
+     * ★ 2026-11（D145）：判据换成**接入点**（`entries` 里有 `task`）。老 fixture（只有
+     *   `builtin` + `builtinKind`）仍然被正确排除——`entriesOf()` 会从老字段回退。
+     *   另外新增一条：**不可选的也要列出来**（"显示出来，只是置灰"）。
+     */
+    assert.deepEqual(
+      blockedAssignees(all).map((b) => b.agentId),
+      ['r1'],
+      '平台成员要出现在"显示但置灰"那一组里',
+    )
+    // 显式 entries 优先于老字段：把起草者改成能派活，它就该进候选
+    const promoted = agent({ id: 'r2', entries: ['chat', 'task'] })
+    assert.deepEqual(executorCandidates([promoted]).map((a) => a.id), ['r2'])
   })
 })

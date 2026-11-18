@@ -1,6 +1,7 @@
 import { renderText, webText, type TextParams, type WebTextId } from '@agentdeck/i18n'
 import { currentLocale } from './locale.ts'
 import type { Agent, ChatTurnView, Skill } from './api.ts'
+import { hasEntry } from './members.ts'
 
 /**
  * 聊天页的纯逻辑。
@@ -111,6 +112,24 @@ export type DraftPick = {
  */
 export const CHAT_CAPABLE_BUILTIN_KINDS = ['agent-maker', 'workflow-maker'] as const
 
+/**
+ * **不能选、但要显示出来**的那几条（2026-11，D145 使用者拍板："显示出来，只是置灰"）。
+ *
+ * 为什么不再"悄悄滤掉"：同一个下拉在不同人眼里长度不一样，人会以为"我的智能体少了"。
+ * 所以平台成员照常出现在列表里，`disabled` + 一行原因；`executorChoices()` 仍然只返回
+ * **能选**的那些（`applyChoice` 的逻辑一个字都不用动）。
+ *
+ * 判据与 daemon 同一句：`entries` 里有没有 `chat`（`owner === 'platform'` 且没有 chat
+ * 的就是被平台自己用的那条，比如起草者/记忆整理者）。
+ */
+export function blockedChatExecutors(
+  agents: readonly Agent[],
+): Array<{ agentId: string; name: string; reason: string }> {
+  return agents
+    .filter((a) => (a.owner === 'platform' || a.builtin === true) && !hasEntry(a, 'chat'))
+    .map((a) => ({ agentId: a.id, name: a.name, reason: '平台成员，不参与对话' }))
+}
+
 export function executorChoices(
   agents: readonly Agent[],
   skills: readonly Skill[],
@@ -130,10 +149,17 @@ export function executorChoices(
    * 能聊天的是：所有**用户建的** agent，加上内置的**聊天型岗位**
    * （`CHAT_CAPABLE_BUILTIN_KINDS`）。写等值集合，不写 `kind !== 'drafter'`。
    */
+  /*
+   * ★ 2026-11（D145）：判据换成**接入点**（`entries` 里有 `chat`），与 daemon 的
+   *   `canChat` 同一句。`CHAT_CAPABLE_BUILTIN_KINDS` 那份名单不再参与判定（留着给
+   *   兼容老 daemon：老 daemon 不返回 entries，此时按名单兜底）。
+   */
   const executors = agents.filter(
     (agent) =>
-      agent.builtinKind === undefined ||
-      (CHAT_CAPABLE_BUILTIN_KINDS as readonly string[]).includes(agent.builtinKind),
+      hasEntry(agent, 'chat') ||
+      (agent.entries === undefined &&
+        (agent.builtinKind === undefined ||
+          (CHAT_CAPABLE_BUILTIN_KINDS as readonly string[]).includes(agent.builtinKind))),
   )
   const choices: ExecutorChoice[] = executors.map((agent) => ({
     value: `agent:${agent.id}`,

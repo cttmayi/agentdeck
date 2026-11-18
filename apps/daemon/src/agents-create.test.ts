@@ -472,9 +472,15 @@ describe('★ 默认智能体：设 / 取消 / 只认执行者', () => {
         body: JSON.stringify({ agentId: drawer.id }),
       })
       assert.equal(res.status, 400)
-      const body = (await res.json()) as { error: string }
-      assert.match(body.error, /内置岗位/, '要说清为什么——否则人会以为是 bug')
+      const body = (await res.json()) as { error: string; code?: string }
+      /*
+       * ★ 2026-11（D145）：判据从"是不是内置岗位"换成**接入点**（`entries` 里有没有
+       *   `task`）——同一个判据现在也用在派活与任务下拉上。文案随之改了（不再说"内置岗位"），
+       *   但**必须仍然说清为什么**，否则人会以为是 bug。
+       */
+      assert.equal(body.code, 'agent_not_dispatchable')
       assert.match(body.error, /不接业务任务/)
+      assert.match(body.error, /接入点|entries/, '要说清判据是什么（改哪个属性能让它接）')
     })
   })
 

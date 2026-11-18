@@ -224,19 +224,30 @@ const CHECKS = [
     view: '新建任务',
     key: 'newtask.agentOptions',
     /**
-     * ★ 判据是**"平台内置岗位一个都不在"**，不是"我期待那几个人都在"：
-     *   内置的那几个（沉淀起草者 / 记忆整理者 / 智能体生成者，名字里都带「（内置）」）
-     *   干的是平台自己的活，派用户任务给它们是把平台内部的东西摆到业务选择里。
-     *   ⚠️ 筛选纪律：按**相等**判（`builtinKind === undefined`）而不是"不等于某几个名字"，
-     *   否则明天多一个内置岗位就静默漏进来。
+     * ★ 2026-11（D145）：从"平台成员一个都不出现"改成"**出现但都置灰**"。
+     *
+     * 使用者拍板："显示出来，只是置灰。保证界面一致性"——列表长度必须稳定，否则同一个人
+     * 在不同页面看到的下拉长度不一样，会以为"我的智能体少了"。
+     * 判据（三条，缺一不可）：
+     *   ① 至少两个**可选**项（只有一个的话"选谁"这件事量不出来）；
+     *   ② 平台成员**都在**列表里（名字带「（内置）」）；
+     *   ③ 它们**一个都不能可选**，而且要带原因（"— 平台成员，不接业务任务"）。
      */
     label:
-      '★★★ 下拉里**一个平台内置岗位都没有**（名字带「（内置）」的那些：起草者 / 记忆整理者 / ' +
-      '生成者）——它们干的是平台自己的活，不该出现在"交给谁"里；同时至少有两个可选项' +
-      '（只有一个的话"选谁"这件事量不出来）',
-    ok: (v) =>
-      Array.isArray(v) && v.length >= 2 && v.every((label) => !String(label).includes('内置')),
-    show: (v) => JSON.stringify(v),
+      '★★★ 「交给谁」里平台成员**显示但全部置灰**：可选项 ≥2、平台成员都在列表里、'
+      + '且没有一个能选（每颗都带原因）——改之前它们是**被滤掉**的，列表长度会随身份变化',
+    ok: (v) => {
+      if (!v || !Array.isArray(v.enabled) || !Array.isArray(v.disabled)) return false
+      const builtinShown = v.disabled.filter((x) => String(x).includes('内置'))
+      return (
+        v.enabled.length >= 2 &&
+        v.enabled.every((x) => !String(x).includes('内置')) &&
+        builtinShown.length >= 3 &&
+        builtinShown.every((x) => String(x).includes('平台成员'))
+      )
+    },
+    show: (v) =>
+      v ? `可选 ${JSON.stringify(v.enabled)}　置灰 ${JSON.stringify(v.disabled)}` : `${v}`,
   },
   {
     view: '新建任务',

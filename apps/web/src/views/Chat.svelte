@@ -26,6 +26,7 @@
     agentMemoryEnabled,
     applyChoice,
     chatFilesState,
+    blockedChatExecutors,
     executorChoices,
     isTurnRunning,
     skillsHeldBackByDaemon,
@@ -354,6 +355,7 @@
   /** 被这个旧 daemon 挡住、因此没进选项的那些 skill（页面上要点名说出来）。 */
   $: heldBackSkills = skillsHeldBackByDaemon($agents, $skills, skillsCarrySupported)
   $: agentChoices = draftChoices.filter((c) => c.kind === 'agent')
+  $: blockedChoices = blockedChatExecutors($agents)
   $: skillChoices = draftChoices.filter((c) => c.kind === 'skill')
   $: draftOption = draftChoices.find((c) => c.value === draftChoice) ?? null
   /** 选中的 skill（没有就 null）。 */
@@ -1180,6 +1182,10 @@
           <optgroup label={$t('chat.agentGroup')}>
             {#each agentChoices as choice (choice.value)}
               <option value={choice.value}>{agentNames.get(choice.agentId) ?? '—'}</option>
+            {/each}
+            <!-- ★ 2026-11（D145）：平台成员**显示出来、只是置灰**（不悄悄滤掉） -->
+            {#each blockedChoices as b (b.agentId)}
+              <option value={`blocked:${b.agentId}`} disabled>{b.name} — {b.reason}</option>
             {/each}
           </optgroup>
           {#if skillChoices.length > 0}

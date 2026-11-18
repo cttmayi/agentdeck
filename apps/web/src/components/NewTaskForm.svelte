@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte'
   import { api, newRunId, type Issue } from '../lib/api.ts'
   import { agents, effectiveDefaultAgentId, loadIssues, loadRuns } from '../lib/stores.ts'
-  import { executorCandidates } from '../lib/newtask-chain.ts'
+  import { blockedAssignees, executorCandidates } from '../lib/newtask-chain.ts'
   import PromptField from './PromptField.svelte'
   import { splitRequest } from '../lib/request-text.ts'
   import { createDirty } from '../lib/create-draft.ts'
@@ -46,6 +46,11 @@
 
   /** 执行者候选：`role === 'executor'`（审核者不接任务）。 */
   $: executorAgents = executorCandidates($agents)
+  /*
+   * ★ 2026-11（D145）：平台成员**显示出来、只是置灰**（"显示 + 置灰 + 原因"，不悄悄滤掉）
+   *   —— 列表长度稳定，人才不会以为"我的智能体少了"。
+   */
+  $: blockedAssigneesList = blockedAssignees($agents)
   // 没选过执行者时，初值 = 生效中的默认（没有就用列表第一个）。
   $: if (!agentId && executorAgents.length > 0) {
     agentId = $effectiveDefaultAgentId ?? executorAgents[0]!.id
@@ -243,6 +248,10 @@
               <option value={a.id}>
                 {a.name}{a.id === $effectiveDefaultAgentId ? $t('newtask.defaultSuffix') : ''}
               </option>
+            {/each}
+            <!-- ★ 2026-11（D145）：平台成员显示但置灰 -->
+            {#each blockedAssigneesList as b (b.agentId)}
+              <option value={`blocked:${b.agentId}`} disabled>{b.name} — {b.reason}</option>
             {/each}
           </select>
           <span class="hint">

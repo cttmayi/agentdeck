@@ -5319,10 +5319,19 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             ? ntPickCard().querySelectorAll('select').length
             : null
           facts['newtask.agentSelectFound'] = !!ntSelect()
+          /*
+           * ★ 2026-11（D145）：判据从"平台成员**一个都不出现**"改成"**出现但都置灰**"
+           *   （使用者拍板："显示出来，只是置灰。保证界面一致性"）。
+           *   所以这里分开给：可选的（enabled）与置灰的（disabled）。
+           */
           facts['newtask.agentOptions'] = (() => {
             const sel = ntSelect()
             if (!sel) return null
-            return [...sel.querySelectorAll('option')].map((o) => text(o))
+            const all = [...sel.querySelectorAll('option')]
+            return {
+              enabled: all.filter((o) => !o.disabled).map((o) => text(o)),
+              disabled: all.filter((o) => o.disabled).map((o) => text(o)),
+            }
           })()
           facts['newtask.agentSelectApplied'] = ntPickOptionByValue(ntSelect(), ntExecutorId)
           await wait(400)

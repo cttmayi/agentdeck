@@ -261,7 +261,7 @@ describe('D49 端到端：聊天投递的就是那句话', () => {
      */
     const list = await json('/api/agents')
     const agents = (list.body as {
-      agents: Array<{ id: string; builtin?: boolean; builtinKind?: string }>
+      agents: Array<{ id: string; builtin?: boolean; builtinKind?: string; owner?: string; entries?: string[] }>
     }).agents
     const maker = agents.find((a) => a.builtinKind === 'agent-maker')
     assert.ok(maker !== undefined, '启动对账要建出智能体生成者（内置）')
@@ -272,17 +272,21 @@ describe('D49 端到端：聊天投递的就是那句话', () => {
     assert.equal(made.status, 201, `生成者建对话应成功：${JSON.stringify(made.body)}`)
     await waitForTerminal((made.body as { turn: { runId: string } }).turn.runId)
 
-    // 其它内置岗位仍然进不来（它们只干平台自己那一件活）
+    /*
+     * ★ 2026-11（D145）：判据换成**接入点**（`entries` 里有没有 `chat`），不再是
+     *   "岗位白名单"。列表接口现在会带上算好的 `owner` / `entries`，直接读它们
+     *   ——这也顺带钉住"界面不用自己按 builtinKind 猜"。
+     */
     const otherBuiltin = agents.find(
-      (a) => a.builtin === true && a.builtinKind !== undefined && a.builtinKind !== 'agent-maker',
+      (a) => a.owner === 'platform' && !(a.entries ?? []).includes('chat'),
     )
-    assert.ok(otherBuiltin, '启动对账要建出别的内置岗位（起草者 / 记忆整理）')
+    assert.ok(otherBuiltin, '启动对账要建出别的平台成员（起草者 / 记忆整理）')
     const denied = await postJson('/api/conversations', {
       agentId: otherBuiltin!.id,
       text: '你好',
     })
     assert.equal(denied.status, 400)
-    assert.equal((denied.body as { code?: string }).code, 'agent_builtin_no_chat')
+    assert.equal((denied.body as { code?: string }).code, 'agent_no_chat')
   })
 
   test('★★ 对照组：任务那条路**照旧套模版**（同一台 daemon、同一个执行者）', async () => {

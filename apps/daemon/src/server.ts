@@ -104,6 +104,17 @@ import {
   migratePlatformSkillsToExclusive,
 } from './agent-maker-skills.ts'
 import { ensureBuiltinWorkflowMakerSkills } from './workflow-maker-skills.ts'
+import {
+  canBeDispatched,
+  canBeReferencedByWorkflow,
+  canChat,
+  entriesOf,
+  isHalfBuiltin,
+  migratePlatformMemberFields,
+  ownerOf,
+  platformMemberRefsInWorkflows,
+  workflowReferenceableNames,
+} from './platform-member.ts'
 import { CONDUCT_MAX_CHARS, GENERAL_WORK_CONDUCT } from './agent-conduct.ts'
 import { forgetRuntimeConfigHome, isIsolatedRuntime } from './run-hooks/runtime-config.ts'
 import {
@@ -1946,6 +1957,48 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   //    那个模块一起删掉了；这一步现在是"把整个字段摘掉"，比它更彻底。
   await runAgentLegacyCleanupOnce({ store, info })
 
+  /*
+   * ★ 2026-11（D145）：**把归属与接入点写进数据**（`owner` + `entries`）。
+   *
+   * 三条口径（见 `platform-member.ts`）：只补缺的、不删老字段、半内置不猜但**点名**。
+   * ⚠️ 必须排在 `runAgentLegacyCleanupOnce` **之后**：那条清理要先把老键（`reviewerAgentId`
+   *    等）摘掉并**在日志里点名**；而这里的写回是"把整条记录重写一遍"，跑在前面会把
+   *    老键提前抹掉——清理就变成"没东西可清"，日志里那句"清了谁"也随之消失。
+   *    （这个顺序是测试 `agent-legacy-cleanup.test.ts` 当场抓出来的。）
+   */
+  {
+    const migrated = await migratePlatformMemberFields(store, workspaceId)
+    if (migrated.migrated.length > 0) {
+      info(`平台成员属性已写入（owner + entries）：${migrated.migrated.length} 条记录`)
+    }
+    if (migrated.halfBuiltin.length > 0) {
+      warn(
+        `有 ${migrated.halfBuiltin.length} 条记录配置损坏（builtin 标记在、岗位值缺）：` +
+          `${migrated.halfBuiltin.join('、')}——已按「用户的普通智能体」处理（可改可删），` +
+          `要恢复平台成员请用「恢复成默认值」或重新出厂`,
+      )
+    }
+  }
+
+
+  /*
+   * ★ 2026-11（D145）：**上线前扫一遍现有编排代码**。
+   *
+   * 「派任务 / 被编排引用」这两道守卫是这一轮**新加**的：改之前编排代码能直接引用平台
+   * 成员（引擎解析是 `agents.find(name)` 的全量名单），所以升级当天，老编排里很可能
+   * 已经引用了起草者/编排生成者——那样它会**在运行时被拒**。与其让人跑到一半撞墙，
+   * 不如启动时**点名说出来**（第 ① 步：只报不改，改哪条由人决定）。
+   */
+  {
+    const stale = await platformMemberRefsInWorkflows(store, workspaceId, workflows)
+    if (stale.length > 0) {
+      warn(
+        `有 ${stale.length} 条编排引用了平台成员（它们的接入点里没有「被编排调用」，` +
+          `运行会被拒）：${stale.join('、')}——把里面的名字换成自己建的智能体即可`,
+      )
+    }
+  }
+
   // ★ Web UI 的构建产物不进版本库（gitignore），所以 clone 下来直接起 daemon
   //   会**没有界面**。这种情况必须说清楚怎么做，而不是发一个空白页让人以为
   //   是 daemon 坏了。只提示、不阻止启动——API 与 CLI 仍然完全可用。
@@ -2595,6 +2648,23 @@ async function injectedSkillsOf(
               const agents = await store.listAgents(workspaceId)
               const agent = agents.find((a) => (a.name as string) === agentName)
               if (!agent) return { ok: false, runId: null, error: `内嵌智能体不存在：${agentName}` }
+              /*
+               * ★ 2026-11（D145，使用者拍板"两处都约束"）：**引擎这侧也要查接入点**。
+               *
+               * 改之前这里没有任何门——`agents.find(name)` 是**全量**名单，于是编排代码
+               * 可以直接引用「沉淀起草者」「编排生成者」当执行者，跑起来按它们的平台指令
+               * 干活。另一半（编辑器/生成者的候选名单）由 `/api/workflows` 与生成者校验
+               * 那边同步过滤，所以"看得到就能跑、看不到就报错"是一致的。
+               */
+              if (!canBeReferencedByWorkflow(agent)) {
+                return {
+                  ok: false,
+                  runId: null,
+                  error:
+                    `「${agentName}」不能被编排引用——它的接入点里没有「被编排调用」` +
+                    `（平台成员默认不给）。换一个自己建的智能体。`,
+                }
+              }
               agentRef = { id: agent.id as AgentId, name: agent.name as string, instructions: agent.instructions ?? '' }
             } else {
               /*
@@ -3189,6 +3259,14 @@ async function injectedSkillsOf(
         //   不是同一份。
         instructions: effectiveInstructions(a),
         memoryCount: memoryCount.get(a.id as string) ?? 0,
+        /*
+         * ★ 2026-11（D145）：把**两个属性算好再给界面**，界面不再自己按 `builtinKind`
+         *   猜"能不能聊天/能不能派活"。半内置（配置残缺）也如实带一个标记，界面据此
+         *   显示"配置损坏"而不是把它当成正常智能体。
+         */
+        owner: ownerOf(a),
+        entries: entriesOf(a),
+        halfBuiltin: isHalfBuiltin(a),
       }))
       // ★ 默认智能体跟着列表一起给：界面要在卡片上标「默认」，新建任务页要用它
       //   当预选项——两处都拿同一份，不各自猜。
@@ -3249,12 +3327,17 @@ async function injectedSkillsOf(
        *   活（起草 / 整理记忆 / 生成智能体），被派用户任务只会按各自的岗位说明跑偏。
        *   用户建的 agent 一律可以当默认（平台不再声称知道"谁该干活"）。
        */
-      const builtinKind = builtinKindOf(agent)
-      if (builtinKind !== null) {
+      /*
+       * ★ 2026-11（D145）：判据换成**接入点**（`entries` 里有没有 `task`），不再问"它是
+       *   哪个岗位"。同一个判据也用在派活（`POST /api/runs` / `POST /api/issues`）与
+       *   任务下拉上——今天那三处各摸一个字段，正是"半内置"能钻过去的原因。
+       */
+      if (!canBeDispatched(agent)) {
         sendJson(res, 400, {
           error:
-            `「${agent.name}」是${describeBuiltinAgent(agent)}，不能当默认——` +
-            '内置岗位干的是平台自己的活（沉淀起草 / 记忆整理 / 生成智能体），不接业务任务。',
+            `「${agent.name}」不能当默认执行者——它的接入点里没有「派任务」` +
+            '（平台成员默认不接业务任务；要让它接，得改它的 entries）。',
+          code: 'agent_not_dispatchable',
         })
         return
       }
@@ -4047,7 +4130,7 @@ async function injectedSkillsOf(
           sendJson(res, 404, { error: `agent 不存在：${agentId}` })
           return
         }
-        if (agent.builtin === true && options.allowBuiltinEdits !== true) {
+        if (ownerOf(agent) === 'platform' && options.allowBuiltinEdits !== true) {
           sendJson(res, 400, {
             error: `「${agent.name}」是${describeBuiltinAgent(agent)}：它的独有技能由平台播种，不可改。`,
             code: 'builtin_agent_readonly',
@@ -4092,7 +4175,7 @@ async function injectedSkillsOf(
           sendJson(res, 404, { error: `agent 不存在：${agentId}` })
           return
         }
-        if (agent.builtin === true && options.allowBuiltinEdits !== true) {
+        if (ownerOf(agent) === 'platform' && options.allowBuiltinEdits !== true) {
           sendJson(res, 400, {
             error: `「${agent.name}」是${describeBuiltinAgent(agent)}：它的独有技能由平台播种，不可删。`,
             code: 'builtin_agent_readonly',
@@ -4157,7 +4240,7 @@ async function injectedSkillsOf(
          * 都要能对上"平台说的"与"实际跑的"。
          * 要回到原样、或平台升级了默认身份，用「恢复成默认值」（那是重置，不是编辑）。
          */
-        if (current.builtin === true && options.allowBuiltinEdits !== true) {
+        if (ownerOf(current) === 'platform' && options.allowBuiltinEdits !== true) {
           sendJson(res, 400, {
             error:
               `「${current.name}」是${describeBuiltinAgent(current)}：**只读**（平台内置，` +
@@ -4477,7 +4560,7 @@ async function injectedSkillsOf(
         //   ——而 409 那句文案还写着"可以在「智能体」页把它删掉"，等于平台在骗人。
         //   现在按 `builtinKindOf` 分开：起草者仍然铁律不可删，retired 的放行。
         //   ⚠️ 不自动删：那是使用者的数据，删不删由他点。
-        if (current.builtin === true && builtinKindOf(current) !== 'skill-reviewer') {
+        if (ownerOf(current) === 'platform') {
           sendJson(res, 400, {
             error: `「${current.name}」是${describeBuiltinAgent(current)}，不能删——要恢复原样请用「恢复成默认值」。`,
             code: 'builtin_agent_not_deletable',
@@ -4928,6 +5011,30 @@ async function injectedSkillsOf(
 
     if (req.method === 'POST' && path === '/api/issues') {
       const body = (await readJsonBody(req)) as Partial<Issue>
+      /*
+       * ★ 2026-11（D145）：**派活的接口层守卫**。
+       *
+       * 改之前这里对 assignee 不做任何检查——界面下拉把平台成员过滤掉了，但手写 API
+       * 就能把任务派给「沉淀起草者（内置）」，它会按"你是 skill 作者"的指令去干业务活。
+       * 判据与界面下拉、默认执行者、`POST /api/task` 用的是同一句：`canBeDispatched`。
+       */
+      const assigneeId = typeof body.assignee === 'string' ? body.assignee : null
+      if (assigneeId !== null) {
+        const target = await store.getAgent(assigneeId as Agent['id'])
+        if (!target) {
+          sendJson(res, 400, { error: `agent 不存在：${assigneeId}`, code: 'agent_not_found' })
+          return
+        }
+        if (!canBeDispatched(target)) {
+          sendJson(res, 400, {
+            error:
+              `「${target.name}」不接业务任务——它的接入点里没有「派任务」` +
+              `（平台成员默认不接）。换一个自己建的智能体。`,
+            code: 'agent_not_dispatchable',
+          })
+          return
+        }
+      }
       const now = Date.now()
       const issue: Issue = {
         id: (body.id ?? (ulid() as Issue['id'])) as Issue['id'],
@@ -7582,19 +7689,16 @@ async function injectedSkillsOf(
        *   ⚠️ 仍然写**等值**：`kind === null || kind === 'agent-maker'`，不写
        *   `kind !== 'drafter'`。
        */
-      const chatKind = builtinKindOf(agent)
       /*
-       * ★ 2026-11（D135）：能聊天的内置岗位有两个——智能体生成者与**编排生成者**
-       *   （它们干的活就是"在聊天里问清楚，产出草稿给人采纳"）。
-       *   ⚠️ 仍然写**等值**比较（一个集合），不写"不是起草者/记忆整理者"这种列表式排除。
+       * ★ 2026-11（D145）：判据换成**接入点**（`entries` 里有没有 `chat`），不再维护一份
+       *   "能聊天的岗位名"白名单——加一条平台成员时不需要改这里。
        */
-      const CHAT_CAPABLE_BUILTINS: ReadonlyArray<string> = ['agent-maker', 'workflow-maker']
-      if (chatKind !== null && !CHAT_CAPABLE_BUILTINS.includes(chatKind)) {
+      if (!canChat(agent)) {
         sendJson(res, 400, {
           error:
-            `「${agent.name}」是${describeBuiltinAgent(agent)}，不参与聊天——` +
-            `它只干平台自己那一件活。`,
-          code: 'agent_builtin_no_chat',
+            `「${agent.name}」不参与对话——它的接入点里没有「对话」` +
+            `（平台自己发起的活不走聊天）。`,
+          code: 'agent_no_chat',
         })
         return
       }
@@ -8031,10 +8135,12 @@ async function injectedSkillsOf(
         return
       }
       const agents = await store.listAgents(workspaceId)
-      const check = validateWorkflowCode(
-        parsed.code,
-        agents.map((a) => a.name as string),
-      )
+      /*
+       * ★ 2026-11（D145）：节点名只认**能被编排引用**的那些（`entries` 里有 `workflow`）。
+       *   改之前是全量名单 ⇒ 平台成员（起草者 / 编排生成者）也能通过校验，然后在运行
+       *   时才被引擎拒——"校验说行、跑起来必炸"是最坏的一种不一致。
+       */
+      const check = validateWorkflowCode(parsed.code, workflowReferenceableNames(agents))
       if (!check.ok) {
         sendJson(res, 400, {
           error:
@@ -9089,13 +9195,13 @@ async function injectedSkillsOf(
          * ⚠️ 2026-11（S4，D127）：这里原来要求 `role === 'executor'`。**角色退场** ⇒
          *   判据换成"它不能是平台内置岗位"（内置的干平台自己的活）。
          */
-        const kind = builtinKindOf(agent)
-        if (kind !== null) {
+        // ★ 2026-11（D145）：判据 = 接入点里有没有「派任务」（与默认执行者同一句）。
+        if (!canBeDispatched(agent)) {
           sendJson(res, 400, {
             error:
-              `「${agent.name}」是${describeBuiltinAgent(agent)}，不接业务任务。` +
-              `换一个自己建的智能体。`,
-            code: 'task_agent_is_builtin',
+              `「${agent.name}」不接业务任务——它的接入点里没有「派任务」。` +
+              `换一个自己建的智能体，或改它的 entries。`,
+            code: 'task_agent_not_dispatchable',
           })
           return
         }
@@ -9112,9 +9218,9 @@ async function injectedSkillsOf(
          *   判据换成"不是平台内置岗位"（用 `builtinKindOf(a) === null` 的等值写法）。
          */
         const usable =
-          preferred !== null && builtinKindOf(preferred) === null
+          preferred !== null && canBeDispatched(preferred)
             ? preferred
-            : (await store.listAgents(workspaceId)).filter((a) => builtinKindOf(a) === null)[0]
+            : (await store.listAgents(workspaceId)).filter(canBeDispatched)[0]
         if (usable === undefined) {
           sendJson(res, 400, {
             error:

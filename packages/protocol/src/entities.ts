@@ -593,6 +593,35 @@ export const Agent = z.object({
     .optional(),
 
   /**
+   * **归属**（2026-11，D145）：这条记录是平台的，还是用户自己的。
+   *
+   * ⚠️ 为什么要它：`builtin`（是不是平台的）与 `builtinKind`（哪一条岗位）原来是**两个
+   *   能各自变的字段**，而判据各摸一个（只读看前者、派活看后者）——手改一次数据就能造出
+   *   "半内置"：改不了、删不掉，却被当成普通智能体派活。
+   *
+   *   现在 `owner` 是**"能不能改/删"的唯一判据**，`entries` 是**"谁能叫它"的唯一判据**，
+   *   `builtinKind` 只剩"是哪一条"这一个职责（平台流程按它找人）。
+   *
+   * ⚠️ 可选：老记录没有它，`ownerOf()` 会**从老字段推**（`builtin === true` 且岗位值在
+   *   ⇒ platform），迁移只把结果写进数据，不改行为、可回滚。
+   */
+  owner: z.enum(['platform', 'user']).optional(),
+
+  /**
+   * **接入点**（2026-11，D145）：谁可以叫它。多选，**封闭值域**。
+   *
+   *   · `chat`     —— 能当对话执行者
+   *   · `task`     —— 能派业务任务 / 当默认执行者 / 出现在新建任务下拉
+   *   · `workflow` —— 能被编排代码 `agent('名字')` 引用（候选名单**与**引擎解析两处都查）
+   *   · `action:<id>` —— 某个平台动作会叫它（`skill-draft` / `memory-tidy` /
+   *     `agent-draft` / `agent-commit` / `workflow-commit`）
+   *
+   * ⚠️ 可选。缺省按 `owner` 推：`user` ⇒ `['chat','task','workflow']`（三项全开）；
+   *   `platform` ⇒ 出厂表 `PLATFORM_MEMBER_ENTRIES`（平台成员**默认不给 task/workflow**）。
+   */
+  entries: z.array(z.string()).optional(),
+
+  /**
    * 这个审核者按什么判（D37）。
    *
    * `null` = 没有标准。审核者没有标准 ⇒ **平台不会把产出交给它审**

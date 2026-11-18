@@ -301,6 +301,18 @@ export interface Agent {
   /** **平台内置岗位**（只有内置的有；用户建的 agent 没有）。见上面那条说明。 */
   builtinKind?: 'drafter' | 'skill-reviewer' | 'memory-tidy' | 'agent-maker' | 'workflow-maker'
   /**
+   * 2026-11（D145）：**归属**——`platform` 只读/不可删，`user` 自由。
+   * 界面判断"能不能改/删"只读它，不再看 `builtin`。
+   */
+  owner?: 'platform' | 'user'
+  /**
+   * 接入点（谁能叫它）：`chat` / `task` / `workflow` / `action:<id>`。
+   * 界面判断"能不能聊天/派活/被编排引用"只读它，不再按 `builtinKind` 猜。
+   */
+  entries?: string[]
+  /** 配置残缺（老字段只剩一半）：界面据此标"配置损坏"，不要当成正常智能体。 */
+  halfBuiltin?: boolean
+  /**
    * ★ 分批第 245 批：记忆功能的总开关。`false` = 关（不带入第一句话、不能手写、不能整理）。
    *
    * ⚠️ 缺省 = **开**：老记录里没有这个键。判据写 `!== false`，不要写 `=== true`

@@ -1,4 +1,5 @@
 import type { Agent } from './api.ts'
+import { hasEntry } from './members.ts'
 
 /**
  * 新建任务页**唯一**要推导的那一件事：这条任务交给谁执行。
@@ -45,5 +46,23 @@ import type { Agent } from './api.ts'
  *   靠的是**这一层不再假装懂**，而不是靠 role 拦）。
  */
 export function executorCandidates(agents: readonly Agent[]): Agent[] {
-  return agents.filter((a) => a.builtinKind === undefined)
+  /*
+   * ★ 2026-11（D145）：判据换成**接入点**（`entries` 里有 `task`），与 daemon 的
+   *   `canBeDispatched` 同一句。改之前这条用的是 `builtinKind === undefined`——
+   *   同一个问题在界面、设默认、接口层各有一个判据，而"半内置"正好从缝里钻过去。
+   */
+  return agents.filter((a) => hasEntry(a, 'task'))
+}
+
+/**
+ * **不能选、但要显示出来**的那几条（"显示出来，只是置灰"，D145）。
+ *
+ * 理由与聊天页同一个：列表长度必须稳定，否则人会以为"我的智能体少了"。
+ */
+export function blockedAssignees(
+  agents: readonly Agent[],
+): Array<{ agentId: string; name: string; reason: string }> {
+  return agents
+    .filter((a) => (a.owner === 'platform' || a.builtin === true) && !hasEntry(a, 'task'))
+    .map((a) => ({ agentId: a.id, name: a.name, reason: '平台成员，不接业务任务' }))
 }
