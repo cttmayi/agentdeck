@@ -3763,14 +3763,16 @@ const CHECKS = [
      *   · `padding-left === 0px`：`<ul>` 没重置就会被浏览器默认的 40px 顶开——
      *     整列右移 40px、行宽少 40px（定时任务、编排各犯过一次）；
      *   · `list-style === none`：容器不许还留着项目符号；
-     *   · 行距 `gap === 4px`（`--sp-1`）且**行左沿相对 `.pane-body` 内容左缘 = 0**。
+     *   · **行与行之间一条 1px 的 `--line` 上边线**（D141：4px 空隙在静止状态看不出来），
+     *     且**行左沿相对 `.pane-body` 内容左缘 = 0**。
      *
      * ⚠️ `gap` 允许 `null`（分组视图里两条行中间夹着组头，那一条量不到，不是缺陷）；
      *    但只要量到了就必须是 4px——0 会让 hover 框互相咬住。
      */
     label:
-      '★★★ 行容器 `ul` 五页同一个形状：**没有**默认 40px 缩进（`padding-left: 0`）、'
-      + '没有项目符号、行距 4px、行左沿贴着栏内缘——缺一条就是整列错位',
+      '★★★ 行容器 `ul` 同一个形状：**没有**默认 40px 缩进（`padding-left: 0`）、没有项目符号、'
+      + '**行间一条 1px 的 `--line` 上边线**（第一行不许有）、行左沿贴着栏内缘'
+      + '——缺一条就是"整列错位"或"静止状态看不出行分界"',
     ok: (v) => {
       if (!v) return false
       return LIST_PAGES.every((k) => {
@@ -3780,7 +3782,14 @@ const CHECKS = [
           x.padLeft === '0px' &&
           x.listStyle === 'none' &&
           x.inset === 0 &&
-          (x.gap === null || x.gap === 4)
+          x.gap === 0 &&
+          // 第一行不许有"发丝线"（列表顶部凭空多一条）；它可以是透明，也可以是**选中色**
+          // （探针量到的第一行常常就是当前选中的那一行，`.list-row.active` 的边框是 accent）
+          (x.firstRowTop === null ||
+            x.secondRowTop === null ||
+            x.firstRowTop.color !== x.secondRowTop.color) &&
+          (x.secondRowTop === null ||
+            (x.secondRowTop.w === '1px' && x.secondRowTop.color !== 'rgba(0, 0, 0, 0)'))
         )
       })
     },
@@ -3789,6 +3798,7 @@ const CHECKS = [
         const x = v?.[k]
         return x
           ? `${k}: 缩进${x.padLeft}/符号${x.listStyle}/距${x.gap ?? '—'}/左沿${x.inset}`
+            + `/线(1st ${x.firstRowTop ? x.firstRowTop.color : '—'}·2nd ${x.secondRowTop ? x.secondRowTop.color : '—'})`
           : `${k}: 没量到`
       }).join('　'),
   },

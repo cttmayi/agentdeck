@@ -878,8 +878,11 @@ hr {
   padding: 0;
   display: flex;
   flex-direction: column;
-  /* 行距与聊天/任务/智能体同一档（D66 定 `--sp-1`，原来是 2px vs 它的漂移） */
-  gap: var(--sp-1);
+  /* 行与行**不再靠空隙分段**（D141）：4px 空隙在不 hover、不选中时什么也看不出来
+     ——使用者原话"列表的内容只有选中才有框，没选择的时候，看不清楚分界"。
+     现在行间是一条 1px 的 `--line` 发丝线（放在 `ListRow.svelte` 的 scoped 样式里，
+     挨着行盒本身），所以这里 gap 回到 0：线与线相接，才是"列表"，而不是"一堆浮空的字"。 */
+  gap: 0;
 }
 
 /* ── 列表分组（2026-11，D137）：组头 = 淡字一行（chevron + 组名 + 计数）──
@@ -972,6 +975,18 @@ hr {
 /* 组与组之间再多留一点空（上一组的行与下一组的组头之间） */
 .list-stack > .list-group-head-wrap:not(:first-child) {
   margin-top: var(--sp-2);
+}
+
+/* ★ 2026-11（D141）：**行与行之间的发丝线**——不 hover、不选中时也看得见分界。
+   改之前靠 `.list-stack` 的 4px 空隙分段，而空隙在静止状态什么也读不出来
+   （使用者："列表的内容只有选中才有框，没选择的时候，看不清楚分界"）。
+
+   ⚠️ 为什么在全局而不是 `ListRow.svelte` 的 scoped 里：Svelte 会把"可能匹配不到自家元素"
+      的选择器**剪掉**，`.list-row + .list-row` 实测没进构建产物（查 CSS 才发现）。
+   ⚠️ 画在**相邻行的上边**，不是每行下边：第一行不会凭空多一条顶线，组头下边那条线
+      也不会跟它叠成双线。 */
+.list-row + .list-row {
+  border-top-color: var(--line);
 }
 
 /* 行盒 + 主按钮 + 行盒的 hover/选中态样式在 `ListRow.svelte` 的 scoped 样式里
@@ -3034,7 +3049,7 @@ a > button { width: 100%; }
 
         <div class="demo-case">
           <h3 class="good">✓ 行容器 = list-stack</h3>
-          <p>同一份行内容，只是容器换成一个已经在 <code>app.css</code> 里定义好的类：行左沿贴齐栏内缘、行距 4px。</p>
+          <p>同一份行内容，只是容器换成一个已经在 <code>app.css</code> 里定义好的类：行左沿贴齐栏内缘、行间一条发丝线。</p>
           <div style="border: 1px dashed var(--line-strong); border-radius: var(--radius-sm); overflow: hidden">
             <ul class="list-stack">
           <li class="list-row demo-row">
@@ -3130,7 +3145,7 @@ a > button { width: 100%; }
         <b>这一屏量到过的数</b>（2026-11，headless Chrome 1400×1200，量法与探针同一套）：
         两栏并排 ✓ · 栏头带 51px ✓ · 栏头无标题 ✓ · 搜索框在栏头 ✓ ·
         <code>ul</code> 的 <code>padding-left</code> 0 ✓ · <code>list-style</code> none ✓ ·
-        行距 4px ✓ · 行左沿贴齐栏内缘 ✓ · 行高底线 <code>min-height</code> 64px ✓ ·
+        行间发丝线 ✓ · 行左沿贴齐栏内缘 ✓ · 行高底线 <code>min-height</code> 64px ✓ ·
         长标题单行裁切 ✓ · 错例① 的 <code>ul</code> 缩进 40px、行距 0（缺陷复现）✓ ·
         错例② 的长标题折成 3 行、行高 67px（对比正确版的 22px）✓
       </p>
@@ -3176,9 +3191,12 @@ a > button { width: 100%; }
           ['行容器 ul 缩进 0', C(q('.pane-body > ul.list-stack'))?.paddingLeft === '0px'],
           ['行容器没有项目符号', C(q('.pane-body > ul.list-stack'))?.listStyleType === 'none'],
           [
-            '行距 4px',
+            '行间一条发丝线（不 hover 也看得见分界）',
             rows.length > 1 &&
-              Math.round(R(rows[1]).top - R(rows[0]).bottom) === 4,
+              Math.round(R(rows[1]).top - R(rows[0]).bottom) === 0 &&
+              C(rows[1]).borderTopWidth === '1px' &&
+              C(rows[1]).borderTopColor !== 'rgba(0, 0, 0, 0)' &&
+              C(rows[0]).borderTopColor === 'rgba(0, 0, 0, 0)',
           ],
           ['行高底线 64px', C(rows[0])?.minHeight === '64px'],
           ['长标题被裁成一行', !!longTitle && longTitle.scrollWidth > longTitle.clientWidth + 1],
@@ -3196,11 +3214,12 @@ a > button { width: 100%; }
             return Math.abs(R(hs[0]).height - R(hs[1]).height) <= 1 &&
               C(hs[0]).fontSize === C(hs[1]).fontSize
           })()],
-          ['分组：只有第二组上方有分隔线', (() => {
+          ['分组：每个组头下方一条线、列表顶部不许有线', (() => {
             const wraps = qa('.list-pane .list-group-head-wrap')
             return wraps.length === 2 &&
               C(wraps[0]).borderTopWidth === '0px' &&
-              C(wraps[1]).borderTopWidth === '1px'
+              C(wraps[0]).borderBottomWidth === '1px' &&
+              C(wraps[1]).borderBottomWidth === '1px'
           })()],
           ['分组：点组头能收起那一组', (() => {
             const head = q('.list-pane .list-group-head')
@@ -3227,9 +3246,9 @@ a > button { width: 100%; }
         box.innerHTML =
           bad.length === 0
             ? '<b>自检通过 ' + checks.length + '/' + checks.length + '</b>：两栏并排且详情够宽、栏头 51px 无标题、' +
-              'ul 无缩进 / 无符号 / 行距 4px、行高底线 64px、长标题单行裁切、正文自滚、' +
+              'ul 无缩进 / 无符号 / 行间一条发丝线、行高底线 64px、长标题单行裁切、正文自滚、' +
               '动作在栏头一条轨道且只有一颗主操作、删除是危险色、没有底部栏脚、' +
-              '分组两页同一个组头（可收起、组间有分隔线）、无横向溢出。'
+              '分组两页同一个组头（可收起、每个组头下方有分界线）、无横向溢出。'
             : '<b>自检未通过（' + bad.length + ' 项）</b>：' + bad.join('、')
       }
 

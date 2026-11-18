@@ -840,8 +840,11 @@ hr {
   padding: 0;
   display: flex;
   flex-direction: column;
-  /* 行距与聊天/任务/智能体同一档（D66 定 `--sp-1`，原来是 2px vs 它的漂移） */
-  gap: var(--sp-1);
+  /* 行与行**不再靠空隙分段**（D141）：4px 空隙在不 hover、不选中时什么也看不出来
+     ——使用者原话"列表的内容只有选中才有框，没选择的时候，看不清楚分界"。
+     现在行间是一条 1px 的 `--line` 发丝线（放在 `ListRow.svelte` 的 scoped 样式里，
+     挨着行盒本身），所以这里 gap 回到 0：线与线相接，才是"列表"，而不是"一堆浮空的字"。 */
+  gap: 0;
 }
 
 /* ── 列表分组（2026-11，D137）：组头 = 淡字一行（chevron + 组名 + 计数）──
@@ -934,6 +937,18 @@ hr {
 /* 组与组之间再多留一点空（上一组的行与下一组的组头之间） */
 .list-stack > .list-group-head-wrap:not(:first-child) {
   margin-top: var(--sp-2);
+}
+
+/* ★ 2026-11（D141）：**行与行之间的发丝线**——不 hover、不选中时也看得见分界。
+   改之前靠 `.list-stack` 的 4px 空隙分段，而空隙在静止状态什么也读不出来
+   （使用者："列表的内容只有选中才有框，没选择的时候，看不清楚分界"）。
+
+   ⚠️ 为什么在全局而不是 `ListRow.svelte` 的 scoped 里：Svelte 会把"可能匹配不到自家元素"
+      的选择器**剪掉**，`.list-row + .list-row` 实测没进构建产物（查 CSS 才发现）。
+   ⚠️ 画在**相邻行的上边**，不是每行下边：第一行不会凭空多一条顶线，组头下边那条线
+      也不会跟它叠成双线。 */
+.list-row + .list-row {
+  border-top-color: var(--line);
 }
 
 /* 行盒 + 主按钮 + 行盒的 hover/选中态样式在 `ListRow.svelte` 的 scoped 样式里

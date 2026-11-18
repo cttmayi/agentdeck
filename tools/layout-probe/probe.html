@@ -10599,11 +10599,24 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
                 rows.length >= 2 && rows[0].nextElementSibling === rows[1]
                   ? Math.round(rows[1].getBoundingClientRect().top - rows[0].getBoundingClientRect().bottom)
                   : null
+              /*
+               * ★ 2026-11（D141）：分段方式从"4px 空隙"改成"**行间一条 1px 的 `--line` 上边线**"
+               *   ——空隙在静止状态（不 hover、不选中）什么也读不出来。这里量：
+               *   `gap === 0`、第一行**没有**上边线、第二行有一条 `--line` 色的上边线。
+               */
+              const borderOf = (el) => {
+                if (!el) return null
+                const bc = getComputedStyle(el)
+                return { w: bc.borderTopWidth, color: bc.borderTopColor }
+              }
+              const all = [...ul.querySelectorAll(pg.rows)]
               return {
                 padLeft: c.paddingLeft,
                 listStyle: c.listStyleType,
                 gap,
                 inset: Math.round(first.getBoundingClientRect().left - bodyContentLeft),
+                firstRowTop: borderOf(all[0]),
+                secondRowTop: borderOf(all[1]),
               }
             })
             sk.hover[pg.key] = need(`行 hover 底色（${pg.key}）`, () => {

@@ -76,7 +76,7 @@ primary）；`workflows.aiGenerateJump`（点「AI 生成…」⇒ 落到聊天�
 之前它只有 D61–D66 统一时存在的那三页，于是新页面从没进过对比，"新页面和邻居一不一样"
 没有任何判据（编排页整列缩进 40px、行距 0 的那一版，探针 562 项全绿）。
 新增两条：`skeleton.listBox`（五页 `ul` 的 `padding-left` = 0 / `list-style` = none /
-行距 4px / 行左沿贴着栏内容左缘）与 `skeleton.rowMetrics`（五页行高**底线** `min-height`
+行间一条 `--line` 发丝线（第一行没有）/ 行左沿贴着栏内容左缘）与 `skeleton.rowMetrics`（五页行高**底线** `min-height`
 = 64px、**页内**行高差 ≤1px）。
 同时把"五页行高两两 ≤1px"放宽成"每页不低于底线"：编排行辅助信息里带徽标、实测 67px
 （聊天 64 / 智能体 65）——那是 `--list-row-min-h` 注释里写明的"内容更高时跟随内容"，
@@ -116,6 +116,8 @@ primary）；`workflows.aiGenerateJump`（点「AI 生成…」⇒ 落到聊天�
 组头字号 **≥** 行标题字号、组头底色 **≠** 行底色、也 **≠** **选中行**底色。
 最后那一项是量出来的教训：第一版分段带用了 `--surface-2`，而那就是 `.list-row.active`
 的底色 ⇒ "选中的那一行"会被读成分组头（探针当场 `headBg === activeRowBg`）。
+
+★ **D141**（行分界）**条数不变、口径变了**：`skeleton.listBox` 原来量"行距 4px"，现在量"**`gap` = 0 且相邻行之间一条 `--line` 上边线、第一行没有**"——因为 4px 空隙在静止状态看不出来（使用者："只有选中才有框"）。顺带一条实测教训：这条 CSS **不能**放`ListRow.svelte` 的 scoped 样式里（Svelte 把 `.list-row + .list-row` 剪掉了，构建产物里没有）。
 
 ⚠️ **判据的载体换了就跟着改选择器，但"意图"不许改**——D137/D138 两次都只动了宿主
 （`.group-head` → `.list-group-head`、`.schedules-main` → `.detail-pane`），判据文本与
