@@ -317,7 +317,7 @@
             {#snippet children()}
               <!-- 标题单行省略 + `title` 兜底（与聊天/任务列表同一条：列表是用来扫的） -->
               <span class="crystal-title" title={sourceLabel(row)}>{sourceLabel(row)}</span>
-              <span class="crystal-meta">
+              <span class="list-row-sub crystal-meta">
                 <!-- ★ 这一格是**沉淀任务**的状态，不是起草 run 的状态：
                      run 跑完只说明草稿写出来了，活还没完（要审阅、要入库）——
                      显示 run 的「已完成」会让使用者以为已经沉淀完了（见
@@ -440,12 +440,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .crystal-meta {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    font-size: var(--fs-xs);
-    color: var(--text-faint);
-  }
+  /* ⚠️ 2026-11（D142）：`.crystal-meta` 的声明删了——统一走 app.css 的 `.list-row-sub`
+     （基线对齐；这一行同样混着状态徽标）。 */
 
 </style>

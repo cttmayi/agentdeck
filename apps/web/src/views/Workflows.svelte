@@ -333,7 +333,7 @@
             <ListRow rowClass="wf-row" active={w.id === selectedId} onclick={() => selectOne(w)}>
               {#snippet children()}
                 <span class="wf-title" title={w.name}>{w.name}</span>
-                <span class="wf-sub">
+                <span class="list-row-sub wf-sub">
                   <span class="badge">{$t(sourceKey(w))}</span>
                   <span class="faint"
                     >{$t('workflows.updated', { time: relativeTime(w.updatedAt, Date.now()) })}</span
@@ -510,15 +510,8 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .wf-sub {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    font-size: var(--fs-xs);
-    color: var(--text-faint);
-    overflow: hidden;
-    white-space: nowrap;
-  }
+  /* ⚠️ 2026-11（D142）：`.wf-sub` 的声明删了——统一走 app.css 的 `.list-row-sub`
+     （基线对齐）。原来这里是 `align-items: center`，而这一行开头就是一枚「来源」徽标。 */
   /* ⚠️ 与定时任务页 `.sched-sub > *` 同一条教训（那一页量到过：长 cron 人话把行
      撑宽、省略号不生效）：flex 子项默认 `min-width: auto` 不收缩，子项里那段
      "更新于 x 分钟前"变长时会把整行顶出去。子项可收缩，截断才真的发生。 */

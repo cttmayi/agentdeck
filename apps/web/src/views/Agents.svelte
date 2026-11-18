@@ -334,7 +334,7 @@ import ListRow from '../components/ListRow.svelte'
                 <span class="badge default-badge">{$t('agents.defaultBadge')}</span>
               {/if}
             </span>
-            <span class="agent-notes faint fs-xs">
+            <span class="list-row-sub agent-notes faint fs-xs">
               <span class="agent-notes-trunc">
                 {a.instructions.trim()
                   ? a.instructions.slice(0, 48) + (a.instructions.length > 48 ? '…' : '')
@@ -514,11 +514,10 @@ import ListRow from '../components/ListRow.svelte'
     flex-wrap: wrap;
   }
 
+  /* ⚠️ 2026-11（D142）：共用部分走 `.list-row-sub`（它本来就是 baseline 对齐——这一页
+     是最早写对的那处）；这里只留宽度。 */
   .agent-notes {
     width: 100%;
-    display: flex;
-    align-items: baseline;
-    gap: var(--sp-2);
     min-width: 0;
   }
 

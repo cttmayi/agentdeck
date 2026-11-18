@@ -977,6 +977,31 @@ hr {
   margin-top: var(--sp-2);
 }
 
+/* ── 行的第二行（辅助信息）：`.list-row-sub`（2026-11，D142）──
+ *
+ * 六个列表页原来各写一份（`.conv-sub` / `.task-meta` / `.agent-notes` / `.sched-sub` /
+ * `.wf-sub` / `.crystal-meta`），其中**五处是 `align-items: center`** —— 而这一行里
+ * 常把文字和徽标混着放，徽标自己的盒子比文字高，`center` 对齐的是**盒子**、不是文字：
+ * 于是同一行里"最近 15 小时前"比前面那几段**低 3px**（实测：center 3px / baseline 0px）。
+ * 使用者报的就是这个（"和前面的文字高度没对齐，有特殊处理？"——没有特殊处理，是对齐方式错了）。
+ *
+ * 所以收成一条：**基线对齐**（`align-items: baseline`），字号/字色显式写。
+ * 页面只写"这一页多出来的形状"（比如任务页要 `flex-wrap: wrap`、智能体页要 `width: 100%`）。 */
+.list-row-sub {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* 长内容要能收缩（否则省略号不生效——定时任务页量到过的那条教训） */
+.list-row-sub > * {
+  min-width: 0;
+}
+
 /* ★ 2026-11（D141）：**行与行之间的发丝线**——不 hover、不选中时也看得见分界。
    改之前靠 `.list-stack` 的 4px 空隙分段，而空隙在静止状态什么也读不出来
    （使用者："列表的内容只有选中才有框，没选择的时候，看不清楚分界"）。
@@ -1998,10 +2023,16 @@ tbody tr:last-child td,
 /* ★ 扁平化（2026-09），**但描边留一条发丝**：纯色块在浅底上会"看不见边界"，
    浅色块底 + 同色的 28% 发丝线，chip 才是个 chip。`color-mix` 让描边跟着
    currentColor 走，亮暗两个主题各得其所。 */
+/* 徽标（胶囊 + 圆点 + 10% 底 + 28% 发丝边）。
+ *
+ * ⚠️ 2026-11（D142）：`display` 从 `inline-flex` 改成 **`inline-block`**，圆点从
+ *    "flex 子项" 改成 "内联块"——因为**基线的来源变了**：flex 容器的基线取"第一个
+ *    flex 子项的基线"，而圆点（`::before`）没有文字，浏览器退回用它的**下边缘**当基线
+ *    ⇒ 徽标整体比旁边的文字**低 1.9px**（实测），混排时（"最近 15 小时前 [失败]"）
+ *    那一段就比前面几段矮半行。改成 inline-block 之后徽标的基线就是**它自己文字**的
+ *    基线，和两边文字自然对齐（实测极差 0）。圆点用 `vertical-align: middle` 居中。 */
 .badge {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-1);
+  display: inline-block;
   padding: 0.1rem var(--sp-2);
   border-radius: var(--radius-pill);
   font-size: var(--fs-xs);
@@ -2013,10 +2044,13 @@ tbody tr:last-child td,
 
 .badge::before {
   content: '';
+  display: inline-block;
   width: 5px;
   height: 5px;
   border-radius: 50%;
   background: currentColor;
+  margin-right: var(--sp-1);
+  vertical-align: middle;
 }
 
 /* 小一号（表单/卡片里的"私有""必填"这类贴身标记）。用 `em` 而不是令牌，
@@ -2642,16 +2676,9 @@ a > button { width: 100%; }
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .demo-sub {
-        display: flex;
-        align-items: center;
-        gap: var(--sp-2);
-        font-size: var(--fs-xs);
-        color: var(--text-faint);
-        overflow: hidden;
-        white-space: nowrap;
-      }
-      .demo-sub > * { min-width: 0; }
+      /* ⚠️ 2026-11（D142）：`.demo-sub` 的声明删了——第二行统一走 `app.css` 的
+         `.list-row-sub`（`display:flex` + **基线对齐** + 字号字色显式写）。
+         原来这里自己写了一份 `align-items: center`，而那正是"文字比徽标低 1.9px"的病根。 */
 
       /* ── 对照用：**错的**三块（故意不重置 / 故意不写五件套）── */
       .demo-bad-list { /* 故意什么都不写：吃浏览器默认 padding-left: 40px */ }
@@ -2750,7 +2777,7 @@ a > button { width: 100%; }
                     <li class="list-row demo-row">
                       <button type="button" class="list-row-main">
                         <span class="demo-title" title="第 12 周竞品周报" data-pin="5">第 12 周竞品周报</span>
-                        <span class="demo-sub" data-pin="5">
+                        <span class="list-row-sub demo-sub" data-pin="5">
                           <span class="badge done">完成</span>
                           <span class="faint">助手 · 2 小时前</span>
                         </span>
@@ -2759,7 +2786,7 @@ a > button { width: 100%; }
                     <li class="list-row demo-row active">
                       <button type="button" class="list-row-main">
                         <span class="demo-title" title="第 12 周竞品周报（重跑）" data-pin="5">第 12 周竞品周报（重跑）</span>
-                        <span class="demo-sub" data-pin="5">
+                        <span class="list-row-sub demo-sub" data-pin="5">
                           <span class="badge in_progress">进行中</span>
                           <span class="faint">助手 · 12 分钟前</span>
                         </span>
@@ -2777,7 +2804,7 @@ a > button { width: 100%; }
                     <li class="list-row demo-row">
                       <button type="button" class="list-row-main">
                         <span class="demo-title" title="支付链路巡检记录" data-pin="5">支付链路巡检记录</span>
-                        <span class="demo-sub" data-pin="5">
+                        <span class="list-row-sub demo-sub" data-pin="5">
                           <span class="badge in_review">待审查</span>
                           <span class="faint">巡检员 · 昨天</span>
                         </span>
@@ -2787,7 +2814,7 @@ a > button { width: 100%; }
                     <li class="list-row demo-row">
                       <button type="button" class="list-row-main">
                         <span class="demo-title" title="这是一个特别长的标题，用来演示单行省略号是否真的生效——长标题不许把行撑开、也不许顶成两行带省略号" data-pin="5">这是一个特别长的标题，用来演示单行省略号是否真的生效——长标题不许把行撑开、也不许顶成两行带省略号</span>
-                        <span class="demo-sub" data-pin="5">
+                        <span class="list-row-sub demo-sub" data-pin="5">
                           <span class="badge failed">失败</span>
                           <span class="faint">采集员 · 3 天前</span>
                         </span>
@@ -3094,7 +3121,7 @@ a > button { width: 100%; }
               <li class="list-row demo-row">
                 <button type="button" class="list-row-main">
                   <span class="demo-title">这是一个特别长的标题，用来演示省略号是否真的生效——它会把行撑成两行</span>
-                  <span class="demo-sub"><span class="badge done">完成</span><span>助手 · 2 小时前</span></span>
+                  <span class="list-row-sub demo-sub"><span class="badge done">完成</span><span>助手 · 2 小时前</span></span>
                 </button>
               </li>
             </ul>
@@ -3131,7 +3158,7 @@ a > button { width: 100%; }
               <li class="list-row demo-row">
                 <button type="button" class="list-row-main">
                   <span class="demo-title">第 12 周竞品周报（含 3 个渠道的对比与结论）</span>
-                  <span class="demo-sub"><span class="badge done">完成</span><span class="faint">助手 · 2 小时前</span></span>
+                  <span class="list-row-sub demo-sub"><span class="badge done">完成</span><span class="faint">助手 · 2 小时前</span></span>
                 </button>
               </li>
             </ul>
@@ -3199,6 +3226,24 @@ a > button { width: 100%; }
               C(rows[0]).borderTopColor === 'rgba(0, 0, 0, 0)',
           ],
           ['行高底线 64px', C(rows[0])?.minHeight === '64px'],
+          [
+            '副行：文字与徽标同一基线',
+            (() => {
+              const sub = q('.pane-body .list-row-sub')
+              if (!sub || C(sub).alignItems !== 'baseline') return false
+              const tops = []
+              for (const el of sub.querySelectorAll('*')) {
+                for (const n2 of el.childNodes) {
+                  if (n2.nodeType === 3 && (n2.textContent || '').trim() !== '') {
+                    const r = document.createRange()
+                    r.selectNodeContents(n2)
+                    if (getComputedStyle(el).fontSize === C(sub).fontSize) tops.push(r.getBoundingClientRect().top)
+                  }
+                }
+              }
+              return tops.length >= 2 && Math.max(...tops) - Math.min(...tops) <= 1
+            })(),
+          ],
           ['长标题被裁成一行', !!longTitle && longTitle.scrollWidth > longTitle.clientWidth + 1],
           ['正文有高度（≥200px）', Math.round(R(body)?.height ?? 0) >= 200],
           ['正文是自滚容器（overflow-y: auto）', C(body)?.overflowY === 'auto'],
@@ -3248,7 +3293,7 @@ a > button { width: 100%; }
             ? '<b>自检通过 ' + checks.length + '/' + checks.length + '</b>：两栏并排且详情够宽、栏头 51px 无标题、' +
               'ul 无缩进 / 无符号 / 行间一条发丝线、行高底线 64px、长标题单行裁切、正文自滚、' +
               '动作在栏头一条轨道且只有一颗主操作、删除是危险色、没有底部栏脚、' +
-              '分组两页同一个组头（可收起、每个组头下方有分界线）、无横向溢出。'
+              '分组组头与行分界、副行文字与徽标同一基线、无横向溢出。'
             : '<b>自检未通过（' + bad.length + ' 项）</b>：' + bad.join('、')
       }
 

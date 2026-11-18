@@ -3691,6 +3691,28 @@ const CHECKS = [
   },
   {
     view: '列表栏骨架（D61）',
+    key: 'skeleton.subBaseline',
+    label:
+      '★★★ 副行里**文字在同一基线上**（各段文字顶边极差 ≤1px）——这一行常混着文字与徽标，'
+      + '而徽标的盒子比文字高：`align-items: center` 对齐的是盒子 ⇒ "最近 15 小时前"比前面'
+      + '几段低 3px（使用者报的就是这个）。现在统一走 `.list-row-sub` 的基线对齐',
+    ok: (v) => {
+      if (!v) return false
+      const seen = LIST_PAGES.map((k) => v[k]).filter(Boolean)
+      return (
+        seen.length >= 4 &&
+        // 副行一律基线对齐；同字号那几段的文字顶边极差 ≤1px（`null` = 只有一段，量不出）
+        seen.every((x) => x.alignItems === 'baseline' && (x.spread === null || x.spread <= 1))
+      )
+    },
+    show: (v) =>
+      LIST_PAGES.map((k) => {
+        const x = v?.[k]
+        return x ? `${k}: 极差${x.spread ?? '—'}px（${x.n} 段·${x.alignItems}）` : `${k}: 没量到`
+      }).join('　'),
+  },
+  {
+    view: '列表栏骨架（D61）',
     key: 'skeleton.groupHead',
     /**
      * ★★ 2026-11（D137 / D140）：分组组头**两页同一个控件**，并且**一眼分得出来**。

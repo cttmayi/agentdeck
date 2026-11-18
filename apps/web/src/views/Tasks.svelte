@@ -740,8 +740,8 @@ import ListRow from '../components/ListRow.svelte'
       <!-- ⚠️ 标题与徽标必须同一行：`{#if}` 块换行会在 textContent 里留前导空白，
            探针按 `startsWith('探针用的任务')` 找夹具行（布局判据的入口）——踩过。 -->
       <span class="task-title" title={issue.title}>{#if issue.source?.kind === 'workflow'}<span class="badge">{$t('workflows.taskBadge')}</span>{/if}{issue.title}</span>
-      <span class="task-meta">
-        <span class="stage-tag {info.stage}">{$t(stageShortId(info.stage))}</span>
+      <span class="list-row-sub task-meta">
+        <span class="badge stage-tag {info.stage}">{$t(stageShortId(info.stage))}</span>
         <!-- 只显示标签**之外**的信息（`note`）：「待审查」后面再跟一句
              「等待审核」是重复，使用者点名要去掉的就是它。 -->
         {#if info.noteId}
@@ -1384,12 +1384,11 @@ import ListRow from '../components/ListRow.svelte'
   }
 
   /* 删除按钮：默认几乎不可见，hover 才露出危险色——扫列表时不该被一排 × 吵到 */
+  /* ⚠️ 2026-11（D142）：共用部分（display / 基线对齐 / gap / 字号 / 字色）走 app.css 的
+     `.list-row-sub`；这里只留**这一页的形状**：允许换行（任务元信息里有阶段标签 + 三段时间），
+     且换行也只占一行的高度。 */
   .task-meta {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
     flex-wrap: wrap;
-    /* 元信息这一行就算换行也只占一行的高度：里面的东西都是短词 */
     min-height: 1.2em;
   }
 
@@ -1409,28 +1408,17 @@ import ListRow from '../components/ListRow.svelte'
   /* D65：阶段标签与平台徽标（`.badge`）**同一条配方**——胶囊 + 圆点 + 10% 底 +
      28% 发丝边。原来它是描边方角（r4px、无底无点），和智能体的角色徽标、技能/工具
      页的徽标是两种形状。改完之后任务列表与看板里的阶段 chip 都变成胶囊。 */
+  /*
+   * 阶段标签 = **`.badge` 的一个变体**（2026-11，D142）。
+   *
+   * 原来这里是一整套"再画一遍"（胶囊 + 圆点 + 10% 底 + 28% 边 + inline-flex），
+   * 与 `.badge` 逐条重复——重复的代价不只是代码：`.badge` 修基线的时候它没跟着修
+   * （`.badge` 的 `::before` 圆点让基线落在圆点上，比旁的文字低 1.9px），
+   * 于是任务页那一行照样歪。
+   * 现在形状全部来自 `.badge`，这里只留**竖内距 0**（`0.1rem` 会把任务行撑高 2-3px）。
+   */
   .stage-tag {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--sp-1);
-    /* 竖内距 0（`0.1rem` 会把它撑成 ~20px，任务行跟着 65→67px，D61 的行高判据
-       会红——而它在这个列表里是元信息行的内容，该贴文本行高）。横向留 `--sp-2`
-       与 `.badge` 一致；胶囊形状（圆角 + 圆点 + 底）不变。 */
     padding: 0 var(--sp-2);
-    border-radius: var(--radius-pill);
-    font-size: var(--fs-xs);
-    font-weight: 500;
-    border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
-    background: color-mix(in srgb, currentColor 10%, transparent);
-    white-space: nowrap;
-  }
-
-  .stage-tag::before {
-    content: '';
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: currentColor;
   }
 
   /* 阶段色与看板的列色一致：同一件事在两个视图里该是同一个颜色。

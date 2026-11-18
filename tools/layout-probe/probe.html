@@ -10367,7 +10367,12 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
                 const sample = `${Math.round(parseFloat(c.fontSize) * 10) / 10}（高 ${Math.round(b.getBoundingClientRect().height)}）`
                 ;(btns[key] ??= []).push(sample)
               }
-              const badge = d().querySelector('.badge')
+              /*
+               * ⚠️ 2026-11（D142）：采样时**排除 `.stage-tag`**——它是 `.badge` 的一个
+               *   变体（同一套配方，只把竖内距改成 0，免得把任务行撑高 2-3px，D61 定的）。
+               *   它现在同时带 `.badge` 类，不排除的话这一条会拿"变体"去跟"基准"比内距。
+               */
+              const badge = d().querySelector('.badge:not(.stage-tag)')
               const bc = badge ? getComputedStyle(badge) : null
               const rowTitle = d().querySelector(
                 '.list-pane .row-title, .list-pane .task-title, .list-pane .conv-title, .list-pane .agent-line strong',
@@ -10408,7 +10413,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         {
           const sk = {
             headH: {}, searchInHead: {}, rowH: {}, delInset: {}, titleInHead: {},
-            title: {}, chip: {}, rowBox: {}, hover: {}, listBox: {}, rowMetrics: {}, sub: {},
+            title: {}, chip: {}, rowBox: {}, hover: {}, listBox: {}, rowMetrics: {}, sub: {}, subBaseline: {},
           }
           /**
            * ★ 2026-11（D136）：采样页从 **3 页扩到 5 页**——加了定时任务与编排。
@@ -10421,9 +10426,9 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
            *   等于自证。往后**任何新增的列表页都必须先进这张表**。
            */
           const skPages = [
-            { key: 'chat', hash: '#/chat', rows: '.conv-row', titleSel: '.conv-title', chipSel: null },
-            { key: 'tasks', hash: '#/tasks', rows: '.task-row', titleSel: '.task-title', chipSel: '.stage-tag' },
-            { key: 'agents', hash: '#/agents', rows: '.agent-row', titleSel: '.agent-line strong', chipSel: '.badge' },
+            { key: 'chat', hash: '#/chat', rows: '.conv-row', titleSel: '.conv-title', chipSel: null, subSel: '.conv-sub' },
+            { key: 'tasks', hash: '#/tasks', rows: '.task-row', titleSel: '.task-title', chipSel: '.stage-tag', subSel: '.task-meta' },
+            { key: 'agents', hash: '#/agents', rows: '.agent-row', titleSel: '.agent-line strong', chipSel: '.badge', subSel: '.agent-notes' },
             { key: 'schedules', hash: '#/schedules', rows: '.sched-row', titleSel: '.sched-title', chipSel: null, subSel: '.sched-sub' },
             { key: 'workflows', hash: '#/workflows', rows: '.wf-row', titleSel: '.wf-title', chipSel: '.badge', subSel: '.wf-sub' },
             // ★ 2026-11（D138）：「沉淀」也是列表页（ListPane + ListRow），原来**不在采样表里**
@@ -10571,6 +10576,55 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
                 return { fs: Math.round(parseFloat(c.fontSize) * 10) / 10, color: c.color }
               })
             }
+            /*
+             * ★ 2026-11（D142）：副行里**文字是否在同一基线上**。
+             *
+             * 这一行里常把文字与徽标混着放，徽标的盒子比文字高 —— `align-items: center`
+             * 对齐的是**盒子**，于是"最近 15 小时前"比前面几段低 3px（实测）。
+             * 现在统一 `.list-row-sub` 用 `align-items: baseline`。判据：副行内各段文字的
+             * 顶边极差 ≤1px。
+             */
+            if (pg.subSel) {
+              sk.subBaseline[pg.key] = need(`副行基线（${pg.key}）`, () => {
+                const sub = first?.querySelector(pg.subSel)
+                if (!sub) return null
+                /*
+                 * ⚠️ 只比**同字号**的几段：字号不同时，即使基线对齐，**顶边**也不一样
+                 *    （11px 的阶段标签与 12px 的元信息天然差 ~1.9px）。第一版没滤字号，
+                 *    任务页就一直红——那不是缺陷，是量法错了。
+                 */
+                const baseFs = getComputedStyle(sub).fontSize
+                const tops = []
+                const visit = (el) => {
+                  for (const child of el.children) {
+                    const own = [...child.childNodes]
+                      .filter((n) => n.nodeType === 3 && (n.textContent ?? '').trim() !== '')
+                      .map((n) => {
+                        const r = document.createRange()
+                        r.selectNodeContents(n)
+                        return { top: r.getBoundingClientRect().top, fs: getComputedStyle(child).fontSize }
+                      })
+                    if (own.length > 0) tops.push(...own)
+                    else visit(child)
+                  }
+                }
+                visit(sub)
+                const sameSize = tops.filter((x) => x.fs === baseFs)
+                return {
+                  alignItems: getComputedStyle(sub).alignItems,
+                  n: sameSize.length,
+                  // 同字号段不足两段 ⇒ 量不出极差（不是缺陷）
+                  spread:
+                    sameSize.length < 2
+                      ? null
+                      : Math.round(
+                          (Math.max(...sameSize.map((x) => x.top)) -
+                            Math.min(...sameSize.map((x) => x.top))) *
+                            10,
+                        ) / 10,
+                }
+              })
+            }
             sk.rowBox[pg.key] = need(`行容器（${pg.key}）`, () => {
               const c = first ? getComputedStyle(first) : null
               return c ? { align: c.alignItems, gap: c.gap } : null
@@ -10666,6 +10720,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             'skeleton.separatorNoHint': sk.separatorNoHint,
             'skeleton.listBox': sk.listBox,
             'skeleton.subRow': sk.sub,
+            'skeleton.subBaseline': sk.subBaseline,
             'rowdetail.title': sk.title,
             'rowdetail.chip': sk.chip,
             'rowdetail.rowBox': sk.rowBox,

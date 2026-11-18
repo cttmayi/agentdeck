@@ -1011,7 +1011,7 @@
                    打算显示，只是没接上（`relativeTime` 同样是死导入）。
                    准确时间在 `title` 里（列表只需要量级）。 -->
               <span
-                class="conv-sub faint fs-xs"
+                class="list-row-sub conv-sub faint fs-xs"
                 title={conversation.lastTurnAt === null
                   ? $t('chat.neverUsed')
                   : absoluteTime(conversation.lastTurnAt)}
@@ -1634,9 +1634,8 @@
     white-space: nowrap;
   }
 
-  .conv-sub {
-    display: block;
-  }
+  /* ⚠️ 2026-11（D142）：`.conv-sub` 的声明删了——行的第二行统一走 app.css 的
+     `.list-row-sub`（基线对齐 + 字号字色显式写）。这一页没有额外形状。 */
 
   /* ★ 313 批：栏头改用 `.detail-head` 那套 grid 骨架（标题左列 / 动作右列 /
      元信息自动落到第二行）。原来这里是 `.pane-head` + 自己写的 flex，与任务、

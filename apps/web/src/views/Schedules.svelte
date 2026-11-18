@@ -526,7 +526,7 @@ import type { WebTextId } from '@agentdeck/i18n'
           >
             {#snippet children()}
               <span class="sched-title">{s.name}</span>
-              <span class="sched-sub">
+              <span class="list-row-sub sched-sub">
                 <span class="sched-cron">{s.humanCron}</span>
                 {#if s.enabled && s.nextRunAt !== null}
                   <span class="sched-next">{$t('schedules.next')} {relativeTime(s.nextRunAt, Date.now())}</span>
@@ -951,19 +951,10 @@ import type { WebTextId } from '@agentdeck/i18n'
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .sched-sub {
-    display: flex;
-    gap: var(--sp-2);
-    font-size: var(--fs-xs);
-    color: var(--text-faint);
-    overflow: hidden;
-    white-space: nowrap;
-  }
-  /* 2026-11（同一批）：flex 子项默认 min-width:auto 不收缩——长 cron 人话
-     （如"整点, 每隔 4 小时"）会把行撑宽/溢出。子项可收缩后省略号才生效。 */
-  .sched-sub > * {
-    min-width: 0;
-  }
+  /* ⚠️ 2026-11（D142）：`.sched-sub` 的声明删了——这一页原来用 `align-items: center`，
+     而这一行里混着徽标（「最近 15 小时前」后面那枚状态徽标），center 对齐的是盒子、
+     不是文字 ⇒ 那段文字比前面几段**低 3px**（使用者报的"高度没对齐"）。
+     现在统一走 app.css 的 `.list-row-sub`（基线对齐）。 */
   .sched-cron {
     color: var(--text-dim);
   }
