@@ -3693,50 +3693,40 @@ const CHECKS = [
     view: '列表栏骨架（D61）',
     key: 'skeleton.groupHead',
     /**
-     * ★★ 2026-11（D137）：分组组头**两页同一个控件**。
+     * ★★ 2026-11（D137 / D140）：分组组头**两页同一个控件**，并且**一眼分得出来**。
      *
-     * 这一档原来各写一套：任务页是带边框的卡片按钮（组名 `--fs-sm`/600），智能体页是
-     * 无边框淡字行（`--fs-xs`），连 DOM 结构都不同（一个把行套在组里、一个是兄弟）。
-     * 现在两页都用 `ListGroupHead` + `app.css` 的 `.list-group-head`，所以量**等式**。
+     * D137 把两页收编成 `ListGroupHead` + `.list-group-head`；D140 按使用者两轮反馈
+     * 定形为"**底色带 + 下方一条线**"（曾经是淡字一行：字号比行标题小、颜色与行标题
+     * 同色 ⇒ 读起来就是"一行缩小的内容"，使用者两轮都说"分不清楚"）。
      */
     label:
       '★★ 列表分组两页同一个组头：同高（≤1px）、同字号、组名同字重（600）、都有 chevron、'
-      + '计数贴右；组间分隔线**只在第二组有**（第一组上方不许有线）；'
-      + '且组头**不靠缩小区分**（字号 ≥ 行标题、有底色带、与行背景不同）',
+      + '计数贴右；且**一眼分得出来**——字号 ≥ 行标题、有底色带（≠ 行底、也 ≠ 选中行底）、'
+      + '每个组头下方一条线（列表顶部不许有线）、两组之间留空隙',
     ok: (v) => {
       const a = v?.tasks
       const b = v?.agents
       if (!a || !b) return false
-      return (
-        Math.abs(a.h - b.h) <= 1 &&
-        a.fs === b.fs &&
-        a.nameWeight === '600' &&
-        b.nameWeight === '600' &&
-        a.hasChevron &&
-        b.hasChevron &&
-        a.countRight &&
-        b.countRight &&
-        a.sepFirst === '0px' &&
-        b.sepFirst === '0px' &&
-        // ★ D140：组头**不靠"缩小"区分**（字号 ≥ 行标题），且靠**底色**分段
-        a.nameFs >= (a.rowTitleFs ?? 99) &&
-        b.nameFs >= (b.rowTitleFs ?? 99) &&
-        a.headBg !== a.rowBg &&
-        b.headBg !== b.rowBg &&
-        // 组头底色也不能等于**选中行**的底色（否则选中的那一行会被读成分组头）
-        (a.activeRowBg === null || a.headBg !== a.activeRowBg) &&
-        (b.activeRowBg === null || b.headBg !== b.activeRowBg) &&
-        // `null` = 这一页当时只有一组（量不到第二组的线），不是缺陷；量到了就必须是 1px
-        (a.sepSecond === null || a.sepSecond === '1px') &&
-        b.sepSecond === '1px'
-      )
+      const same = (x) =>
+        x.nameWeight === '600' &&
+        x.hasChevron &&
+        x.countRight &&
+        x.nameFs >= (x.rowTitleFs ?? 99) &&
+        x.headBg !== x.rowBg &&
+        (x.activeRowBg === null || x.headBg !== x.activeRowBg) &&
+        x.borderTopFirst === '0px' &&
+        x.borderBottomFirst === '1px' &&
+        (x.borderBottomSecond === null || x.borderBottomSecond === '1px') &&
+        (x.gapBeforeSecond === null || x.gapBeforeSecond >= 8)
+      return Math.abs(a.h - b.h) <= 1 && a.fs === b.fs && same(a) && same(b)
     },
     show: (v) =>
       ['tasks', 'agents']
         .map((k) => {
           const x = v?.[k]
           return x
-            ? `${k}: 高${x.h}/字号${x.fs}/字重${x.nameWeight}/chev${x.hasChevron ? x.glyph : '无'}/计数贴右${x.countRight}/线(1st${x.sepFirst},2nd${x.sepSecond})`
+            ? `${k}: 高${x.h}/字号${x.fs}(行${x.rowTitleFs})/底${x.headBg}(行${x.rowBg},选${x.activeRowBg})`
+              + `/线(顶${x.borderTopFirst},底${x.borderBottomFirst}/${x.borderBottomSecond})/组间距${x.gapBeforeSecond}`
             : `${k}: 没量到`
         })
         .join('　'),

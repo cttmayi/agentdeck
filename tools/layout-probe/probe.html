@@ -10719,9 +10719,27 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
                 const t = d().querySelector('.list-pane .list-row .' + (pgTitleClass(hash) ?? 'x'))
                 return t ? getComputedStyle(t).color : null
               })(),
-              sepFirst: getComputedStyle(first.closest('.list-group-head-wrap')).borderTopWidth,
-              sepSecond: second
-                ? getComputedStyle(second.closest('.list-group-head-wrap')).borderTopWidth
+              /* D140 第二轮：分割从"只有第二组有顶线"改成**每个组头下方一条线**
+                 （两道线索：底色带 + 它下面那条线）。所以这里量三条：
+                 · 第一组**上方**不许有线（列表顶部不该凭空多一条）；
+                 · 每个组头下方必须是 1px；
+                 · 第二组与上一组之间要留出空隙（不然"带子 + 线"贴着上一行，还是分不清）。 */
+              borderTopFirst: getComputedStyle(first.closest('.list-group-head-wrap')).borderTopWidth,
+              borderBottomFirst: getComputedStyle(first.closest('.list-group-head-wrap')).borderBottomWidth,
+              borderBottomSecond: second
+                ? getComputedStyle(second.closest('.list-group-head-wrap')).borderBottomWidth
+                : null,
+              gapBeforeSecond: second
+                ? (() => {
+                    // 第二组上方那条"上一组最后一行"的下沿；
+                    // ⚠️ 上一组可能是**收起的**（智能体页「内置」默认收拢）⇒ 中间没有行，
+                    //    这时量不到"组间距"，记 null（与"只有一组"同样是"没量到"，不是缺陷）
+                    let el = second.closest('.list-group-head-wrap').previousElementSibling
+                    while (el && !el.classList.contains('list-row')) el = el.previousElementSibling
+                    return el
+                      ? Math.round(second.getBoundingClientRect().top - el.getBoundingClientRect().bottom)
+                      : null
+                  })()
                 : null,
             }
           }

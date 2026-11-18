@@ -859,10 +859,6 @@ hr {
      </ul>
    组与组之间那条线由 `:not(:first-child)` 自动画（上一组没有东西就不会有组头，
    所以不需要页面判断"要不要画分隔线"）。组件：`ListGroupHead.svelte`。 */
-.list-group-head-wrap {
-  margin: 0;
-}
-
 /* 组头：**一条分段带**（2026-11 使用者两轮反馈之后的形状）。
  *
  * 第一版是"淡字一行"（透明底 + `--fs-xs` + 组名 `--text`），使用者看下来两条意见：
@@ -885,7 +881,10 @@ hr {
   padding: var(--sp-1) var(--sp-2);
   border: 0;
   border-radius: var(--radius-sm);
-  background: var(--bg);
+  /* 分段带的底色：`--bg`(#f6f7f9) 与行底(#fff) 的对比只有 **1.07**，肉眼等于没有
+     （使用者两轮反馈"底色还是一样"）⇒ 用 `--text` 混出明确的浅灰：
+     对行底 1.31、对选中行 1.15，两个都分得开；深色主题下同一条式子自动变成"提亮"。 */
+  background: color-mix(in srgb, var(--text) 14%, var(--surface));
   color: var(--text-dim);
   font: inherit;
   font-size: var(--fs-base);
@@ -894,7 +893,7 @@ hr {
 }
 
 .list-group-head:hover {
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--text) 22%, var(--surface));
   color: var(--text);
 }
 
@@ -923,11 +922,18 @@ hr {
   white-space: nowrap;
 }
 
-/* 组与组之间的分隔线：组头不是列表第一项 ⇒ 上面一定还有一组 */
+/* 组头下面那条线：**"这以下是本组内容"**。
+   与底色是**两道线索**——浅色主题下只靠落差的底色太弱（1.07 那版等于没有），
+   所以每个组头都画一条（不再是"只有非第一组才画"）：它标的是"组从这里开始"，
+   与"上面是上一组"本来就不同一件事。 */
+.list-group-head-wrap {
+  margin: 0 0 var(--sp-1);
+  border-bottom: 1px solid var(--line);
+}
+
+/* 组与组之间再多留一点空（上一组的行与下一组的组头之间） */
 .list-stack > .list-group-head-wrap:not(:first-child) {
-  border-top: 1px solid var(--line);
-  margin-top: var(--sp-1);
-  padding-top: var(--sp-1);
+  margin-top: var(--sp-2);
 }
 
 /* 行盒 + 主按钮 + 行盒的 hover/选中态样式在 `ListRow.svelte` 的 scoped 样式里
