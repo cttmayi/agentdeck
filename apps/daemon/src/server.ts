@@ -103,6 +103,7 @@ import {
   ensureBuiltinAgentMakerSkills,
   migratePlatformSkillsToExclusive,
 } from './agent-maker-skills.ts'
+import { ensureBuiltinWorkflowMakerSkills } from './workflow-maker-skills.ts'
 import { CONDUCT_MAX_CHARS, GENERAL_WORK_CONDUCT } from './agent-conduct.ts'
 import { forgetRuntimeConfigHome, isIsolatedRuntime } from './run-hooks/runtime-config.ts'
 import {
@@ -1889,6 +1890,24 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     }
     if (ensure.skipped.length > 0) {
       warn(`生成者平台技能播种跳过：${ensure.skipped.join('；')}`)
+    }
+  }
+
+  /*
+   * ★ 2026-11（D143）：**编排生成者的平台技能**（`orchestration-authoring`）同样在启动时播种。
+   *
+   * 为什么要它：使用者问「"编排生成者（内置）" 里面并没有描述 API 的细节，它怎么会知道
+   * 怎么写编排呢」——原来的指令只有五行伪代码，签名/语义/坑全没有。API 细节走技能
+   * （与智能体生成者同一分工，D111），指令里只留"动笔之前照它写"。
+   * ⚠️ 播种失败不阻塞启动（上面那段同一口径）：`onWarn` 说清跳过了哪一份。
+   */
+  {
+    const ensureWf = await ensureBuiltinWorkflowMakerSkills(store, workspaceId)
+    if (ensureWf.seeded.length > 0) {
+      info(`编排生成者平台技能已就位（独有技能）：${ensureWf.seeded.join('、')}`)
+    }
+    if (ensureWf.skipped.length > 0) {
+      warn(`编排生成者平台技能播种跳过：${ensureWf.skipped.join('；')}`)
     }
   }
 
