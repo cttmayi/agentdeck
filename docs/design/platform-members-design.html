@@ -1,0 +1,2900 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>内置岗位 → 平台成员配置（设计稿）</title>
+    <!--
+      ══════════════════════════════════════════════════════════════════════
+      这是什么
+      ══════════════════════════════════════════════════════════════════════
+
+      2026-11，使用者："我不想用岗位这个属性来做很多不同分支，想脱离出一些单独的属性来配置。"
+      这份设计稿把那句话落成一张表：**把「岗位（builtinKind）」从"类型"降级为"一组可配属性"**，
+      于是——
+
+        · 新增一个平台成员 = **表里加一行**（写指令 + 技能），不再复制 `ensureBuiltinXxx`；
+        · 「把起草者改成普通智能体」= 一次**有语义的动作**（detach），不再是手改数据；
+        · 今天散在 **6 处**、各摸一个字段的判据，全部改成**只读这张表**；
+        · “半内置”（`builtin: true` 但没有岗位）在数据里**表达不出来**。
+
+      ⚠️ 这一份是**设计稿，不是产品页面**。页面里的表格/卡片用的是真实设计系统
+         （下面第一段 `<style>` 是从 `app.css` 逐字嵌入的），所以颜色/圆角/字号就是产品里的。
+
+      ⚠️ 页面上标着 **待拍板** 的地方，是我还需要使用者点头的四件事。
+    -->
+    <style>
+      /* ==== BEGIN app.css（packages/ui/src/styles/app.css，逐字嵌入，别手改）==== */
+/* ══════════════════════════════════════════════════════════════════
+   设计令牌
+   ══════════════════════════════════════════════════════════════════
+
+   之前那份 CSS 是"能看就行"的水平：颜色写死在各处、字号随手给、间距没有
+   节奏。结果是界面**看起来像一堆元素碰巧放在一起**，而不是一个东西。
+
+   这里先把四件事定下来，后面所有样式都只引用变量：
+
+   ① **间距用一套 4 的倍数**（`--sp-1..8`）。随手写 `padding: 7px` 是
+      "看起来不齐"最常见的原因——每处差 1~2px，累积起来就是没有节奏。
+   ② **字号有层级**（`--fs-xs..2xl`），并且**用层级而不是用颜色**来表达
+      主次。靠"重要的用白色、不重要的用灰色"会让界面发灰。
+   ③ **颜色语义化**（surface / line / text / good / bad / warn），
+      不在组件里写 `#2a2a2a`。这样换主题、调对比度只需要改一处。
+   ④ **圆角与阴影克制**：只有浮层（抽屉、卡片悬停）才有阴影。
+      到处加阴影会让界面看起来油腻。
+
+   ══════════════════════════════════════════════════════════════════
+   亮 / 暗两套主题（2026-09 全面改版）
+   ══════════════════════════════════════════════════════════════════
+
+   · `:root` 是**亮色**，`:root[data-theme='dark']` 是**暗色**——切换只是换一层
+     变量，组件一个都不用动。`data-theme` 由 `lib/theme.ts` 打在 `<html>` 上，
+     index.html 里那段同步脚本保证首帧就是对的（不闪）。
+   · 主题无关的令牌（间距/字号/行高/圆角/布局尺寸）只写一遍在 `:root`。
+   · **扁平化**（同一轮改版），但**浮层保留克制阴影**：抽屉/弹窗/菜单是压在页面
+     上面的层，"它浮起来了"要靠**遮罩 + 描边 + 一层浅影**三层一起说——只靠
+     遮罩和描边，暗色下浮层与页面之间的界限不够清楚（2026-09 实测后把阴影
+     加回来）。`--shadow-1` 给轻浮层（菜单），`--shadow-2` 给抽屉/弹窗。
+   · `color-scheme` 跟着主题走：原生控件（select 下拉、滚动条）的配色
+     才不会在暗色下白得刺眼。
+   · 代码高亮那几档（`--hl-*`）也进主题：FileViewer 的 hljs 配色原来是写死的
+     霓虹色，只在暗底上成立，亮色底下会淡得读不出。
+ */
+
+:root {
+  /* 间距：4 的倍数 */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: 2rem;
+  --sp-8: 3rem;
+
+  /* 字号层级 */
+  /* ★ 299 批：11px / 10px 这两档原来散在组件里（徽标、进度条、极小的辅助字），
+     不是新字号，是把已经在用的两档**给个名字** */
+  --fs-3xs: 0.625rem;
+  --fs-2xs: 0.6875rem;
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-base: 0.875rem;
+  --fs-md: 0.9375rem;
+  --fs-lg: 1.0625rem;
+  --fs-xl: 1.375rem;
+  --fs-2xl: 1.75rem;
+
+  /* 行高：正文松、标题紧 */
+  --lh-tight: 1.3;
+  --lh-base: 1.6;
+
+  --radius-sm: 4px;
+  /* ★ 298 批：圆角的全部取值（原来组件里散着 0/5px/6px/100px 这些裸值） */
+  --radius-none: 0;
+  --radius-xs: 6px;
+  --radius-pill: 999px;
+  /* ★ 298 批：控件高度（按钮/输入/下拉的两种档）。
+     298 批当批就用上了：`.topbar button` = `--ctl-h`、`.topbar .page-actions button` = `--ctl-h-sm` */
+  --ctl-h: 1.9rem;
+  --ctl-h-sm: 1.5rem;
+  --radius: 8px;
+  --radius-lg: 12px;
+
+  /* ★ 2026-11：侧栏宽度**减半**（15rem → 7.5rem）——使用者：左栏太宽、
+     辅助文字要更精简。`.shell` 与 `.topbar` 共用这一个值（顶栏左格与侧栏共线），
+     所以顶栏左格也跟着变窄（页名本来就允许收缩省略）。 */
+  --sidebar-w: 7.5rem;
+  --topbar-h: 3.25rem;
+  /* ★ 300 批：压在 accent 实心块上的字色。亮/暗**两套主题里都是白**，所以写在
+     主题无关这一段（原来 11 处各写 `#fff`，其中 6 处在组件里——既看不出它是
+     "accent 上的字"，改主题时也没人会想到它）。 */
+  --on-accent: #fff;
+
+  /* ★ 2026-11（Windows 上思考过程显示乱码）：模型的推理摘录满是箭头/数学符号/
+     制表符/emoji——macOS 的 -apple-system 与系统回退覆盖广，Windows 的 Segoe UI +
+     微软雅黑覆盖不到这些码位，缺字形就成乱码。补**回退字体**（Windows 自带的
+     Segoe UI Symbol / Segoe UI Emoji / Cascadia Code），只影响缺字形的平台：
+     macOS 上 -apple-system 先命中，后面的回退一项都不触发，渲染逐字节不变。 */
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei',
+    'Segoe UI Symbol', 'Noto Sans Symbols 2', 'Apple Symbols',
+    'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
+  /* Cascadia Code 是 Windows 10/11 自带的终端字体（覆盖制表符等符号），
+     放 Consolas 前面；Consolas 缺这些码位。 */
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, 'Cascadia Code',
+    Consolas, 'Noto Sans Mono', monospace;
+
+  /* ═══ 亮色（默认）═══ */
+  color-scheme: light;
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #eef0f4;
+  --surface-hover: #e6e9ef;
+  /* 代码/日志面板里的吸顶条：比面板底色再深一档，滚动时内容从它下面钻过去 */
+  --panel: #eceef2;
+  --line: #e2e5ea;
+  --line-strong: #c9cfd8;
+
+  --text: #1d232c;
+  --text-dim: #5a6472;
+  --text-faint: #8a93a2;
+
+  --accent: #2b6fd0;
+  --accent-dim: #2f6fd0;
+  --good: #1f9d73;
+  --bad: #d64545;
+  --warn: #b7791f;
+
+  /* 运行状态色：与语义色分开，因为"进行中"既不是好也不是坏 */
+  --status-todo: #8a93a2;
+  --status-active: #2b6fd0;
+  --status-review: #7a5fd0;
+  --status-done: #1f9d73;
+  --status-blocked: #b7791f;
+
+  /* 代码高亮：亮色底下用墨色系（霓虹色只在暗底成立） */
+  --hl-keyword: #9d3fbf;
+  --hl-string: #3e7d24;
+  --hl-number: #c4621c;
+  --hl-title: #2d5fd4;
+
+  /* 浮层阴影：扁平但克制——只给"压在页面上的层"（抽屉/弹窗/菜单），
+     亮色淡、暗色浓（暗色底下浅影不显眼） */
+  --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.08);
+  --shadow-2: 0 12px 32px rgba(16, 24, 40, 0.16);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0f1115;
+  --surface: #161920;
+  --surface-2: #1c2029;
+  --surface-hover: #222733;
+  --panel: #0b0d11;
+  --line: #262b36;
+  --line-strong: #333a49;
+
+  --text: #e6e9ef;
+  --text-dim: #a2abbb;
+  --text-faint: #6d7686;
+
+  --accent: #5aa9f5;
+  --accent-dim: #2b5f92;
+  --good: #4ec9a0;
+  --bad: #f2716a;
+  --warn: #e0b04a;
+
+  --status-todo: #6d7686;
+  --status-active: #5aa9f5;
+  --status-review: #b48ef0;
+  --status-done: #4ec9a0;
+  --status-blocked: #e0b04a;
+
+  --hl-keyword: #c792ea;
+  --hl-string: #9ece6a;
+  --hl-number: #ff9e64;
+  --hl-title: #7aa2f7;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+/* ══════════════ 基础 ══════════════ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 标题统一紧行高——松行高只适合正文，标题松了会散 */
+h1, h2, h3, h4 {
+  margin: 0;
+  line-height: var(--lh-tight);
+  font-weight: 600;
+}
+
+h2 { font-size: var(--fs-xl); }
+h3 { font-size: var(--fs-lg); }
+h4 { font-size: var(--fs-md); }
+
+p { margin: 0 0 var(--sp-3); }
+
+a { color: var(--accent); }
+
+code, kbd, pre {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+
+code {
+  background: var(--surface-2);
+  padding: 0.1em 0.35em;
+  border-radius: var(--radius-sm);
+  /* 代码片段在中文段落里容易被压扁，加一点横向余量 */
+  white-space: nowrap;
+}
+
+/**
+ * ⚠️ 上面那条 `nowrap` 只管**行内**代码（`这个样子的`），`pre` 里的代码必须换回
+ *    `pre`——`white-space` 是会被继承的，`code` 上写死了 `nowrap` 就会一路带进
+ *    代码块里，把整段代码**折成一行**。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 这个 bug 是怎么被发现的（以及它为什么难认）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 使用者报「聊天里那段代码的换行没有了」。实测（用真实数据、真实浏览器量
+ * computed style）：文字里**有 10 个换行**，而 `<code>` 的 `white-space` 是
+ * `nowrap`，于是那个 `<pre>` 只有 **47px** 高——十行代码被压成一行，还要横向滚动。
+ *
+ * 难认的地方在于：**它看起来像模型没写换行**。渲染器（`lib/markdown.ts`）是对的
+ * ——它老老实实 `body.join('\n')`，还有测试钉着——而错在一条给别的东西写的样式。
+ * 所以这条规则旁边把话说清楚：`nowrap` 是给行内代码的，不是给代码块的。
+ */
+pre code {
+  white-space: pre;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: var(--sp-5) 0;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: var(--radius-xs);
+  border: none;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+::-webkit-scrollbar-track { background: transparent; }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
+/* ══════════════ 布局骨架 ══════════════ */
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  height: calc(100vh - var(--topbar-h));
+}
+
+.topbar {
+  height: var(--topbar-h);
+  /* ═══ 与 `.shell` 同一套列：左格 = 侧栏那一列宽，右格 = 主区那一列 ═══
+     这样顶栏里的东西与下面的侧栏 / 主区**共线**：左格（品牌 + 页名）正对着
+     侧栏，右格从侧栏右缘开始（动作的**左缘与侧栏右缘对齐**，也就是与主区内容
+     的左缘对齐）。2026-09 第二稿：之前动作紧跟着页名，页名一短（「聊天」）动作
+     就悬在侧栏上方的半空里。 */
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  align-items: center;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  /* 整条带子一条基线：页面动作换页时会整排换字，`nowrap` 保证它不会挤成两行
+     （顶栏高度是 `calc(100vh - ...)` 算出来的，一旦换行整个布局就错位） */
+  white-space: nowrap;
+}
+
+/* 左格：品牌 + 页名。左内距对齐侧栏的内容内距（`--sp-2`），
+   让"品牌"与侧栏里的导航读起来是同一列的东西 */
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding-left: var(--sp-2);
+  min-width: 0;
+}
+
+/* 右格：这一页的动作 + 与页面无关的那几个。右内距对齐主区那边原来的留白 */
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-right: var(--sp-4);
+  min-width: 0;
+}
+
+.brand {
+  font-weight: 600;
+  font-size: var(--fs-md);
+  letter-spacing: -0.01em;
+  /* 品牌名与页名之间靠那条竖线分开，这里只留一点气口 */
+  flex: none;
+}
+
+/* ★ 2026-11：侧栏减半（`--sidebar-w: 7.5rem`）后顶栏左格只有 120px，「品牌 + 页名」
+   放不下（"AgentDeck" 78px + 页名 ≥ 28px + 分隔线 ≈ 120px+）。让位的是品牌：
+   页名是"我在哪一页"的功能信息（也是这一页的 h1），品牌只是站点名——产品名仍写在
+   页面 `title` 与 README 里。将来要把侧栏加宽，把这两行 display 删掉就回来了。 */
+.topbar .brand,
+.topbar .page-sep {
+  display: none;
+}
+
+/* 品牌与页名之间那条细竖线：两者都是文字，不隔开会被读成一句话 */
+.page-sep {
+  width: 1px;
+  height: 1.25rem;
+  background: var(--line);
+  flex: none;
+}
+
+/**
+ * 当前页名（顶栏左格）。
+ *
+ * ★ 它与侧栏那一条**共用同一个词条**（`lib/view.ts` 的 `VIEW_TITLE_KEYS`），
+ *   所以"侧栏说任务清单、顶栏说任务"这种不一致在结构上不可能发生。
+ *
+ * ⚠️ 给它一个上限并省略：页名是**可变文字**（切页就换），不封顶的话
+ *    切换语言之后（New task / Tasks…）整条顶栏的宽度会跟着跳。
+ *
+ * ⚠️ 左格宽度**钉死**为 `--sidebar-w`（顶栏与 `.shell` 共线），所以页名要能
+ *    在那一格里**收缩省略**——`flex: 0 1 auto; min-width: 0` 就是"给品牌让路，
+ *    不够宽时我自己省略"，而不是把左格撑破。
+ */
+.page-name {
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text-dim);
+  margin: 0;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/**
+ * ★ 这一页的动作：一条**工具条**（2026-10 / D59 改版）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 改版前是什么样，为什么"看着不好看"是可以量出来的
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 改版前那一排是三种重量混着排：实心蓝的主操作（#2f6fd0 对白底 4.88:1）、
+ * secondary 底（#eef0f4，**1.14:1**）、ghost 的选中态底（#e6e9ef，**1.22:1**）。
+ * 后两个低于"看得见一条边"的门槛（非文字对比 3:1），所以屏幕上其实是
+ * **一个色块 + 三段文字**——不是一组控件。而且"新建"（做一件事）、"列表/看板"
+ * （换一种看法）、"刷新"（重复一次）三种不同性质的东西长成了同一种形状。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 现在：一条轨道 + 三种状态
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 轨道（`--line`：#e2e5ea / 深色 #262b36，对顶栏底 1.26 / 1.24）说明
+ * "这几个是一组"；组里每一格的形状**完全一样**，状态靠三档底色说清楚：
+ *
+ *   常态  透明（与轨道同色）
+ *   hover `--surface`（浅色下是白格浮起来，深色下是深格沉下去——两种主题里
+ *         都与轨道差 1.18~1.26，比改版前那个 1.14 的"选中态"还明显）
+ *   当前  `--accent-dim` 实心 + 白字（4.88:1）——**这才是"我是哪一种"**
+ *
+ * ★ 左缘与**侧栏右缘对齐**（右格的第一列起点）这条没变：页名一短（「聊天」只有
+ *   两个字）动作就会悬在侧栏上方的半空里。顶栏与 `.shell` 共用同一套
+ *   `grid-template-columns`，所以这个对齐是**结构上**的，不是"差不多"。
+ *
+ * ⚠️ 宽屏平铺。窄屏被 `@media` 换成 `⋯`（见文件里的断点）——两处是同一份数据。
+ */
+.topbar .page-actions {
+  display: flex;
+  align-items: center;
+  /* ★ 高度钉成与右边那几个图标控件一样（`--topbar-h` 那条带子上的节奏）：
+     里面每一格矮一档，是**嵌套**关系，不是"高度不齐"（探针按这一点量）。 */
+  height: 1.9rem;
+  box-sizing: border-box;
+  padding: 0 var(--sp-1);
+  gap: 2px;
+  background: var(--line);
+  border-radius: var(--radius);
+}
+
+/**
+ * 组里每一格：同样的形状，只有底色随状态变。
+ *
+ * ⚠️ 选择器**必须带上 `.topbar`**：同一条带子上还有一条给常驻控件（通知 / 设置）
+ *    的 `.topbar button { height: 1.9rem }`，两者同分，**靠源序决胜**——而这一块
+ *    在文件里排在它前面，于是格子被拉到 30px、工具条变成一条没有呼吸的实心带
+ *    （实测踩过：三条探针都还是绿的，因为它们只量"高度齐不齐"）。
+ */
+.topbar .page-actions button {
+  height: var(--ctl-h-sm);
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.topbar .page-actions button:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text);
+  /* 覆盖全局那条 `filter: brightness()`：在这一排里"浮起一格"才是 hover 该有的样子 */
+  filter: none;
+}
+
+/**
+ * 主操作（新建 / 安装）：**只靠文字分重量**，不靠一整块实心色。
+ *
+ * ⚠️ 颜色不是直接的 `var(--accent)`：它压在浅色轨道上只有 **3.88:1**，而这个字号
+ *    （13px）按 AA 要 4.5。朝正文色压 15% 之后是 **4.62:1**，色相不变、仍然一眼
+ *    看出是"强调"。深色主题下这个式子算出来是 5.9:1，同样成立——所以只写一条。
+ */
+.topbar .page-actions button.btn--primary {
+  color: color-mix(in srgb, var(--accent) 85%, var(--text));
+  font-weight: 600;
+}
+
+/* 当前那一格（呈现模式 / 正在建任务）：实心底，一排里最重的信号 */
+.topbar .page-actions button.active {
+  background: var(--accent-dim);
+  color: var(--on-accent);
+}
+
+.topbar .page-actions button.active:hover:not(:disabled) {
+  background: var(--accent-dim);
+  filter: brightness(1.15);
+}
+
+/**
+ * 顶栏里的原生控件（`select` 这种）要**紧凑**，而且**宽度按内容**。
+ *
+ * ★ 2026-10 加远端管理页时量的：全局 `select` 的规矩是"表单里用的"——`width: 100%`、
+ *   一行内距，于是顶栏里那个语言下拉实测 **37px 高**、还被拉到整格宽，与同一排的
+ *   按钮（32px 那一档）明显不是一套。远端管理页的语言/主题就在顶栏里，所以在这里
+ *   补一条**只作用于顶栏**的规矩（daemon 顶栏没有原生控件，加了也不影响它）。
+ */
+.topbar select {
+  width: auto;
+  height: 2rem;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-xs);
+}
+
+/**
+ * 与页面无关的那一组（语言 / 通知 / 登录 / 设置）：`margin-left: auto` 推到最右。
+ *
+ * ★ 它与左边"这一页的动作"之间那段空白**就是分组本身**，不需要画一条分隔线
+ *   （画过一版：一条竖线贴着按钮组，看起来像按钮自带的边）。
+ *
+ * ⚠️ 这一层也是**边界**：页面动作里也有叫「设置」的（智能体页那个），英文下同样叫
+ *    Settings——探针要能量"**全局那个**设置按钮翻译了吗"，就得有一层能点名的容器。
+ *    没有它时那条断言只能按文字在全条顶栏里找，找到的是哪一个全看顺序。
+ */
+.global-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+  min-width: 0;
+}
+
+/**
+ * ★ 顶栏里的按钮统一成一种"工具条按钮"。
+ *
+ * 两个毛病，一起修：
+ *
+ *   ① **尺寸不齐**：页面动作原来是页面里那个大尺寸（`padding: 8px 12px`），
+ *      与窄一些的语言下拉、带头像的账号按钮排在一条 52px 的带子上，高低错落。
+ *   ② **激活态根本不存在**：`.active` 这个类名在界面上**没有样式**（`app.css`
+ *      里只有侧栏的 `.nav-item.active`），所以「列表 / 看板」两个按钮长得一模一样
+ *      ——使用者看不出自己在哪一个模式里。这是这次"按钮不好看"里最实的一处。
+ *
+ * 统一尺寸之后仍然保留三种**重量**（这是它们该有的区别）：
+ * 实心 = 这一页的主线动作（新建 / 安装 / 新对话）、描边 = 配套动作（刷新 / 设置）、
+ * 无框 = 呈现方式切换（列表 / 看板，当前那个用底色标出来）。
+ */
+.topbar button {
+  height: var(--ctl-h);
+  /**
+   * ⚠️ 高度是**写死的**，不是"字高 + 内距"算出来的：算出来的话，`⋯`（那个字比
+   *    别的按钮大、行高又是 1）与带 24px 头像的账号按钮会各差几像素，一条带子上
+   *    看着就是没对齐。钉成一个值之后，加一个新按钮不会把这一排弄歪。
+   *    探针里也有一条量它（`topbar.buttonHeights` 去重之后必须只剩一种）。
+   */
+  height: 1.9rem;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+}
+
+/**
+ * 窄屏的 `⋯`：默认不显示（宽屏动作直接平铺），窄屏里它接管整排动作。
+ *
+ * ⚠️ 菜单与按钮都在这一个 wrapper 里（`position: relative`），菜单才能贴着
+ *    按钮定位——挂到别处就得算坐标。
+ */
+.page-more {
+  display: none;
+  position: relative;
+}
+
+/* `⋯` 的字比别的按钮大一点（它是一个符号，不跟着字号走会显得太小）——
+   高度与内距由上面那条统一规则管，这里只改字形大小 */
+.more-btn {
+  font-size: var(--fs-md);
+}
+
+.page-menu {
+  position: absolute;
+  top: calc(100% + var(--sp-1));
+  right: 0;
+  z-index: 40;
+  min-width: 10rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  white-space: normal;
+}
+
+.page-menu button {
+  width: 100%;
+  text-align: left;
+  /* ⚠️ 菜单项**不是**工具条里那一格（那一格 24px 高、方角、透明底）。
+     它继承同一条 `.topbar button` 的规矩，但要在这里明确回来：竖排菜单里
+     需要的是"整行可点 + 左对齐"，而且外面那条 `.page-actions button` 的
+     高度/内距选择器命中不到它（它不在 `.page-actions` 里）——写这一条是为了
+     让"两处形状不同"变成一句看得见的话，而不是靠选择器作用域去猜。 */
+  height: 1.75rem;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  background: transparent;
+}
+
+.page-menu button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+  filter: none;
+}
+
+.page-menu button.active {
+  background: var(--accent-dim);
+  color: var(--on-accent);
+}
+
+/* 点空白处关闭（与抽屉同一个办法：全屏透明遮罩，不必判断"点哪儿算外面"） */
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+}
+
+/* ══════════════ 侧边栏 ══════════════ */
+
+.sidebar {
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  padding: var(--sp-3) var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  overflow-y: auto;
+}
+
+.nav-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font: inherit;
+  /* 用一条左侧色条表示选中，而不是整块高亮——整块高亮在 4 项以上时
+     会让侧边栏看起来像一排按钮，而不是导航 */
+  border-left: 2px solid transparent;
+  transition: background 0.12s, color 0.12s;
+}
+
+.nav-item:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.nav-item.active {
+  background: var(--surface-2);
+  color: var(--text);
+  border-left-color: var(--accent);
+}
+
+.nav-title {
+  display: block;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  /* ★ 2026-11：侧栏减半后标题也要**一行**（英文 "Agent groups" 那种 12 个字母
+     会折成两行、把这一项撑高）。与 `.nav-hint` 同一套兜底：放不下就省略。 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-hint {
+  display: block;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  margin-top: 1px;
+  /* ★ 2026-11：侧栏减半后宽度变窄——辅助文字**不许换行**，超了就省略。
+     （文案本身也已精简到能放下，这一行是兜底，不是让文案偷懒的借口。） */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-item.active .nav-hint { color: var(--text-dim); }
+
+.sidebar-foot {
+  margin-top: auto;
+  padding: var(--sp-3) var(--sp-3) var(--sp-2);
+  border-top: 1px solid var(--line);
+}
+
+/* ★ 2026-11：侧栏减半后，脚部的环境/同步状态两行也钉成一行省略
+   （设备名、CLI 版本、上报条数都可能长过 7.5rem 的内容宽）。 */
+.sidebar-foot .faint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 侧栏底部的环境状态：一眼看出"这台机器的运行环境有没有问题" */
+.env {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2);
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  text-align: left;
+  cursor: pointer;
+}
+
+.env:hover {
+  background: var(--surface-hover);
+  border-color: var(--line);
+}
+
+.env-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--good);
+  flex-shrink: 0;
+}
+
+/* 有问题时变红：常驻的小红点比一行文字更容易被注意到 */
+.env-dot.bad {
+  background: var(--bad);
+}
+
+.env-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.env-line {
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ══════════════ 主区 ══════════════ */
+
+.main {
+  overflow-y: auto;
+  padding: var(--sp-5) var(--sp-6);
+}
+
+/**
+ * 有主从布局的视图（任务），**主区不再自己滚动与留白**：它内部是两栏，
+ * 各自滚动、各自留白。否则会出现两条滚动条，而且底部常驻的那一条
+ *（「继续沟通」）会跟着外层一起滚走。
+ *
+ * 用 `:has()` 而不是给 `.main` 加一个 class：加 class 意味着"哪个视图在用
+ * 主从布局"这件事要在 App.svelte 里再写一遍，两处迟早不同步。
+ */
+.main:has(> .split-layout) {
+  overflow: hidden;
+  padding: 0;
+}
+
+/* ══════════════ 主从布局（列表 | 详情）══════════════
+   任务与智能体两个视图共用；类名不带视图名，免得第二个视图去复制一套。 */
+
+.split-layout {
+  height: 100%;
+  display: grid;
+  /* 清单那一栏默认固定一个阅读宽度（跟着它的表格内容走），详情拿走剩下的。
+     固定而不是按比例：按比例时窗口一变宽，列表里那几列就被拉得很散。
+     ★ 2026-11：列表宽度**可拖**——`--list-w` 由把手写入（localStorage 存档，
+     见 `apps/web/src/lib/list-grip.ts`），没拖过就是下面的默认。把手占第 2 列
+     （`--grip-w`），详情从第 3 列开始。 */
+  grid-template-columns: var(--list-w, minmax(20rem, 26rem)) var(--grip-w, 0.375rem) minmax(0, 1fr);
+}
+
+/* 看板是"扫"的视图：三列挤在半个屏幕里没法看，所以它占满整宽、不带详情栏 */
+.split-layout.board {
+  grid-template-columns: minmax(0, 1fr);
+}
+/* 看板没有"列表 | 详情"两栏，把手不显示（不然它会在单列网格里变成一整行） */
+.split-layout.board .split-grip {
+  display: none;
+}
+
+/* 拖动把手：列表与详情之间那一格。默认是一道透明窄缝（光标 col-resize 是唯一的暗示），
+   悬停 / 拖动时加深——跟沉淀页产物栏那个把手同一套观感。 */
+.split-grip {
+  cursor: col-resize;
+  /* 拖动时别让浏览器把 pointermove 抢走（触屏上尤其，否则一拖就变成滚动/选中） */
+  touch-action: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.split-grip:hover,
+.split-grip.dragging {
+  background: var(--line-strong);
+}
+
+/**
+ * ★ 分批第 92 批：主从布局的**第三列**（沉淀页的产物栏）。
+ *
+ * 为什么把产物提成独立一列而不是塞进详情页里（设计 §12.12）：沉淀页的心智是
+ * "对话 + 产物"，产物如果埋在详情页的分节里，要点进去、还要在 tab 之间切才能看到
+ * "这次产出了什么、体检过没过"——那就又变成"信息在、但看不见"。
+ *
+ * 宽度固定 20rem：这一栏装的是文件名/体检条目/一段预览，跟列表栏一样属于
+ * "阅读宽度固定、剩下的给正文"的那一类。窄屏行为（退化成右侧抽屉）由
+ * `CrystallizeArtifactPane.svelte` 自己的 `@media` 负责——**两处断点必须都是 72rem**，
+ * 否则会出现"网格还是三列、但第三列已经变抽屉"的错位。
+ */
+/* ⚠️ 只有够宽才并排。分批第 155 批把断点从 96rem 降到 **74rem（1184px）**：
+   产物栏现在装的是**编辑器**（§12.53 选项 2：右栏加宽、编辑搬过去），而抽屉形态下
+   编辑区是一块浮层——改字的时候把中间的结论与时间线整片盖住。74rem 起让它成为真列：
+   列表 20–26rem + 详情（≥ 30rem）+ 产物 24–30rem 还放得下；再窄就退回抽屉。 */
+.split-layout.with-artifact {
+  grid-template-columns: var(--list-w, minmax(20rem, 26rem)) var(--grip-w, 0.375rem) minmax(0, 1fr);
+}
+
+@media (min-width: 74rem) {
+  .split-layout.with-artifact {
+    grid-template-columns: var(--list-w, minmax(20rem, 26rem)) var(--grip-w, 0.375rem) minmax(0, 1fr) var(--artifact-w, 28rem);
+  }
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* grid/flex 子项默认不许缩，不写这句内部滚动会失效 */
+}
+
+/**
+ * ★ 列表栏骨架（D61）：聊天 / 任务 / 智能体三页的列表栏共用同一套常量。
+ *
+ * · `--list-head-h`：**单行栏头**的高度（聊天页那个只有标题的栏头、任务页列表
+ *   模式那个"计数 + 搜索"的栏头）。钉成一个值，三处看起来才是同一件东西；
+ *   探针按它量（51px）。
+ * ⚠️ **看板模式不算**：它的栏头里有标题 + 说明两行，本来就更高，是另一种呈现。
+ * ⚠️ **不要因为"三页行高差几像素"就抽一个 ListItem 组件**（D61 的判据之一）：
+ *   三页条目的信息差异是真差异（阶段标签 / 轮数 / 角色徽标），硬抽只会把差异
+ *   塞回 props 和插槽。统一的是**常量**（内距、字号、行高），不是结构。
+ */
+:root {
+  --list-head-h: 51px;
+  /* 列表行**至少**多高（三栏同款）。内容（徽标 / 阶段标签）更高时跟随内容——
+     统一的是这条底线与内距，不是把内容压扁（D61）。 */
+  --list-row-min-h: 64px;
+}
+
+/* ══════════════ 列表行壳（D66 标准控件 ListRow / ListPane）══════════════ */
+
+/* ── 行容器（`<ul class="list-stack">`）：**全局只此一份**（2026-11）──
+   重置 + 行距。缺了它，`<ul>` 吃浏览器默认 `padding-left: 40px` ⇒ 整列行右移
+   40px、行宽少 40px。这个缺陷在**两个页面各犯过一次**（定时任务："列表 item 宽度
+   不对，左边空出一大截"；编排：同样的问题，因为第一次的修法写进了
+   `Schedules.svelte` 的 scoped `<style>`，而 Svelte 的 scoped 样式**不跨文件**，
+   下一个用同名类的页面照样中招）。所以它现在在全局：一处定义、六页照抄。
+
+   ⚠️ 页面**不许**再写 reset（`list-style` / `padding` / `margin` 三行），也不许
+   自创 `.*-list` 做同一件事——`tests/ui-style.test.ts` 机器拦着。形状上的差异
+   （比如智能体页需要底部留白）用页面的类叠加上去，不覆盖这里。 */
+.list-stack {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  /* 行与行**不再靠空隙分段**（D141）：4px 空隙在不 hover、不选中时什么也看不出来
+     ——使用者原话"列表的内容只有选中才有框，没选择的时候，看不清楚分界"。
+     现在行间是一条 1px 的 `--line` 发丝线（放在 `ListRow.svelte` 的 scoped 样式里，
+     挨着行盒本身），所以这里 gap 回到 0：线与线相接，才是"列表"，而不是"一堆浮空的字"。 */
+  gap: 0;
+}
+
+/* ── 列表分组（2026-11，D137）：组头 = 淡字一行（chevron + 组名 + 计数）──
+
+   来由：这一档原来**两页各写一套**——任务页的组头是带边框的卡片按钮（组名 600/`--fs-sm`），
+   智能体页的组头是无边框的淡字行（`--fs-xs`、hover 才有底），连结构都不一样（一个把行
+   套在组里、一个把组头当行的兄弟）。同一个东西长两种样子，第三个要分组的页面只能挑一个抄。
+   现在收编成一处：形状跟 `.fold-head` 那一族同一档（组头是**分段标题**，不是内容，
+   所以不带边框、不与有 hover/选中框的 `.list-row` 抢注意力）。
+
+   结构（行与组头**平级**，`<li>` 里不要再套 `<li>`）：
+     <ul class="list-stack">
+       <li class="list-group-head-wrap"><button class="list-group-head">…</button></li>
+       <li class="list-row">…</li>
+     </ul>
+   组与组之间那条线由 `:not(:first-child)` 自动画（上一组没有东西就不会有组头，
+   所以不需要页面判断"要不要画分隔线"）。组件：`ListGroupHead.svelte`。 */
+/* 组头：**一条分段带**（2026-11 使用者两轮反馈之后的形状）。
+ *
+ * 第一版是"淡字一行"（透明底 + `--fs-xs` + 组名 `--text`），使用者看下来两条意见：
+ *   ① "头和内容的颜色太接近，看不清楚分割"——组名用了正文色，读起来就是一行内容；
+ *   ② "头的字体比内容的字还小"——`--fs-xs`(12) 比行标题 `--fs-base`(14) 还小，
+ *      缩小本来是"次级"的信号，放在**分段头**上正好反了：头比它管的内容还弱。
+ *
+ * 所以现在**靠底色分段、不靠缩小**：
+ *   · 整行铺 `--bg` 的带子（圆角 `--radius-sm`）——扫列表时一眼看出"这里换组了"。
+     ⚠️ 用的是 `--bg` 而不是 `--surface-2`：**选中行**的底色就是 `--surface-2`
+     （`.list-row.active`），两者同色的话"选中的那一行"会被读成"一个分组头"。
+ *   · 字号与行标题同级 `--fs-base`，字重 600（只有组名加粗）；
+ *   · 字色降一档 `--text-dim`（行标题是 `--text`）：**同字号、淡一档**才是"它是标签"；
+ *   · 计数留在 `--fs-xs` + `--text-faint`（它是附注，不是标题的一部分）。 */
+.list-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-1) var(--sp-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  /* 分段带的底色：`--bg`(#f6f7f9) 与行底(#fff) 的对比只有 **1.07**，肉眼等于没有
+     （使用者两轮反馈"底色还是一样"）⇒ 用 `--text` 混出明确的浅灰：
+     对行底 1.31、对选中行 1.15，两个都分得开；深色主题下同一条式子自动变成"提亮"。 */
+  background: color-mix(in srgb, var(--text) 14%, var(--surface));
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--fs-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.list-group-head:hover {
+  background: color-mix(in srgb, var(--text) 22%, var(--surface));
+  color: var(--text);
+}
+
+.list-group-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* chevron 跟组头同字号（`.chevron` 那一档本来是给 `.fold-head` 的 `--fs-sm`） */
+.list-group-head .chevron {
+  font-size: inherit;
+  color: var(--text-faint);
+}
+
+/* 组名：分段带里唯一的强调（600 + 淡一档的正文色） */
+.list-group-name {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+}
+
+/* 计数：附注，留在小号（整体贴右由组件的 `.list-group-tail` 负责） */
+.list-group-count {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* 组头下面那条线：**"这以下是本组内容"**。
+   与底色是**两道线索**——浅色主题下只靠落差的底色太弱（1.07 那版等于没有），
+   所以每个组头都画一条（不再是"只有非第一组才画"）：它标的是"组从这里开始"，
+   与"上面是上一组"本来就不同一件事。 */
+.list-group-head-wrap {
+  margin: 0 0 var(--sp-1);
+  border-bottom: 1px solid var(--line);
+}
+
+/* 组与组之间再多留一点空（上一组的行与下一组的组头之间） */
+.list-stack > .list-group-head-wrap:not(:first-child) {
+  margin-top: var(--sp-2);
+}
+
+/* ── 行的第二行（辅助信息）：`.list-row-sub`（2026-11，D142）──
+ *
+ * 六个列表页原来各写一份（`.conv-sub` / `.task-meta` / `.agent-notes` / `.sched-sub` /
+ * `.wf-sub` / `.crystal-meta`），其中**五处是 `align-items: center`** —— 而这一行里
+ * 常把文字和徽标混着放，徽标自己的盒子比文字高，`center` 对齐的是**盒子**、不是文字：
+ * 于是同一行里"最近 15 小时前"比前面那几段**低 3px**（实测：center 3px / baseline 0px）。
+ * 使用者报的就是这个（"和前面的文字高度没对齐，有特殊处理？"——没有特殊处理，是对齐方式错了）。
+ *
+ * 所以收成一条：**基线对齐**（`align-items: baseline`），字号/字色显式写。
+ * 页面只写"这一页多出来的形状"（比如任务页要 `flex-wrap: wrap`、智能体页要 `width: 100%`）。 */
+.list-row-sub {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* 长内容要能收缩（否则省略号不生效——定时任务页量到过的那条教训） */
+.list-row-sub > * {
+  min-width: 0;
+}
+
+/* ★ 2026-11（D141）：**行与行之间的发丝线**——不 hover、不选中时也看得见分界。
+   改之前靠 `.list-stack` 的 4px 空隙分段，而空隙在静止状态什么也读不出来
+   （使用者："列表的内容只有选中才有框，没选择的时候，看不清楚分界"）。
+
+   ⚠️ 为什么在全局而不是 `ListRow.svelte` 的 scoped 里：Svelte 会把"可能匹配不到自家元素"
+      的选择器**剪掉**，`.list-row + .list-row` 实测没进构建产物（查 CSS 才发现）。
+   ⚠️ 画在**相邻行的上边**，不是每行下边：第一行不会凭空多一条顶线，组头下边那条线
+      也不会跟它叠成双线。 */
+.list-row + .list-row {
+  border-top-color: var(--line);
+}
+
+/* 行盒 + 主按钮 + 行盒的 hover/选中态样式在 `ListRow.svelte` 的 scoped 样式里
+   （行盒类 `.list-row` 只有它会用）。这里只剩 **动作按钮**（`.list-row-action`）：
+
+   ⚠️ 它为什么放全局：动作按钮是**页面的 snippet** 提供的（聊天/任务的删除钮），
+   snippet 内容不吃 ListRow 的 scoped 样式——放组件里就永远匹配不上。 */
+
+/* ── 大编辑器入口（2026-11：PromptEditor，使用者："编辑框太小想弹出来编辑"）──
+   通用控件：包在 textarea 外面的 `.field-prompt` 容器 + 浮在右下角的「⛶ 展开」
+   按钮。智能体指令 / 定时任务模板三处共用，只此一份。 */
+
+/* 行右侧动作钮（原来聊天 `.conv-delete` 与任务 `.task-delete` 各写一份同样的，
+   D66 收成一条）：1.75rem 方块、右缘内缩 `--sp-1`、垂直居中。 */
+
+/* ── 指令框（智能体详情编辑态 + 新建智能体表单共用，2026-11 控件化后提升为全局；
+    原来两份 scoped 规则随 PromptField 迁移 —— 22rem = 352px 是实测值
+    （13px 字号 / 行高 1.6 ⇒ 16 行），两处必须一致）── */
+.instructions {
+  min-height: 22rem;
+  line-height: 1.6;
+  resize: vertical;
+}
+/* 只读的指令框**不压暗文字**（读的人比写的人多）：只换底色与边框。 */
+.instructions.locked {
+  background: var(--surface-2);
+  border-style: dashed;
+  color: var(--text-dim);
+  cursor: default;
+  resize: none;
+}
+
+.field-prompt {
+  position: relative;
+}
+
+.prompt-expand {
+  position: absolute;
+  right: var(--sp-1);
+  bottom: var(--sp-1);
+  background: none;
+  border: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-base);
+  line-height: 1;
+  cursor: pointer;
+  padding: var(--sp-1);
+  border-radius: var(--radius);
+}
+
+.prompt-expand:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.list-row-action {
+  flex-shrink: 0;
+  margin-right: var(--sp-1);
+  width: 1.75rem;
+  height: 1.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-faint);
+  font-size: var(--fs-lg);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.list-row-action:hover {
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  color: var(--bad);
+}
+
+/* 三个单行栏头（聊天 / 任务列表 / 智能体的工具行）：同高、内容垂直居中。
+   看板模式的 `.pane-head` 不带这个类，不受影响。
+
+   ⚠️ D64：**没有 `.list-head` 了**。D61 加它的时候不知道任务页自己的 scoped
+   样式里已经有一个 `.list-head`（列表里的分组标题「需你处理 / 其余任务」）——
+   全局这条的 `height: 51px` 漏到那两行分组标题上，把它们从 ~28px 撑成 51px
+   （实测 sep0/sep1 都是 51px）。D64 聊天栏头改走 `.list-toolbar`，顺手把全局
+   这条删掉——分组标题回到内容高度；栏头带统一只叫 `.list-toolbar`。 */
+.list-toolbar {
+  height: var(--list-head-h);
+  box-sizing: border-box;
+  padding-top: 0;
+  padding-bottom: 0;
+  align-items: center;
+}
+
+.pane + .pane {
+  border-left: 1px solid var(--line);
+}
+
+.pane-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.pane-head h2 {
+  font-size: var(--fs-lg);
+}
+
+.pane-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+/**
+ * ★ 分批第 264 批（使用者："这 3 个按钮的风格改成和『新建对话』『设置』一样的风格"）：
+ *   对话头那排（整理记忆 / 沉淀技能&智能体 / 删除对话）原来用的是**普通按钮**
+ *   （`ghost` / `danger`，各自一个带边框的方块），而顶栏那排是一**条**工具条
+ *   （`.topbar .page-actions`：底色轨道 + 里面几格、hover 才浮起）。
+ *   同一类东西两种长相，使用者一眼就看出来了。这里把那排改成同一种工具条。
+ *
+ * ⚠️ 三条都按工具条里的格子来（含「删除对话」）：形状/高度/底色一致，
+ *    危险动作只**用颜色**区分（`--bad` 的文字色），不再给它一块实心底
+ *    ——"这一格是危险的"靠颜色说得清，靠一整块红底反而把那一排拆散了。
+ */
+.pane-actions {
+  display: flex;
+  align-items: center;
+  /* 与顶栏那排同高同节奏：外面一条带子 1.9rem，里面每一格 1.5rem */
+  height: 1.9rem;
+  box-sizing: border-box;
+  padding: 0 var(--sp-1);
+  gap: 2px;
+  background: var(--line);
+  border-radius: var(--radius);
+}
+.pane-actions button {
+  height: 1.5rem;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pane-actions button:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text);
+  filter: none;
+}
+.pane-actions button.btn--danger {
+  /* 危险动作：同一格形状，只用文字色区分 */
+  background: transparent;
+  color: var(--bad);
+}
+.pane-actions button.btn--danger:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--bad);
+  filter: none;
+}
+
+.pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-4) var(--sp-5);
+}
+
+/* 底部常驻（「继续沟通」）——不随内容滚走 */
+.pane-foot {
+  flex-shrink: 0;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  padding: var(--sp-3) var(--sp-5);
+}
+
+/* ══════════════ 主区里的就地面板（`.main-panel`）══════════════
+   ★ 2026-10：技能页与工具页的「安装」原来是右侧抽屉（`.drawer`），使用者要求改成
+   "类似新建智能体那样，在主区显示"——所以这里给它们一套与主区面板同族的容器：
+   边框 + 圆角 + 头部 / 正文 / 底部三段，指标与 `.pane-head` / `.pane-body` /
+   `.pane-foot` 对齐（同一套留白与字号，看不出是两套东西）。
+
+   它**不是**对话框（`.drawer` / `.modal`）：没有 `position: fixed`、没有遮罩、
+   也没有 `z-index`——它随页面滚，是被"换进主区"的内容。所以风格上也就不该借用
+   `.drawer-*` 那几个类：借了之后下一次有人调抽屉宽度，会把这一块一起改掉。 */
+.main-panel {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.main-panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.main-panel-head h2 {
+  font-size: var(--fs-lg);
+}
+
+/* ⚠️ 返回入口必须**一直可见**（它是这一块唯一的"怎么回去"）。
+   不能复用 `.back-to-list`：那个 class 在宽屏是 `display:none`（主从布局里列表
+   就在左边，不需要返回）。这里列表是被面板**换掉**的，与屏宽无关。 */
+.panel-back {
+  flex-shrink: 0;
+}
+
+.main-panel-body {
+  padding: var(--sp-4) var(--sp-5);
+}
+
+.main-panel-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: var(--sp-3) var(--sp-5);
+}
+
+/* 详情/建任务的栏头（D69.15 由 MainArea 渲染，scoped 样式打不进来，放这里）：
+   与 `.pane-head` 同一套指标——留白、下边框、标题字号 fs-lg（全局 h2 是 fs-xl
+   22px，不钉字号标题就会比聊天栏头大 5px——使用者当场抓到的"Title 高度不一样"） */
+/**
+ * 详情栏头：**左列 = 标题 + 副题，右列 = 动作**。
+ *
+ * ★ 分批第 197 批改的（使用者："「放弃」和「确认入库」位置还是不对，依然在第 3 行，
+ *   而不是右侧"）。原来这里只是个带 padding 的块容器 ⇒ 标题、副题、动作依次占**三行**，
+ *   动作再怎么 `margin-left:auto` 也没有效果（块级流里没有"右边"）。
+ *
+ * 现在用两列网格：动作一栏跨两行、靠右；副题可以长（它自己 `min-width:0` + 省略号），
+ * 但它**挤不掉**动作那一列（`auto` 列按内容宽，`1fr` 那列先缩）。
+ * 窄屏的「返回」按钮仍独占第一行（它只在详情整页、没有左栏时出现）。
+ */
+.detail-head {
+  padding: var(--sp-4) var(--sp-5) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--sp-3);
+  row-gap: var(--sp-1);
+}
+
+.detail-head h2 {
+  font-size: var(--fs-lg);
+  /* ★ 314 批（使用者："标题字色"有差别）：标题字色**显式**钉成正文色。
+     原来是继承——聊天那一栏的容器与任务那一栏不是同一个，继承链不同，
+     同一颗 h2 就会落成 `--text` 与 `--text-dim` 两种，看着就是"颜色不一样"。 */
+  color: var(--text);
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 标题 + 副题：**同一个格子**（D139 起由 `MainArea` 包一层 `.detail-head-main`）。
+   为什么改：原来 h2 与 .detail-sub 是两个网格子项、动作靠 `grid-row: 1 / span 2` 跨行
+   对齐——于是"副题有没有内容"会改变栏头的行数与按钮的垂直位置：副题空着时栏头多出
+   一行空白，标题看着偏高、按钮离标题更远（实测单行 50px 的房间被撑成 59px）。 */
+.detail-head .detail-head-main {
+  grid-column: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* 副题：一行、超了省略——它是最先该让位的东西（动作与标题都比它重要） */
+.detail-head .detail-sub {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 动作：右列、与**文字块**垂直居中（不跨行数——它与副题几行无关） */
+.detail-head .detail-actions {
+  grid-column: 2;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-1);
+  flex-shrink: 0;
+}
+
+/**
+ * ★ 分批第 265 批（使用者："按钮风格，任务页也一样……如果其他页有类似风格问题，一起修改了"）：
+ *   **栏头那一排动作也走同一条工具条**（与顶栏 `新建对话 / 设置`、与聊天页 `pane-actions`
+ *   同一套）。原来各页的栏头按钮都是裸 `ghost` / `secondary` 方块，同一种东西在四个页面
+ *   四种长相，而这四条规则本来就只该有一处。
+ *
+ * ⚠️ 只在**真有内容**时才画那条轨道（`:has(> *)`）：没有动作的页面（比如沉淀页的栏头）
+ *    不该凭空多出一枚灰色小胶囊。聊天页「工作目录的文件」那一栏的 `actions` 片段平时也
+ *    是空的——同一个理由。
+ * ⚠️ 栏头那一格还兼着 `grid-column/row`（见上），这里只补"看起来像工具条"的部分。
+ */
+/**
+ * ⚠️ 只在**两颗以上**按钮时才画那条轨道（`> button + button`）：只有一个动作的栏头
+ *   （沉淀页那颗「确认入库」）保持原来的贴右缘单按钮——那是主操作，套进一条轨道会
+ *   让它离栏头右缘 20 多像素，而"确认入库必须在标题右侧、贴着右缘"是使用者连提两次的
+ *   一条判据（`crystal.commitRight`）。一颗按钮不存在"和邻居对齐"的问题，不需要轨道。
+ */
+.detail-head .detail-actions:has(> button + button) {
+  height: 1.9rem;
+  box-sizing: border-box;
+  padding: 0 var(--sp-1);
+  gap: 2px;
+  background: var(--line);
+  border-radius: var(--radius);
+}
+.detail-head .detail-actions > button {
+  height: 1.5rem;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.detail-head .detail-actions > button:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text);
+  filter: none;
+}
+.detail-head .detail-actions > button.btn--danger {
+  background: transparent;
+  color: var(--bad);
+}
+.detail-head .detail-actions > button.btn--danger:hover:not(:disabled) {
+  background: var(--surface);
+  filter: none;
+}
+
+/* ══════════ 轨道式互斥切换（`.source-toggle`）══════════
+ *
+ * 「智能体 / 智能体组」这类二选一（乃至多选一）的切换：灰轨 + 透明胶囊按钮，
+ * 选中那颗 `active` 变 `--accent-dim` 底白字。与 `.detail-actions` 工具条
+ * 同一族（轨道 + 1.5rem 胶囊），只是它**贴内容宽**（`width: fit-content`）、
+ * 用在表单字段里而不是栏头。
+ *
+ * ★ 2026-11：原来定义在 `NewTaskForm.svelte` 局部，定时任务表单的「智能体/组」
+ *   互斥切换要同一形态，于是提到这里**两处共用**（使用者：定时任务页风格与
+ *   其它页面完全不同——独立 pill 换成这同一套轨道）。
+ */
+.source-toggle {
+  display: flex;
+  align-items: center;
+  /* ★ 轨道**贴内容**：父容器是纵向 flex，块级子项默认被 `stretch` 拉满整宽——
+     实测灰轨横贯整卡（使用者报"右侧被拉太长了"）。钉死内容宽，与顶栏
+     `page-actions`（flex 行里的内容宽轨道）同一个行为。 */
+  width: fit-content;
+  height: 1.9rem;
+  box-sizing: border-box;
+  padding: 0 var(--sp-1);
+  gap: 2px;
+  background: var(--line);
+  border-radius: var(--radius);
+}
+.source-toggle button {
+  height: 1.5rem;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.source-toggle button:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text);
+}
+.source-toggle button.active {
+  /* ⚠️ 背景用 `--accent-dim` 而不是 `--accent`：暗色主题下 `--accent` 是**浅蓝**
+     （#5aa9f5），白字配它看不见；`--accent-dim` 两种主题下都是深蓝，白字才读得
+     出来（与顶栏激活按钮同一套惯例）。 */
+  background: var(--accent-dim, #2f6fed);
+  color: var(--on-accent);
+}
+
+/* ══════════ 表单高级区 + 工作目录行（两表单 + 新对话共用）══════════
+ *
+ * 「高级选项」折叠区与「输入框 + 浏览…」同一行。原来在 NewTaskForm 与
+ * Chat 各写了一份（2026-11 定时任务表单也要同一控件，第三处要抄）——
+ * 同一份内距/收缩规矩三处各写一遍就是三处会漂移的常量，提到这里一处定义。
+ */
+.form-advanced {
+  margin: var(--sp-2) 0;
+}
+.workdir-row {
+  display: flex;
+  gap: var(--sp-2);
+}
+.workdir-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* ★ 分批第 230 批：「浏览…」不许被挤窄（中文最小内容宽度 = 一个字，
+   一挤就折成两行）。收缩全推给输入框。 */
+.workdir-row > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* 窄屏的返回按钮独占第一行。
+   ⚠️ D139：`justify-self: start` + 不拉满——拉满时窄屏栏头会变成"一条整宽横条 +
+   标题一行 + 副题一行 + 右侧动作"，实测 153px 高，按钮还离文字很远。 */
+.detail-head .back-to-list {
+  grid-column: 1 / -1;
+  justify-self: start;
+  width: auto;
+}
+
+.detail-sub {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  /* ★ 315 批（使用者："第二行副标题颜色有差"）：与标题同一个病——**没有 color，
+     靠继承**。聊天那一栏与任务那一栏的容器不同，同一颗副标题就落成两种灰。
+     副标题是次要信息，钉成 `--text-faint`，全站一处决定。 */
+  color: var(--text-faint);
+}
+
+/* 返回按钮只在窄屏（详情整页显示时）需要——宽屏列表就在左边。
+   智能体详情里的那个返回按钮同理（它自带 .back 类）。 */
+.back-to-list,
+.split-layout.with-detail .detail-pane .back {
+  display: none;
+  margin-bottom: var(--sp-2);
+}
+
+/* ══════════════ 断点 ══════════════
+   两档：
+     72rem —— 主从布局退化成"一次只显示一栏"（详情占满，返回按钮出现）
+     60rem —— 看板三列改成纵向堆叠（三等分在窄屏挤得没法读） */
+
+@media (max-width: 72rem) {
+  .split-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* 窄屏退化成单栏（列表被详情盖掉）——"两栏之间"不存在，把手不显示 */
+  .split-layout .split-grip {
+    display: none;
+  }
+
+  .split-layout.with-detail .list-pane {
+    display: none;
+  }
+
+  .split-layout:not(.with-detail) .detail-pane {
+    display: none;
+  }
+
+  .back-to-list,
+  .split-layout.with-detail .detail-pane .back {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 60rem) {
+  .board-4 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .main {
+    padding: var(--sp-4);
+  }
+
+  .pane-head,
+  .pane-body,
+  .pane-foot {
+    padding-left: var(--sp-4);
+    padding-right: var(--sp-4);
+  }
+
+  /**
+   * 窄屏：页面动作收进 `⋯`。
+   *
+   * ★ 为什么是"收起来"而不是"换行"：顶栏高度被 `.shell` 的
+   *   `calc(100vh - var(--topbar-h))` 用着，一旦它变成两行，整个页面会多出
+   *   一条滚动条、底部那一栏也会被推出视口。宽度可以挤，高度不能变。
+   *
+   * ⚠️ 两处渲染的是**同一份** `$pageActions`：窄屏只是换了个位置，
+   *    不是另一套按钮（另一套就会有两套"哪些该禁用"的判断）。
+   */
+  .page-actions {
+    display: none;
+  }
+
+  .page-more {
+    display: block;
+  }
+}
+
+/**
+ * 更窄（手机横屏 / 半屏窗口）：账号只留头像。
+ *
+ * 名字是这一条带子上最长的**可变**文字（`max-width: 8rem`），其它都是固定词条；
+ * 挤不下时先牺牲它，头像仍然说明"我是谁"。
+ */
+@media (max-width: 48rem) {
+  .account-name {
+    display: none;
+  }
+
+  .page-name {
+    max-width: 8rem;
+  }
+}
+
+/**
+ * 页面头部：只有一个标题 + 一段说明。
+ *
+ * ⚠️ 2026-09 之前这里叫 `.view-head` 并**同时**装着标题与那一排动作按钮；
+ *    动作移到顶栏之后，三个页面（新建任务 / Skills / 工具）里的 `<h2>` 与顶栏
+ *    页名重复，于是标题也去掉了——这一块现在只剩说明段。
+ *    ⚠️ 任务与智能体不在这里：它们是主从布局，说明写在**左栏**的 `pane-head` 里
+ *    （那是"这一栏是什么"，不是"这一页是什么"）。
+ */
+.view-intro {
+  margin-bottom: var(--sp-5);
+}
+
+/**
+ * ⚠️ **不给它设 `max-width`**：这几页的说明段原来被限在 `60ch`，于是在宽窗口下
+ *    它是窄窄一列，而下面的表格 / 卡片是整宽——一块窄文字浮在左边，看起来像没排好
+ *    （2026-09 按要求拉通）。可读性上长行确实更费眼，但"与下面的内容对齐"更值。
+ */
+.view-intro p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+/* ══════════════ 控件 ══════════════ */
+
+/* ★ 扁平化（2026-09）：按钮不再描边。
+   主按钮 = 实心色块（白字）；次级 = 浅灰软底（flat 的"第二等"不是描边，
+   是低对比度的底色）；ghost = 无底无框，hover 才浮出底色。
+   三种重量靠**底色对比**区分，不靠边框。 */
+button,
+.btn {
+  font: inherit;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius);
+  border: none;
+  background: var(--accent-dim);
+  color: var(--on-accent);
+  cursor: pointer;
+  transition: filter 0.12s, background 0.12s;
+}
+
+/**
+ * ⚠️ **"按钮 + 可伸缩的兄弟"这种行，按钮上必须写 `flex: 0 0 auto; white-space: nowrap`**
+ *    （分批第 230 批，使用者报的："『浏览』2 个字，都换行了"、"『选择一个目录』里面的
+ *    『关闭』换行了"）。
+ *
+ * 根因不是宽度算错了：这样的行里按钮和输入框/文字**都是 flex 项**，空间不够时一起收缩，
+ * 而一个 flex 项能缩到的最小宽度是 `min-content`——对中文来说就是**一个字**（每个汉字
+ * 都是一个断行点）。于是两三个字的按钮被压成一个字宽，「关闭」折成「关」「闭」两行。
+ * 触发条件是"兄弟那一格的内容变长了一点"，所以它看起来时有时无、换个窗口宽度就换一副样子。
+ *
+ * 已经在这些地方按这条规矩写死了（新增同类行时照着来）：
+ *   · `.modal-head > button`（模态框的「关闭」）
+ *   · `FootFiles` 的 `.foot-files-head :global(.ghost)`（「工作目录的文件」/「材料」标题行）
+ *   · `DirPicker` 的 `.path-row / .nav-row / .actions > button`
+ *   · 「新对话」与「新建任务」的 `.workdir-row > button`（「浏览…」）
+ *
+ * ⚠️ 不要图省事在这里全局写 `white-space: nowrap`：`.intake-choice` 那类按钮里**本来就要
+ *    折行**（第一行是选项、第二行是说明），全局禁掉会把它们挤成横向溢出。
+ */
+button:hover:not(:disabled),
+.btn:hover:not(:disabled) { filter: brightness(1.15); }
+button:disabled,
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/**
+ * ══════════ 按钮族（分批第 298 批）══════════
+ *
+ * **界面上只有这几类按钮。**写新界面时从这里挑一个变体，不要另起一套
+ * `padding/border-radius/background` —— 从前同一个"次要按钮"在 7 个组件里
+ * 各写了一遍内距，改一处色就漏掉六处（清单见 `docs/design/style-audit.md`）。
+ *
+ * 结构 = `class="btn btn--<重量>"`，可选再叠 `btn--<尺寸>`：
+ *
+ * | 变体            | 用在哪                                        |
+ * |-----------------|-----------------------------------------------|
+ * | `btn--primary`  | 这一屏的主线动作（新建 / 发送 / 保存）         |
+ * | `btn--secondary`| 配套动作（刷新 / 浏览… / 取消里的"次要那个"）  |
+ * | `btn--ghost`    | 无底无框，hover 才浮出底（返回 / 关闭 / 小图标）|
+ * | `btn--danger`   | 破坏性动作（删除 / 清空 / 停掉）               |
+ * | `btn--link`     | 行内文字链（`撤销` / `重命名`），不带按钮形状  |
+ * | `btn--sm`       | 字号降到 `--fs-xs`（12px），形状不变           |
+ * | `btn--mini`     | 行尾那排"悬停才出现"的极小动作（记忆行的 改/删）|
+ * | `btn--tight`    | 小内距 + 描边的次要按钮（表单里紧贴输入框）    |
+ * | `btn--icon`     | 只有图标（顶栏铃铛/齿轮），SVG 尺寸由这里定     |
+ *
+ * ⚠️ **重量是互斥的**，尺寸可以叠。写 `btn btn--ghost btn--sm` 而不是
+ *    `ghost small`——两个类各自说清"哪个重量""哪档大小"，不再靠类名重叠去猜。
+ * ⚠️ `btn--primary` 与基类同款，显式写出来是为了让**每次**调用都看得见重量；
+ *    没有写变体的 `class="btn"` 也按 primary 渲染，但新代码不要这么写。
+ *
+ * 结构性控件（列表行 `.row`、标签页 `.tab`、角色卡 `.role-card`、
+ * `DirPicker` 的目录行……）**不属于按钮族**：它们自带形状，只借基类的
+ * `font: inherit` / 指针。清单见 `docs/design/ui-style.md`。
+ */
+.btn--primary {
+  background: var(--accent-dim);
+  color: var(--on-accent);
+}
+
+.btn--secondary {
+  background: var(--surface-2);
+  color: var(--text-dim);
+}
+
+.btn--secondary:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.btn--danger {
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  color: var(--bad);
+}
+
+.btn--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bad) 22%, transparent);
+  filter: none;
+}
+
+/**
+ * 行内文字链：**去掉一切按钮形状**（内距/底色/圆角都归零），只剩可点的字。
+ * 用在"已记进它的记忆 · 撤销"这类句子里——描边或色块会把一行灰字撑成一排控件。
+ */
+.btn--link {
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-none);
+  background: none;
+  color: var(--accent);
+  font-size: var(--fs-xs);
+}
+
+/* 禁用态：除了整体变淡，字色也压到 faint——只靠透明度的话，accent 蓝在浅色
+   底上仍然"看起来能点"（300 批：`AgentDetail` 里那份本地定义并到这里）。 */
+.btn--link:disabled {
+  opacity: 0.5;
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+/* 更淡的链接（`Chat` 的撤销条）：靠虚线下划线表示可点，颜色压到 faint */
+.btn--link.btn--quiet {
+  color: var(--text-faint);
+  text-decoration: underline dotted;
+}
+
+/* 尺寸：只改字号与内距，**不改圆角/底色**，所以能跟任何重量叠 */
+.btn--sm {
+  font-size: var(--fs-xs);
+}
+
+.btn--mini {
+  padding: 0 var(--sp-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.btn--mini:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.btn--tight {
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--line-strong);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.btn--icon {
+  padding: 0 var(--sp-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* SVG 只做装饰，大小跟着按钮走（原来是 Topbar 自己的 `.icon-btn svg`） */
+.btn--icon > svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+
+/* 未读徽标紧贴图标：数字小、不占位，只在有未读时出现。
+   圆点藏掉——铃铛自己就是图标，旁边再放一个状态点会变成"两个圆" */
+.btn--icon .unread {
+  padding: 0 0.3rem;
+  min-width: 1.1rem;
+  justify-content: center;
+}
+
+.btn--icon .unread::before {
+  display: none;
+}
+
+input,
+textarea,
+select {
+  font: inherit;
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  transition: border-color 0.12s;
+}
+
+input:hover,
+textarea:hover { border-color: var(--text-faint); }
+
+input:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+textarea { resize: vertical; min-height: 4rem; }
+
+label {
+  display: block;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  margin-bottom: var(--sp-3);
+}
+
+label > input,
+label > textarea,
+label > select { margin-top: var(--sp-1); }
+
+/* ★ 表单字段组（一个 label + 一个控件 + 说明）。
+   ⚠️ 这三条**原来在 `Skills.svelte` 与 `Tools.svelte` 里各抄了一份、逐字相同**
+      （用 `diff` 验过）——同一套样式两份出处，改一处漏一处，两个页面立刻长得
+      不一样。提到全局：同一件事只有一个出处。 */
+/* ★ 300 批：字段的"竖排"也收在这里。原来 `CrystallizeCommitDialog` 与
+   `CrystallizeView` 各写了一遍 `display:flex; flex-direction:column; gap:--sp-1`
+   ——同一个形状两处抄，改一处就漏一处。`--flush` 给"外层已经管了间距、
+   自己不要再顶出 12px"的场合（审阅态那一屏）。 */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-3);
+}
+
+.field--flush { margin-bottom: 0; }
+.field > label {
+  display: block;
+  margin-bottom: var(--sp-1);
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+}
+.field > input { width: 100%; }
+
+/* ══════════════ 表格 ══════════════ */
+
+/* ★ 307 批（使用者要求"给未来的表格也留一个同一的入口"）：每条规则都同时挂
+   元素选择器与 `.table` 类。现在的表都是 `<table>`（四页共用 `Table` 组件），
+   所以加类不会改任何像素；将来若有"不是 table 元素但该长得像表格"的东西
+   （栅格化的对照表之类），加个 `class="table"` 就同款，不用再抄一遍内距。 */
+
+table,
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+thead th,
+.table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: var(--fs-xs);
+  /* 表头用小型大写感的层级，而不是加粗——加粗会让每张表都很吵 */
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line-strong);
+  white-space: nowrap;
+}
+
+tbody td,
+.table td {
+  padding: var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+tbody tr:hover,
+.table tbody tr:hover { background: var(--surface); }
+
+tbody tr:last-child td,
+.table tbody tr:last-child td { border-bottom: 0; }
+
+.table-wrap {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  /* ⚠️ `overflow-x: auto` + `overflow-y: hidden`，**不是** `overflow: hidden`。
+     2026-10 量出来的：写 `hidden` 时窗口一窄，表格右边的列被**裁掉且无法到达**
+     ——daemon 的技能表在 860px 窗口下被裁掉 **316px**（"抓取于""操作"那几列直接
+     看不见，而界面上没有任何提示）。裁切与滚动是两种不同的失败：滚动是"要动一下
+     才看到"，裁切是"根本没有"。横向可滚之后圆角仍然由 `overflow-y: hidden` 裁住
+     （表格的直角不会戳出圆角边框）。 */
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--surface);
+}
+
+/* ══════════ 表格单元格原子（D69 上移：原来 `Skills.svelte` 与 `Tools.svelte`
+   ══════════ 各抄一份、逐字相同，远端管理页**一份都没有**——它的 `.source-ref`
+   因此不省略、会折行撑高整行。同一件事只有一个出处：这几套是 5 张数据表共用的，
+   提到这里，remote 自动获得同样的行为。 */
+
+/* 操作列：两个以上按钮并排不折行（daemon 4 张表 + remote 2 张都用它） */
+.row-actions { display: flex; gap: var(--sp-1); }
+.row-actions .danger { color: var(--bad); }
+
+/* 首格行：chevron + slug 并排（D69.8 从 remote 技能页上移为共享）。
+   ⚠️ `display:flex` 的 `flex-wrap` 默认 `nowrap`——这是"`▸ slug` 永不折行"的
+   保证：内联元素在列被压窄时会换行（`table{width:100%}` 一窄就折），flex 不会；
+   实在放不下时整格溢出、由 `.table-wrap` 横向滚动。 */
+.row-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* 折叠区块（D69.9）：头部是**整行真按钮**，chevron + 标题 + 右侧小字摘要——
+   "重要资讯直接展示、非重要资讯折叠"的载体，与表格 `.expand-toggle` 同一视觉
+   语言。内容只在展开时渲染（`{#if}`）。 */
+.fold-section { margin: var(--sp-2) 0; }
+.fold-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  padding: var(--sp-1);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.fold-head:hover { background: var(--surface-hover); }
+.fold-head .chevron {
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  flex: 0 0 auto;
+}
+.fold-head[aria-expanded='true'] .chevron { color: var(--accent); }
+.fold-title { font-weight: 600; }
+.fold-summary {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 55%;
+}
+.fold-body { padding: var(--sp-1); }
+
+/* 名称/说明下面那句说明：**最多两行**截断，全文在 `title` 里。
+   ⚠️ 用行数上限而不是定宽单行：表格列宽自适应，定宽没意义；行数上限保证
+   "再长的说明也不把这一行撑成十行"（实测最长 400+ 字符）。 */
+.desc-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 首格展开 chevron（`ExpandToggle` 组件）：
+   · 按钮本身只有图标大小，不撑高这行；
+   · 展开时箭头朝下、给强调色——"这一行现在是开着的"一眼可见；
+   · ⚠️ 不写 `width/height` 死值：按钮高度随行高走，否则会被行高顶歪。 */
+.expand-toggle {
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  padding: 0 var(--sp-1);
+  margin-right: var(--sp-1);
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  line-height: 1;
+  vertical-align: middle;
+}
+.expand-toggle:hover { color: var(--text); background: var(--surface-hover); }
+.expand-toggle[aria-expanded='true'] .chevron { color: var(--accent); }
+
+/* 来源标识：路径/URL 再长也不许折行（一折这一格就变高、整行跟着变高）。
+   `span` 与徽章同行（2026-10 紧凑性），单行省略，全文在 `title` 里。 */
+.source-ref {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: var(--sp-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 16rem;
+}
+
+/* 操作列按钮不许断行：这一格窄（两个按钮挤在一起），断了就变竖排 */
+.row-actions button { white-space: nowrap; }
+
+/* ══════════ 表格单元格原子（D69 上移：原来 `Skills.svelte` 与 `Tools.svelte`
+   ══════════ 各抄一份、逐字相同，远端管理页**一份都没有**——它的 `.source-ref`
+   因此不省略、会折行撑高整行。同一件事只有一个出处：这几套是 5 张数据表共用的，
+   提到这里，remote 自动获得同样的行为。 */
+
+/* ══════════════ 差异视图（沉淀页） ══════════════ */
+
+/**
+ * ★ 304 批：`CrystallizeDraftEditor` 与 `CrystallizeView` 里这三条规则**逐字相同**
+ *   （同一个"文件行 / 变更标 / hunk 头"写了两遍）。收到这里，一处定义。
+ *
+ * ⚠️ 必须带 `.diff-view` 作用域，不能直接写 `.file-row`：`FileViewer` / `WorkDirTree` /
+ *    `ActionPicker` 里也有同名类（各自 scoped），全局化会把这三条属性漏过去。
+ */
+.diff-view .file-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diff-view .change-tag {
+  flex: 0 0 auto;
+  padding: 0 var(--sp-1);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-2xs);
+  line-height: 1.5;
+  border: 1px solid var(--line);
+}
+
+.diff-view .hunk-head {
+  padding: 2px var(--sp-2);
+  color: var(--text-faint);
+  background: var(--surface-2);
+  border-top: 1px solid var(--line);
+  user-select: none;
+}
+
+/* ══════════════ 状态徽标 ══════════════ */
+
+/* ★ 扁平化（2026-09），**但描边留一条发丝**：纯色块在浅底上会"看不见边界"，
+   浅色块底 + 同色的 28% 发丝线，chip 才是个 chip。`color-mix` 让描边跟着
+   currentColor 走，亮暗两个主题各得其所。 */
+/* 徽标（胶囊 + 圆点 + 10% 底 + 28% 发丝边）。
+ *
+ * ⚠️ 2026-11（D142）：`display` 从 `inline-flex` 改成 **`inline-block`**，圆点从
+ *    "flex 子项" 改成 "内联块"——因为**基线的来源变了**：flex 容器的基线取"第一个
+ *    flex 子项的基线"，而圆点（`::before`）没有文字，浏览器退回用它的**下边缘**当基线
+ *    ⇒ 徽标整体比旁边的文字**低 1.9px**（实测），混排时（"最近 15 小时前 [失败]"）
+ *    那一段就比前面几段矮半行。改成 inline-block 之后徽标的基线就是**它自己文字**的
+ *    基线，和两边文字自然对齐（实测极差 0）。圆点用 `vertical-align: middle` 居中。 */
+.badge {
+  display: inline-block;
+  padding: 0.1rem var(--sp-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  white-space: nowrap;
+}
+
+.badge::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  margin-right: var(--sp-1);
+  vertical-align: middle;
+}
+
+/* 小一号（表单/卡片里的"私有""必填"这类贴身标记）。用 `em` 而不是令牌，
+   因为在密集的表单区里它要跟着那一块的正文一起缩，而不是钉死 12px。 */
+.badge--sm {
+  font-size: var(--fs-2xs);
+  padding: 0.15em 0.6em;
+}
+
+/* accent 强调档：只改字色，描边与 10% 底色都跟着 `currentColor` 走
+   （与 `.badge.local` 同一个配方，区别只在它不表示"来源"） */
+.badge--accent {
+  color: var(--accent);
+}
+
+/* 描边加强档（表单里的"平台默认 / 自定义"这类说明性徽标）：全局徽标的描边是
+   `currentColor` 的 28%，这一档换成 `--line-strong`，在浅底上更"看得见边界" */
+.badge--outline {
+  border-color: var(--line-strong);
+  border-radius: var(--radius);
+}
+
+/* ⚠️ `todo` / `backlog` 已无使用点：原来那个「本地技能目录缺哪几个」徽章挂在设置抽屉里，
+   而设置抽屉随"本地技能目录改成显式安装"撤掉了（D73）。任务状态徽章另有各档（见下），
+   表格 source 徽标已换 `badge.local`（D69）。保留这条只为兼容旧样式，不新增使用。 */
+.badge.todo, .badge.backlog { color: var(--status-todo); }
+.badge.in_progress { color: var(--status-active); }
+.badge.in_review { color: var(--status-review); }
+.badge.done, .badge.completed { color: var(--status-done); }
+.badge.blocked, .badge.failed { color: var(--status-blocked); }
+.badge.cancelled { color: var(--text-faint); }
+
+/* ★ 来源徽标的「本地」档（D69 统一配方：同步/推荐 = 默认灰徽章，
+   本地 = accent 强调。原 remote 自己一份、daemon 用任务状态色 `todo`——
+   状态色是给任务状态用的，来源不该借它。远端管理页原来就叫 `.local`，
+   daemon 技能/工具两页的 source 徽标改用同一档）。 */
+.badge.local {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ══════════════ 文本语义 ══════════════ */
+
+.good { color: var(--good); }
+.bad { color: var(--bad); }
+.warn { color: var(--warn); }
+.muted { color: var(--text-dim); }
+.faint { color: var(--text-faint); }
+/* 小号字（原来是 `.small`；298 批改名，跟 `--fs-*` 令牌一族对齐） */
+.fs-xs { font-size: var(--fs-xs); }
+.mono { font-family: var(--font-mono); }
+
+.hint {
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+  line-height: var(--lh-base);
+}
+
+/* ══════════════ 空 / 加载状态 ══════════════ */
+
+.empty {
+  padding: var(--sp-8) var(--sp-4);
+  text-align: center;
+  color: var(--text-faint);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+}
+
+.empty strong {
+  display: block;
+  color: var(--text-dim);
+  font-weight: 500;
+  margin-bottom: var(--sp-1);
+}
+
+/**
+ * 空态里的段落（2026-09：智能体 / 任务的右栏空态各多了一段"选中之后你会看到
+ * 什么"）。`p` 的全局下边距是 `--sp-3`，最后一段带着 12px 尾巴会把空态框撑得
+ * 上紧下松——这里改成段间留白。
+ */
+.empty p {
+  margin: 0;
+  line-height: var(--lh-base);
+}
+
+.empty p + p {
+  margin-top: var(--sp-2);
+}
+
+.skeleton {
+  height: 1rem;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--surface-2), var(--surface-hover), var(--surface-2));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite linear;
+}
+
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+/* ══════════════ 抽屉 ══════════════ */
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 40;
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(34rem, 92vw);
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  box-shadow: var(--shadow-2);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+}
+
+/**
+ * 那条一闪而过的提示（toast）。
+ *
+ * ⚠️ 它原来复用的是 `.drawer`（只为蹭那套"浮在最上层"的固定定位 + 底色 + 阴影），
+ *   然后用一串 inline style 把位置改成"底部居中"。那种复用的代价是**它长得像抽屉**
+ *   ——探针里"每个 `.drawer` 都得有 `.drawer-head`"那条一致性判据会把它算进去：
+ *   一次保存成功弹出个 toast 就会让那条判据变红，而它要测的东西（抽屉头部写法统一）
+ *   与 toast 毫无关系（2026-11 实测踩到）。
+ *
+ *   所以给它自己的类：视觉上一模一样（同一套底色/阴影/圆角/层级），语义上不再冒充抽屉。
+ */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: var(--sp-5);
+  transform: translateX(-50%);
+  width: auto;
+  max-width: min(32rem, 92vw);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  z-index: 50;
+}
+
+/* 内容宽的抽屉（比如「安装 skill」里那张远端目录表）。
+   34rem 是给"读一段设置"定的宽度，塞一张五列表格就只剩横向滚动条了。 */
+.drawer.wide {
+  width: min(46rem, 94vw);
+}
+
+/* ★ 要在里面**写长文本**的抽屉（新建智能体那份指令）。
+   46rem（736px）对表格够宽，对"写一篇 800 字的指令"不够：正文只有 ~688px，
+   13px 的中文一行放 ~52 个字 ⇒ 800 字要 16 行，读起来一直在滚。
+   58rem（928px）一行 ~67 个字 ⇒ 800 字 12 行，一屏能看完。
+
+   ⚠️ 三个宽度是**三种用途**，不是三个档次的"大小"：
+       34rem 读设置 / 46rem 看表格 / 58rem 写长文。
+      再往上加之前先问一句"这一档是给哪种内容用的"——抽屉再宽就该是整页了。 */
+.drawer.wider {
+  width: min(58rem, 96vw);
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.drawer-body {
+  flex: 1;
+  min-height: 0; /* 与 .pane-body 同一个理由：不写这句内部滚动会失效 */
+  padding: var(--sp-5);
+  overflow-y: auto;
+}
+
+/* 主操作常驻底部：安装面板里的按钮原来在正文末尾，正文一长就得先滚到底
+   才能按——而"装它"正是这个抽屉唯一的动作。 */
+.drawer-foot {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: var(--sp-3) var(--sp-5);
+}
+
+/* ══════════════ 居中对话框 ══════════════
+   与抽屉的区别是**用途**，不是位置：抽屉读写一段配置（从右边推进来，不动主从
+   布局），对话框是"从一大堆东西里挑一个"（要宽、要居中、挑完就关）。
+   遮罩沿用 `.drawer-backdrop`——同一件事不写两遍。 */
+
+.modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  /* 高度上限：留出上下各 5vh 的边距，让使用者看得出"后面还有一页"（浮层不是整页） */
+  max-height: 90vh;
+  width: min(42rem, 92vw);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 装**两栏**的对话框（左挑右配，比如行动权限）。
+   ⚠️ 42rem（672px）塞两栏会各自只剩 ~300px：左栏的契约值 `hello-tool.say`
+      这类长名字会折行、右栏的参数表单挤成一条。74rem（1184px）是按
+      "两栏各 ~480px + 间距"定的——与智能体页里那个选择器的实测宽度同源。 */
+.modal.wide {
+  width: min(74rem, 96vw);
+}
+
+.modal-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--line);
+}
+
+/**
+ * ★ 分批第 230 批：标题区右侧那颗按钮（一般是「关闭」）**不许被挤窄**。
+ *
+ * 使用者报的："『选择一个目录』里面的『关闭』换行了"。
+ *
+ * 根因不是它的宽度算错了，而是**它和副标题都是 flex 项**：这一行没有空间时两个一起收缩，
+ * 而中文的最小内容宽度 = **一个字**（每个汉字都是一个断行点）⇒ 按钮被压到一个字宽，
+ * 「关闭」就折成两行。副标题越长越容易触发，所以它看起来"时有时无"。
+ *
+ * `flex: 0 0 auto` 让它保持自己的宽度（收缩全部落到左边的文字上），`white-space: nowrap`
+ * 再兜一层：万一父容器真的比它还窄，宁可溢出也不要断在字中间。
+ */
+.modal-head > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.modal-body {
+  flex: 1;
+  min-height: 0; /* 与 .drawer-body 同一个理由：不写这句内部滚动会失效 */
+  padding: var(--sp-5);
+  overflow-y: auto;
+}
+
+.modal-foot {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-3);
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: var(--sp-3) var(--sp-5);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.drawer-section { margin-bottom: var(--sp-5); }
+.drawer-section h3 { margin-bottom: var(--sp-3); }
+.drawer-section h4 {
+  margin: var(--sp-4) 0 var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+}
+
+/* ★ 主题三档分段控件（设置抽屉）。扁平软底：没选中的是 `surface-2`，
+   选中的是 `accent-dim`（实心），一眼看出当前是哪档。 */
+.theme-picker {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  gap: 2px;
+}
+.theme-picker button {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: calc(var(--radius) - 2px);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+.theme-picker button:hover:not(:disabled):not(.active) { color: var(--text); }
+.theme-picker button.active {
+  background: var(--accent-dim);
+  color: var(--on-accent);
+}
+
+/*
+ * ★ 状态筛选 chips（任务列表，2026-11）：一排小圆钮，与 theme-picker 同族
+ *   （软底分段选择器），但允许换行（列表栏窄时 chips 折行）。
+ */
+.stage-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.stage-chips button {
+  border: 1px solid var(--surface-2);
+  background: var(--surface);
+  color: var(--text-dim);
+  padding: 2px var(--sp-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
+.stage-chips button:hover:not(:disabled):not(.active) { color: var(--text); }
+.stage-chips button.active {
+  background: var(--accent-dim);
+  border-color: var(--accent-dim);
+  color: var(--on-accent);
+}
+
+/* ★ 分组/平铺切换（任务列表，2026-11）：与 theme-picker 同族的紧凑两档 */
+.view-switch {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  gap: 2px;
+}
+.view-switch button {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 2px var(--sp-2);
+  border-radius: calc(var(--radius) - 2px);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
+.view-switch button:hover:not(:disabled):not(.active) { color: var(--text); }
+.view-switch button.active {
+  background: var(--accent-dim);
+  color: var(--on-accent);
+}
+
+/* ══════════════ 提示条 ══════════════ */
+
+/* 扁平化（2026-09）：重描边 → 浅色块底 + 状态色发丝线。状态色以 10% 混进
+   底色、35% 混进描边，亮暗主题各得其所；`color-mix` 一写，以后换状态色
+   不用回来改这里。 */
+.notice {
+  padding: var(--sp-3);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-start;
+}
+
+.notice.bad {
+  border-color: color-mix(in srgb, var(--bad) 35%, transparent);
+  background: color-mix(in srgb, var(--bad) 10%, var(--surface));
+  color: var(--bad);
+}
+.notice.warn {
+  border-color: color-mix(in srgb, var(--warn) 35%, transparent);
+  background: color-mix(in srgb, var(--warn) 10%, var(--surface));
+  color: var(--warn);
+}
+.notice.good {
+  border-color: color-mix(in srgb, var(--good) 35%, transparent);
+  background: color-mix(in srgb, var(--good) 10%, var(--surface));
+  color: var(--good);
+}
+
+/* ══════════════ 杂项 ══════════════ */
+
+.plain { list-style: none; padding: 0; margin: 0; }
+
+a > button { width: 100%; }
+
+/*
+  渲染出来的 Markdown（任务详情的「最后结果」、聊天的气泡、文件查看器）。
+
+  ⚠️ 这一份是**全局**的：同一个类名现在有三个使用方（`Tasks.svelte`、`Chat.svelte`、
+     `FileViewer.svelte`）。原来它写在 `Tasks.svelte` 的局部样式里，于是查看器要用
+     就得抄一份——而"渲染出来的 Markdown 长什么样"抄第二份就是迟早两处不一样。
+*/
+.markdown {
+    font-size: var(--fs-sm);
+    line-height: 1.7;
+    word-break: break-word;
+  }
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+    margin: var(--sp-4) 0 var(--sp-2);
+    line-height: 1.3;
+  }
+
+.markdown h1 { font-size: var(--fs-xl); }
+.markdown h2 { font-size: var(--fs-lg); }
+.markdown h3 { font-size: var(--fs-md); }
+
+.markdown p { margin: 0 0 var(--sp-3); }
+
+.markdown ul,
+.markdown ol {
+    margin: 0 0 var(--sp-3);
+    padding-left: 1.4em;
+  }
+
+.markdown li { margin-bottom: var(--sp-1); }
+
+.markdown code {
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 0 0.3em;
+  }
+
+.markdown pre {
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: var(--sp-3);
+    overflow-x: auto;
+  }
+
+.markdown pre code {
+    background: none;
+    border: 0;
+    padding: 0;
+  }
+
+.markdown blockquote {
+    margin: 0 0 var(--sp-3);
+    padding-left: var(--sp-3);
+    border-left: 3px solid var(--line);
+    color: var(--text-faint);
+  }
+
+.markdown table {
+    border-collapse: collapse;
+    margin: 0 0 var(--sp-3);
+    width: 100%;
+  }
+
+.markdown th,
+.markdown td {
+    border: 1px solid var(--line);
+    padding: var(--sp-1) var(--sp-2);
+    text-align: left;
+  }
+
+.markdown img {
+    max-width: 100%;
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+  }
+
+      /* ==== END app.css ==== */
+    </style>
+    <style>
+      /* ══ 只属于这份设计稿的排版（产品里没有这些类） ══ */
+      body { background: var(--bg); }
+      .doc { max-width: 78rem; margin: 0 auto; padding: var(--sp-6) var(--sp-5) var(--sp-8); }
+      .doc > h1 { font-size: var(--fs-2xl); margin: 0 0 var(--sp-2); }
+      .doc > h2 {
+        font-size: var(--fs-xl); margin: var(--sp-8) 0 var(--sp-2);
+        padding-bottom: var(--sp-1); border-bottom: 1px solid var(--line);
+      }
+      .doc > h3 { font-size: var(--fs-md); margin: var(--sp-4) 0 var(--sp-1); }
+      .doc > p, .doc .panel p { margin: 0 0 var(--sp-2); }
+      .doc > .lead { color: var(--text-dim); max-width: 62rem; }
+      .doc .tag {
+        display: inline-block; font-size: var(--fs-2xs); padding: 0 var(--sp-2);
+        border-radius: var(--radius-pill); border: 1px solid var(--line-strong);
+        color: var(--text-faint); vertical-align: middle; margin-left: var(--sp-1);
+      }
+      .doc .tag.todo { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+      .doc .tag.keep { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+      .doc table.table { font-size: var(--fs-xs); }
+      .doc table.table td, .doc table.table th { vertical-align: top; }
+      .doc .mono { font-family: var(--font-mono); }
+      .doc pre.code {
+        margin: var(--sp-2) 0 0; padding: var(--sp-3);
+        background: var(--panel); border: 1px solid var(--line);
+        border-radius: var(--radius); font-family: var(--font-mono);
+        font-size: var(--fs-xs); line-height: 1.65; white-space: pre-wrap;
+        color: var(--text-dim);
+      }
+      .doc .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(24rem, 1fr)); gap: var(--sp-3); }
+      .doc .step { display: flex; gap: var(--sp-2); align-items: flex-start; }
+      .doc .step .n {
+        flex: 0 0 auto; width: 1.4rem; height: 1.4rem; border-radius: 50%;
+        display: inline-flex; align-items: center; justify-content: center;
+        background: var(--accent-dim); color: var(--on-accent);
+        font-size: var(--fs-2xs); font-weight: 700;
+      }
+      .doc .kv { display: grid; grid-template-columns: 9rem minmax(0, 1fr); gap: var(--sp-1) var(--sp-2); }
+      .doc .kv .k { color: var(--text-faint); font-size: var(--fs-xs); }
+      .doc .kv .v { font-size: var(--fs-xs); }
+      .doc .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--sp-3); }
+      .doc .legend { display: flex; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--text-faint); }
+    </style>
+  </head>
+  <body>
+    <div class="doc">
+      <h1>内置岗位 → <b>平台成员配置</b></h1>
+      <p class="lead">
+        把「岗位（<code class="mono">builtinKind</code>）」从<b>类型</b>降级为<b>一组可配属性</b>：
+        四个内置成员是同一种东西的四组配置，而不是四个 if 分支。
+        这一份只谈设计，<b>还没有动代码</b>。
+      </p>
+
+      <div class="notice warn" style="margin-top: var(--sp-3)">
+        <div>
+          <b>先看这个问题的真身</b>：今天 <code class="mono">builtin</code>（是不是平台的）与
+          <code class="mono">builtinKind</code>（是哪一个岗位）是<b>两个能各自变的字段</b>，
+          而判据各摸一个——只读认前者、派活/默认/聊天认后者。于是手改一次数据，就能造出
+          <b>“半内置”</b>：<code class="mono">builtin: true</code> + 没有岗位 ⇒ 改不了、删不掉、
+          却能被派活、还能当默认执行者。<b>属性化的目的就是让这种状态表达不出来。</b>
+        </div>
+      </div>
+
+      <h2>1. 属性表（8 个，分两组）</h2>
+      <p class="lead">
+        A 组回答“<b>谁能改它</b>”，B 组回答“<b>它怎么被用起来</b>”。
+        每个属性都对应今天的一处或几处分支——图上“今天对应”那一列就是它要替换掉的东西。
+      </p>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>属性</th><th>值域</th><th>缺省</th><th>谁读它</th><th>今天对应什么</th></tr></thead>
+          <tbody>
+<tr>
+      <td><code class="mono">owner</code><br><span class="faint fs-xs">A 归属</span></td>
+      <td class="mono fs-xs">platform | user</td>
+      <td class="mono fs-xs">user</td>
+      <td class="fs-xs">只读 / 不可删 / 不能当默认 / 不进任务下拉</td>
+      <td class="faint fs-xs">`builtin` + `builtinKind` 两个字段混用</td>
+    </tr>
+<tr>
+      <td><code class="mono">trigger</code><br><span class="faint fs-xs">B 流程</span></td>
+      <td class="mono fs-xs">chat | action | none</td>
+      <td class="mono fs-xs">none</td>
+      <td class="fs-xs">聊天放行；界面入口（哪颗按钮起它）</td>
+      <td class="faint fs-xs">`CHAT_CAPABLE_BUILTINS`、沉淀页/聊天页按钮</td>
+    </tr>
+<tr>
+      <td><code class="mono">material</code><br><span class="faint fs-xs">B 流程</span></td>
+      <td class="mono fs-xs">none | task-material | conversation</td>
+      <td class="mono fs-xs">none</td>
+      <td class="fs-xs">run 之前平台准备什么素材</td>
+      <td class="faint fs-xs">沉淀的 `material/`；`transcript.md` + `existing-memory.md`</td>
+    </tr>
+<tr>
+      <td><code class="mono">produce</code><br><span class="faint fs-xs">B 流程</span></td>
+      <td class="mono fs-xs">none | files:&lt;dir&gt; | reply-json</td>
+      <td class="mono fs-xs">none</td>
+      <td class="fs-xs">run 之后平台怎么读产出</td>
+      <td class="faint fs-xs">`skill/`、`agent-draft/`、`workflow-draft/`、`parseTidyOutput`</td>
+    </tr>
+<tr>
+      <td><code class="mono">adopt</code><br><span class="faint fs-xs">B 流程</span></td>
+      <td class="mono fs-xs">none | commit:&lt;校验器&gt; | pick</td>
+      <td class="mono fs-xs">none</td>
+      <td class="fs-xs">“确认”按钮出不出现、点下去做什么、谁校验</td>
+      <td class="faint fs-xs">三条 commit 路由 + 记忆候选面板</td>
+    </tr>
+<tr>
+      <td><code class="mono">skills</code><br><span class="faint fs-xs">B 流程</span></td>
+      <td class="mono fs-xs">slug[]</td>
+      <td class="mono fs-xs">[]</td>
+      <td class="fs-xs">启动播种的同有技能；每次 run 注入</td>
+      <td class="faint fs-xs">distilly / 3 份 / orchestration-authoring</td>
+    </tr>
+<tr>
+      <td><code class="mono">dispatchable</code><br><span class="faint fs-xs">B 流程</span></td>
+      <td class="mono fs-xs">boolean</td>
+      <td class="mono fs-xs">false</td>
+      <td class="fs-xs">能不能派业务任务 / 当默认执行者 / 出现在下拉</td>
+      <td class="faint fs-xs">今天恒 false，但**三处判据各写一遍**</td>
+    </tr>
+<tr>
+      <td><code class="mono">label / instructions</code><br><span class="faint fs-xs">B 流程</span></td>
+      <td class="mono fs-xs">string</td>
+      <td class="mono fs-xs">—</td>
+      <td class="fs-xs">界面展示的岗位名与说明；出厂身份</td>
+      <td class="faint fs-xs">`AgentDetail` 的 5 处 `builtinKind ===` if 链</td>
+    </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2>2. 四个内置成员 = 四行配置（外加“普通智能体”这一行）</h2>
+      <div class="legend" style="margin-bottom: var(--sp-2)">
+        <span class="badge badge--accent fs-xs">owner=platform</span>
+        <span class="badge in_progress fs-xs">trigger</span>
+        <span class="badge fs-xs">material / skills</span>
+        <span class="badge done fs-xs">produce / adopt</span>
+        <span class="badge badge--outline faint fs-xs">none / [] / false</span>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>成员</th><th>owner</th><th>trigger</th><th>material</th><th>produce</th><th>adopt</th><th>skills</th><th>dispatchable</th></tr></thead>
+          <tbody>
+<tr>
+      <td><b>沉淀起草者</b></td>
+      <td><span class="badge badge--accent fs-xs">platform</span></td>
+      <td><span class="badge in_progress fs-xs">action</span></td>
+      <td><span class="badge  fs-xs">task-material</span></td>
+      <td><span class="badge done fs-xs">files:skill/</span></td>
+      <td><span class="badge done fs-xs">commit</span></td>
+      <td><span class="badge  fs-xs">[distilly]</span></td>
+      <td><span class="badge badge--outline faint fs-xs">false</span></td>
+    </tr>
+<tr>
+      <td><b>记忆整理者</b></td>
+      <td><span class="badge badge--accent fs-xs">platform</span></td>
+      <td><span class="badge in_progress fs-xs">action</span></td>
+      <td><span class="badge  fs-xs">conversation</span></td>
+      <td><span class="badge done fs-xs">reply-json</span></td>
+      <td><span class="badge done fs-xs">pick</span></td>
+      <td><span class="badge badge--outline faint fs-xs">[]</span></td>
+      <td><span class="badge badge--outline faint fs-xs">false</span></td>
+    </tr>
+<tr>
+      <td><b>智能体生成者</b></td>
+      <td><span class="badge badge--accent fs-xs">platform</span></td>
+      <td><span class="badge in_progress fs-xs">chat</span></td>
+      <td><span class="badge badge--outline faint fs-xs">none</span></td>
+      <td><span class="badge done fs-xs">files:agent-draft/</span></td>
+      <td><span class="badge done fs-xs">commit</span></td>
+      <td><span class="badge  fs-xs">[×3]</span></td>
+      <td><span class="badge badge--outline faint fs-xs">false</span></td>
+    </tr>
+<tr>
+      <td><b>编排生成者</b></td>
+      <td><span class="badge badge--accent fs-xs">platform</span></td>
+      <td><span class="badge in_progress fs-xs">chat</span></td>
+      <td><span class="badge badge--outline faint fs-xs">none</span></td>
+      <td><span class="badge done fs-xs">files:workflow-draft/</span></td>
+      <td><span class="badge done fs-xs">commit</span></td>
+      <td><span class="badge  fs-xs">[orchestration-authoring]</span></td>
+      <td><span class="badge badge--outline faint fs-xs">false</span></td>
+    </tr>
+<tr>
+      <td><b>普通智能体</b></td>
+      <td><span class="badge badge--accent fs-xs">user</span></td>
+      <td><span class="badge badge--outline faint fs-xs">none</span></td>
+      <td><span class="badge badge--outline faint fs-xs">none</span></td>
+      <td><span class="badge badge--outline faint fs-xs">none</span></td>
+      <td><span class="badge badge--outline faint fs-xs">none</span></td>
+      <td><span class="badge badge--outline faint fs-xs">[]</span></td>
+      <td><span class="badge  fs-xs">true</span></td>
+    </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="hint" style="margin-top: var(--sp-2)">
+        注意“普通智能体”这一行：它<b>不是特例</b>，而是同一张表里 owner=user 的那一行——
+        这正是“把它改成智能体”能变成一个普通动作的原因。
+      </p>
+
+      <h2>3. 判据全部改成只读这张表</h2>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>判据</th><th>今天写在哪</th><th>改后</th></tr></thead>
+          <tbody>
+<tr><td>只读：改 / 删 / 恢复默认</td><td class="fs-xs"><code class="mono">server.ts</code> 三处 400（<code class="mono">builtin_agent_readonly</code>）</td><td class="mono fs-xs"><code class="mono">owner === "platform"</code></td></tr>
+<tr><td>派活 / 当默认 / 任务下拉</td><td class="fs-xs">三处，<b>判据各不相同</b>（<code class="mono">builtinKind === undefined</code> / <code class="mono">builtinKindOf !== null</code> / 无守卫）</td><td class="mono fs-xs"><code class="mono">dispatchable</code></td></tr>
+<tr><td>聊天放行</td><td class="fs-xs"><code class="mono">CHAT_CAPABLE_BUILTINS = [agent-maker, workflow-maker]</code></td><td class="mono fs-xs"><code class="mono">trigger === "chat"</code></td></tr>
+<tr><td>同有技能播种 + 注入</td><td class="fs-xs">三个模块各一份 <code class="mono">ensure*Skills</code></td><td class="mono fs-xs"><code class="mono">skills</code></td></tr>
+<tr><td>“确认”按钮 + 采纳路由 + 校验</td><td class="fs-xs">三条 commit 路由、两个面板</td><td class="mono fs-xs"><code class="mono">adopt</code></td></tr>
+<tr><td>启动对账 + 日志</td><td class="fs-xs">四份 <code class="mono">ensure*</code> + <code class="mono">builtinAccountingRows</code>（刚漏过一次）</td><td class="mono fs-xs">遍历配置表</td></tr>
+<tr><td>岗位名 / 说明 / 按钮出现</td><td class="fs-xs"><code class="mono">AgentDetail</code> 的 if 链</td><td class="mono fs-xs"><code class="mono">label</code> + <code class="mono">adopt</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>改完的代码长什么样（同一个意思，一个分支）</h3>
+      <pre class="code">// 今天：同一个意思写六遍，各摸一个字段
+if (current.builtin === true) return 400                 // 只读
+if (agent.builtinKind !== undefined) skip                // 任务下拉
+if (builtinKindOf(agent) !== null) return 400            // 当默认
+const CHAT_CAPABLE = ['agent-maker', 'workflow-maker']   // 聊天
+if (!CHAT_CAPABLE.includes(kind)) return 400
+ensureBuiltinDrafter / ensureBuiltinMemoryTidy / …       // 对账 ×4
+
+// 改后：从表里读
+if (cfg.owner === 'platform') return 400                 // 只读
+if (!cfg.dispatchable) skip                              // 任务下拉 + 当默认
+if (cfg.trigger !== 'chat') return 400                   // 聊天
+await reconcilePlatformMembers(store, workspaceId)       // 对账一份通用实现</pre>
+
+      <h2>4. “把起草者改成普通智能体” = 一次有语义的动作</h2>
+      <p class="lead">
+        不再是手改磁盘，而是 <code class="mono">POST /api/agents/:id/detach</code>。四步，每步都要有输出：
+      </p>
+      <div class="grid2">
+        <div class="panel">
+          <div class="step"><span class="n">1</span><div>
+            <b>引用检查</b>
+            <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
+              哪些对话把它当执行者、哪些对话里还有<b>待采纳的草稿</b>、哪些任务assignee是它。
+              在写库<b>之前</b>算出来——写完了再发现“那些按钮会失效”就晚了。
+            </p>
+          </div></div>
+        </div>
+        <div class="panel">
+          <div class="step"><span class="n">2</span><div>
+            <b>原子改写</b>
+            <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
+              <code class="mono">owner=user</code>，B 组属性<b>一起清空</b>。
+              不允许“只改一处”——半内置就是这么来的。
+            </p>
+          </div></div>
+        </div>
+        <div class="panel">
+          <div class="step"><span class="n">3</span><div>
+            <b>对账补位</b>
+            <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
+              平台发现少了一个出厂成员 ⇒ 建回一条（日志说一句）。
+              从前的行为就是这个，只是现在它<b>有据可依</b>，不再是“手改之后的意外”。
+            </p>
+          </div></div>
+        </div>
+        <div class="panel">
+          <div class="step"><span class="n">4</span><div>
+            <b>影响面给人看</b>
+            <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
+              把第 1 步的清单摆出来（尤其“这 2 条对话的『确认生成智能体』会失效”），
+              而不是让人之后自己撞上 400。
+            </p>
+          </div></div>
+        </div>
+      </div>
+
+      <h2>5. 界面上它会是什么样</h2>
+      <p class="lead">智能体详情页里，内置成员多一张「平台成员」卡：属性只读展示 + 一个脱离入口。</p>
+      <div class="main-panel">
+        <div class="main-panel-head">
+          <h2>沉淀起草者（内置）</h2>
+          <span class="badge badge--accent fs-xs">平台成员</span>
+        </div>
+        <div class="main-panel-body">
+          <div class="kv">
+            <span class="k">owner</span><span class="v"><code class="mono">platform</code>（只读 · 不可删 · 不能当默认）</span>
+            <span class="k">trigger</span><span class="v"><code class="mono">action</code> —— 沉淀页那颗「开始起草」</span>
+            <span class="k">material</span><span class="v"><code class="mono">task-material</code> —— 每次起草前平台铺 <code class="mono">material/</code></span>
+            <span class="k">produce</span><span class="v"><code class="mono">files:skill/</code> —— 产出在约定的 <code class="mono">skill/SKILL.md</code></span>
+            <span class="k">adopt</span><span class="v"><code class="mono">commit</code> ——「确认入库」→ 校验 → 技能库 + git</span>
+            <span class="k">skills</span><span class="v"><code class="mono">distilly</code>（平台播种的同有技能）</span>
+            <span class="k">dispatchable</span><span class="v"><code class="mono">false</code> —— 不接业务任务</span>
+          </div>
+          <div class="notice warn" style="margin-top: var(--sp-3)">
+            <div>
+              <b>脱离为普通智能体</b>（会先查引用）：<br>
+              · 3 条沉淀任务会改用<b>重新出厂</b>的起草者；<br>
+              · 1 条对话里还有待采纳的草稿——脱离后「确认入库」会失效；<br>
+              · 它自己会变成可编辑、可删、可派活的普通智能体。
+            </div>
+          </div>
+          <div style="display: flex; gap: var(--sp-2); margin-top: var(--sp-3)">
+            <button type="button" class="btn btn--danger">脱离为普通智能体</button>
+            <button type="button" class="btn btn--ghost">取消</button>
+          </div>
+        </div>
+      </div>
+      <p class="hint" style="margin-top: var(--sp-2)">
+        ⚠️ 卡上每一项都是<b>可点开看说明</b>的只读字段，不是表单——平台成员的配置改动走
+        <code class="mono">PATCH /api/agents/:id/platform-config</code>（带形态校验），不在这里手填。
+      </p>
+
+      <h2>6. 配置形态校验（照 &lt;code class=mono&gt;runtime-table&lt;/code&gt; 的做法：缺了当场报错）</h2>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>约束</th><th>违反时报什么</th></tr></thead>
+          <tbody>
+            <tr><td><code class="mono">owner=platform</code> 时 B 组必须成套（除 retired）</td><td>“平台成员缺少 &lt;属性&gt; —— 它跑不起来”</td></tr>
+            <tr><td><code class="mono">trigger=action</code> ⇒ <code class="mono">material≠none</code> 且 <code class="mono">produce≠none</code> 且 <code class="mono">adopt≠none</code></td><td>“由按钮发起的成员必须有素材、产出与采纳方式”</td></tr>
+            <tr><td><code class="mono">produce=files:x</code> ⇒ <code class="mono">adopt=commit</code></td><td>“文件产出必须有人点确认，否则没人知道它算不算完成”</td></tr>
+            <tr><td><code class="mono">adopt=pick</code> ⇒ <code class="mono">produce=reply-json</code></td><td>“逐条勾选只对『候选列表』有意义”</td></tr>
+            <tr><td><code class="mono">dispatchable=true</code> ⇒ <code class="mono">adopt=none</code></td><td>“能派活就必须不需要人收口——否则任务会永远停在等人确认”</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2>7. 迁移（老数据怎么变成这张表）</h2>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>老数据</th><th>新属性</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code class="mono">builtin: true</code> + <code class="mono">builtinKind: 'drafter'</code></td><td><code class="mono">owner=platform</code> + 第 2 节那一行</td><td>一次性、幂等；升级后老工作区自动对齐</td></tr>
+            <tr><td><code class="mono">builtin: true</code> 但<b>没有 kind</b>（半内置）</td><td><span class="tag todo">待拍板</span> 报损坏 + 拒绝服务，还是自动归为 <code class="mono">owner=user</code>？</td><td>我倾向“报出来 + 不服务”，让人决定</td></tr>
+            <tr><td><code class="mono">builtinKind: 'skill-reviewer'</code>（已下线）</td><td><span class="tag todo">待拍板</span>：<code class="mono">owner=user</code>（可删的普通智能体）或 <code class="mono">platform + trigger=none</code>（只读、标 retired）</td><td>影响老工作区那条记录的命运</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2>8. 还要你拍的四件事 <span class="tag todo">待拍板</span></h2>
+      <div class="grid2">
+        <div class="panel">
+          <b>① <code class="mono">owner</code> 够不够当唯一归属判据？</b>
+          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
+            只读、不可删全认它，“改成智能体”= <code class="mono">owner=user</code>。
+            我倾向够——否则又会回到“两个字段各管一半”。
+          </p>
+        </div>
+        <div class="panel">
+          <b>② <code class="mono">dispatchable</code> 要不要独立出来？</b>
+          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
+            今天平台成员一律不能派活，但<b>三处判据不一致</b>（其中一处根本没有守卫）。
+            我建议独立成属性、缺省 <code class="mono">false</code>。
+          </p>
+        </div>
+        <div class="panel">
+          <b>③ 出厂成员是“数据”还是“代码常量”？</b>
+          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
+            我建议：<b>代码提供出厂预置，库里存属性表</b>——升级能覆盖、用户改了能感知，
+            也不需要“新增成员要发版”这种限制。
+          </p>
+        </div>
+        <div class="panel">
+          <b>④ 已下线的 <code class="mono">skill-reviewer</code> 归哪边？</b>
+          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
+            A：<code class="mono">owner=user</code> ⇒ 变成可删的普通智能体；
+            B：<code class="mono">platform + trigger=none</code> ⇒ 只读、明确标“已下线”。
+          </p>
+        </div>
+      </div>
+
+      <h2>9. 我不建议属性化的部分（说清边界）</h2>
+      <div class="notice">
+        <div>
+          <b>产出的 schema 与落库实现</b>：skill 文件 / 岗位卡 / 编排代码 / 记忆候选 JSON——
+          这四样是不同的业务对象，硬套一个 schema 只会长回四个 <code class="mono">if</code>。
+          属性只负责<b>指过去</b>（<code class="mono">produce=files:agent-draft/</code>），
+          各自的读取与落库仍留在各自的 handler 里。
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

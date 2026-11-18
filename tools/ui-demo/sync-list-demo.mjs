@@ -1,5 +1,5 @@
 /**
- * 把 `docs/design/list-page-demo.html` 里**逐字嵌入**的那两段 CSS 重新同步成真文件的样子。
+ * 把 `docs/design/` 里那些**逐字嵌入**了 `app.css` 的设计页重新同步成真文件的样子。
  *
  * 为什么要这个脚本：那份 HTML 范例的第一段 `<style>` 是 `app.css`（含两个标准控件的
  * scoped 样式）的**逐字副本**——这样范例里的颜色/字号/行高就是产品里的样子，而不是
@@ -17,7 +17,14 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
-const DEMO = join(ROOT, 'docs/design/list-page-demo.html')
+/**
+ * 带标记的设计页（每份都在自己的 `<style>` 里嵌了 app.css）。
+ * ⚠️ 新增一份就先在两段 CSS 前后加 `==== BEGIN/END ==== ` 标记，再来这里加一行。
+ */
+const DEMOS = [
+  join(ROOT, 'docs/design/list-page-demo.html'),
+  join(ROOT, 'docs/design/platform-members-design.html'),
+]
 const APP_CSS = join(ROOT, 'packages/ui/src/styles/app.css')
 const COMPONENTS = [
   join(ROOT, 'apps/web/src/components/ListRow.svelte'),
@@ -48,13 +55,18 @@ function replaceRegion(text, begin, end, body) {
 const appCss = readFileSync(APP_CSS, 'utf8')
 const componentCss = COMPONENTS.map(scopedStyle).join('\n\n')
 
-let demo = readFileSync(DEMO, 'utf8')
-const before = demo.length
-demo = replaceRegion(demo, BEGIN_APP, END_APP, appCss)
-demo = replaceRegion(demo, BEGIN_CMP, END_CMP, componentCss)
-writeFileSync(DEMO, demo, 'utf8')
-
-console.log(
-  `已同步：app.css ${appCss.length} 字 + ${COMPONENTS.length} 个控件的 scoped 样式 ${componentCss.length} 字` +
-    `（范例 ${before} → ${demo.length} 字）。刷新那个 HTML 就能看到最新样子。`,
-)
+for (const demo of DEMOS) {
+  const before = readFileSync(demo, 'utf8')
+  let html = before
+  const hasApp = html.includes(BEGIN_APP)
+  if (hasApp) html = replaceRegion(html, BEGIN_APP, END_APP, appCss)
+  const hasCmp = html.includes(BEGIN_CMP)
+  if (hasCmp) html = replaceRegion(html, BEGIN_CMP, END_CMP, componentCss)
+  writeFileSync(demo, html, 'utf8')
+  console.log(
+    `${demo.replace(ROOT + '/', '')}：` +
+      (hasApp ? `app.css ${appCss.length} 字` : '（无 app.css 标记，跳过）') +
+      (hasCmp ? ` + 控件 scoped ${componentCss.length} 字` : '') +
+      `（${before.length} → ${html.length} 字）`,
+  )
+}

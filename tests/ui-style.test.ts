@@ -228,7 +228,17 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
     assert.deepEqual(bad, [], '行容器的重置只能有一处（app.css `.list-stack`）')
   })
 
-  test('★★ 样式范例（docs/design/list-page-demo.html）里嵌的 CSS 必须与真文件逐字相同', async () => {
+  test('★★ 设计稿里嵌的 CSS 必须与真文件逐字相同（列表页范例 / 平台成员设计稿）', async () => {
+    /*
+     * ★ 2026-11（D145）：从「只盯列表页范例」扩到**所有带标记的设计稿**——新增的
+     *   `platform-members-design.html` 同样逐字嵌了 `app.css`。新增一份时：在两段 CSS
+     *   前后加 `==== BEGIN/END ==== ` 标记，并把它加进下面这个清单。
+     *   同步命令：`node tools/ui-demo/sync-list-demo.mjs`。
+     */
+    for (const rel of [
+      'docs/design/list-page-demo.html',
+      'docs/design/platform-members-design.html',
+    ]) {
     /*
      * ★ 2026-11（D136）：使用者要一份"以后照着抄"的 HTML 范例。范例若像设计稿那样
      * **手抄一份令牌**，它迟早与真文件漂开——使用者照着它抄反而抄进旧样式（这个仓库
@@ -239,7 +249,7 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
      * 重新生成的办法写在范例文件头（把真文件内容贴进那两对 `==== BEGIN/END ====`
      * 之间即可；`BEGIN`/`END` 标记本身不许改）。
      */
-    const demo = await readFile(join(REPO_ROOT, 'docs/design/list-page-demo.html'), 'utf8')
+      const demo = await readFile(join(REPO_ROOT, rel), 'utf8')
     const grab = (begin: string, end: string): string => {
       const i = demo.indexOf(begin)
       const j = demo.indexOf(end)
@@ -256,7 +266,7 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
     )
     assert.ok(
       same(appCss, demoApp),
-      '范例里的 app.css 与真文件不一致——把真文件重新贴进那对 BEGIN/END 标记之间',
+      `${rel} 里的 app.css 与真文件不一致——跑 node tools/ui-demo/sync-list-demo.mjs`,
     )
 
     const scopedOf = async (rel: string): Promise<string> => {
@@ -265,18 +275,24 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
       assert.ok(m, `${rel} 里找不到 <style> 块`)
       return m[1]!
     }
-    const demoScoped = grab(
-      '/* ==== BEGIN 标准控件里的 scoped 样式（真实页面里免费拿到，这里只为了让 demo 长得一样）==== */',
-      '/* ==== END 标准控件 scoped 样式 ==== */',
-    )
-    for (const rel of [
-      'apps/web/src/components/ListRow.svelte',
-      'apps/web/src/components/ListPane.svelte',
-    ]) {
-      assert.ok(
-        demoScoped.includes((await scopedOf(rel)).trim()),
-        `范例里缺了 ${rel} 的 scoped 样式（或与真文件不一致）——重新贴一次`,
-      )
+    /*
+     * 控件 scoped 样式那一段是**可选的**：只有"要长得跟产品一模一样"的页面才需要
+     * （列表页范例嵌了；平台成员设计稿只有表格与面板，没嵌）。有标记就必须逐字一致。
+     */
+    const BEGIN_CMP =
+      '/* ==== BEGIN 标准控件里的 scoped 样式（真实页面里免费拿到，这里只为了让 demo 长得一样）==== */'
+    if (demo.includes(BEGIN_CMP)) {
+      const demoScoped = grab(BEGIN_CMP, '/* ==== END 标准控件 scoped 样式 ==== */')
+      for (const sv of [
+        'apps/web/src/components/ListRow.svelte',
+        'apps/web/src/components/ListPane.svelte',
+      ]) {
+        assert.ok(
+          demoScoped.includes((await scopedOf(sv)).trim()),
+          `${rel} 里缺了 ${sv} 的 scoped 样式（或与真文件不一致）——跑一次同步脚本`,
+        )
+      }
+    }
     }
   })
 
