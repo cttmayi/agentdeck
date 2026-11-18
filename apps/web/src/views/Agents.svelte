@@ -14,7 +14,8 @@
   import NewAgentForm from '../components/NewAgentForm.svelte'
   import WorkspaceSettings from '../components/WorkspaceSettings.svelte'
   import ListPane from '../components/ListPane.svelte'
-  import ListRow from '../components/ListRow.svelte'
+  import ListGroupHead from '../components/ListGroupHead.svelte'
+import ListRow from '../components/ListRow.svelte'
   import AgentDetail from '../components/AgentDetail.svelte'
   import type { Agent } from '../lib/api.ts'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
@@ -383,28 +384,18 @@
       {/snippet}
       <ul class="list-stack agent-list">
         {#if builtinAgents.length > 0}
-          <li class="agent-group-head-wrap">
-            <button
-              type="button"
-              class="agent-group-head"
-              data-agent-group="builtin"
-              aria-expanded={showBuiltin}
-              onclick={() => (builtinOpen = !builtinOpen)}
-            >
-              <span class="chev" aria-hidden="true">{showBuiltin ? '▾' : '▸'}</span>
-              <span class="agent-group-name">{$t('agents.groupBuiltin')}</span>
-              <span class="faint">{builtinAgents.length}</span>
-              <span class="spacer"></span>
-              <!-- ★ 选中项被收起来时留一句话：右栏还在显示它，列表里却"不见了" -->
-              {#if selectionInBuiltin}
-                <span class="faint fs-xs" data-group-selected-hint
-                  >{$t('agents.groupSelectionHere')}</span
-                >
-              {:else}
-                <span class="faint fs-xs">{$t('agents.groupBuiltinHint')}</span>
-              {/if}
-            </button>
-          </li>
+          <!-- ★ 2026-11（D137）：改用标准控件 `ListGroupHead`（与任务页同一个组头）。
+               选中项被收起来时那句话说在 `note` 里：右栏还在显示它，列表里却"不见了"。 -->
+          <ListGroupHead
+            label={$t('agents.groupBuiltin')}
+            count={String(builtinAgents.length)}
+            note={selectionInBuiltin
+              ? $t('agents.groupSelectionHere')
+              : $t('agents.groupBuiltinHint')}
+            open={showBuiltin}
+            ontoggle={() => (builtinOpen = !builtinOpen)}
+            groupKey="builtin"
+          />
           {#if showBuiltin}
             {#each builtinAgents as a (a.id)}
               {@render agentRow(a)}
@@ -413,29 +404,17 @@
         {/if}
 
         {#if ownAgents.length > 0}
-          <!-- ⚠️ 两组之间那条分隔线只画在"上面那组真有东西"时，否则列表顶部会多一条悬空的线 -->
-          <li class="agent-group-sep" class:with-builtin={builtinAgents.length > 0}></li>
-          <li class="agent-group-head-wrap">
-            <button
-              type="button"
-              class="agent-group-head"
-              data-agent-group="own"
-              aria-expanded={showOwn}
-              onclick={() => (ownOpen = !ownOpen)}
-            >
-              <span class="chev" aria-hidden="true">{showOwn ? '▾' : '▸'}</span>
-              <span class="agent-group-name">{$t('agents.groupOwn')}</span>
-              <span class="faint">{ownAgents.length}</span>
-              <span class="spacer"></span>
-              {#if selectionInOwn}
-                <span class="faint fs-xs" data-group-selected-hint
-                  >{$t('agents.groupSelectionHere')}</span
-                >
-              {:else}
-                <span class="faint fs-xs">{$t('agents.groupOwnHint')}</span>
-              {/if}
-            </button>
-          </li>
+          <!-- ⚠️ 组间那条分隔线现在由 `app.css` 的
+               `.list-stack > .list-group-head-wrap:not(:first-child)` 自动画
+               （上一组真有东西才会有它的组头，所以不需要页面判断） -->
+          <ListGroupHead
+            label={$t('agents.groupOwn')}
+            count={String(ownAgents.length)}
+            note={selectionInOwn ? $t('agents.groupSelectionHere') : $t('agents.groupOwnHint')}
+            open={showOwn}
+            ontoggle={() => (ownOpen = !ownOpen)}
+            groupKey="own"
+          />
           {#if showOwn}
             {#each ownAgents as a (a.id)}
               {@render agentRow(a)}
@@ -496,56 +475,15 @@
      画表格的话六列会在 26rem 里互相挤；卡片竖排能放同样的字段，还顺手
      把"整条可点"表达清楚了。 */
 
-  /**
-   * ★ 分批第 268 批：分组标题（内置 / 自建）。
-   *
-   * ⚠️ 它们是 `<li>` 里的按钮，但**不吃**列表的行间距（`gap: var(--sp-1)`）——
-   *    标题要贴着它那组的第一行，否则中间会浮着一条空隙，看起来像漏了一个条目。
+  /*
+   * ⚠️ 2026-11（D137）：这一整段（`.agent-group-head-wrap` / `.agent-group-head` /
+   *   `.chev` / `.agent-group-name` / `.spacer` / `.agent-group-sep`）**都删了**——
+   *   组头改成标准控件 `ListGroupHead`，样式在 `app.css` 的 `.list-group-head` 一族；
+   *   组间那条分隔线由 `.list-stack > .list-group-head-wrap:not(:first-child)` 自动画
+   *   （上一组没东西就不会有它的组头，所以"要不要画"这件事不用页面判断）。
+   *   原来的注释还留着一条有用的结论：组头**贴着**它那组的第一行，中间不该浮空隙——
+   *   现在由 `.list-stack` 的 `gap` 统一给（所有子项同一档，组头不例外）。
    */
-  .agent-group-head-wrap {
-    margin: 0;
-  }
-  .agent-group-head {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    width: 100%;
-    padding: var(--sp-2) var(--sp-3);
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-dim);
-    font: inherit;
-    font-size: var(--fs-xs);
-    text-align: left;
-    cursor: pointer;
-  }
-  .agent-group-head:hover {
-    background: var(--surface-hover);
-    color: var(--text);
-  }
-  .agent-group-head .chev {
-    width: 0.9em;
-    color: var(--text-faint);
-  }
-  .agent-group-name {
-    font-weight: 600;
-    letter-spacing: 0.02em;
-  }
-  .agent-group-head .spacer {
-    flex: 1;
-  }
-  /* 两组之间那条分隔线：只在上面那组真有东西时画（否则列表顶部多一条悬空的线） */
-  .agent-group-sep {
-    display: none;
-  }
-  .agent-group-sep.with-builtin {
-    display: block;
-    border-top: 1px solid var(--line);
-    margin: var(--sp-1) 0;
-    list-style: none;
-  }
-
   /* ⚠️ 2026-11：重置 + 行距在全局 `.list-stack`（markup：`class="list-stack
      agent-list"`）。这里只留**这一页的形状差异**：内置/自建两段之间要留白。 */
   .agent-list {

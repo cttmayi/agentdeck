@@ -882,6 +882,77 @@ hr {
   gap: var(--sp-1);
 }
 
+/* ── 列表分组（2026-11，D137）：组头 = 淡字一行（chevron + 组名 + 计数）──
+
+   来由：这一档原来**两页各写一套**——任务页的组头是带边框的卡片按钮（组名 600/`--fs-sm`），
+   智能体页的组头是无边框的淡字行（`--fs-xs`、hover 才有底），连结构都不一样（一个把行
+   套在组里、一个把组头当行的兄弟）。同一个东西长两种样子，第三个要分组的页面只能挑一个抄。
+   现在收编成一处：形状跟 `.fold-head` 那一族同一档（组头是**分段标题**，不是内容，
+   所以不带边框、不与有 hover/选中框的 `.list-row` 抢注意力）。
+
+   结构（行与组头**平级**，`<li>` 里不要再套 `<li>`）：
+     <ul class="list-stack">
+       <li class="list-group-head-wrap"><button class="list-group-head">…</button></li>
+       <li class="list-row">…</li>
+     </ul>
+   组与组之间那条线由 `:not(:first-child)` 自动画（上一组没有东西就不会有组头，
+   所以不需要页面判断"要不要画分隔线"）。组件：`ListGroupHead.svelte`。 */
+.list-group-head-wrap {
+  margin: 0;
+}
+
+/* 组头：淡字一行。hover 才有底（它是个按钮，但不该一直看起来像卡片） */
+.list-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-1) var(--sp-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--fs-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.list-group-head:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.list-group-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* chevron 跟组头同字号（`.chevron` 那一档是给 `.fold-head` 的 `--fs-sm`） */
+.list-group-head .chevron {
+  font-size: inherit;
+}
+
+/* 组名：淡字行里唯一的强调（600），与 `.fold-title` 同一档 */
+.list-group-name {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+
+/* 计数：右侧那一簇里的最后一个（整体贴右由组件的 `.list-group-tail` 负责） */
+.list-group-count {
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* 组与组之间的分隔线：组头不是列表第一项 ⇒ 上面一定还有一组 */
+.list-stack > .list-group-head-wrap:not(:first-child) {
+  border-top: 1px solid var(--line);
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-1);
+}
+
 /* 行盒 + 主按钮 + 行盒的 hover/选中态样式在 `ListRow.svelte` 的 scoped 样式里
    （行盒类 `.list-row` 只有它会用）。这里只剩 **动作按钮**（`.list-row-action`）：
 
@@ -2373,7 +2444,6 @@ a > button { width: 100%; }
       /* ==== END app.css ==== */
 
       /* ==== BEGIN 标准控件里的 scoped 样式（真实页面里免费拿到，这里只为了让 demo 长得一样）==== */
-      /* ── ListRow.svelte（行壳：行盒 / 主按钮 / hover / 选中框）── */
   /* 行盒：三页同一个形状（D61 定、D65 钉死）。hover 用 `--surface-hover`
      （全 App 的 hover 标准），选中态用 `--surface-2` + accent 边框。 */
   .list-row {
@@ -2413,7 +2483,6 @@ a > button { width: 100%; }
     cursor: pointer;
   }
 
-      /* ── ListPane.svelte（左栏壳：行栏左右内距）── */
   /* D66：行栏左右内距统一 `--sp-2`——原来聊天 8px、任务/智能体 24px
      （三页行栏各差 16px）。看板模式不走这个组件，保持全局 `.pane-body` 的内距。 */
   .pane-body {
@@ -2610,46 +2679,69 @@ a > button { width: 100%; }
                 </div>
                 <div class="pane-body">
                   <ul class="list-stack" data-pin="3">
-          <li class="list-row demo-row">
-            <button type="button" class="list-row-main">
-              <span class="demo-title" title="第 12 周竞品周报" data-pin="5">第 12 周竞品周报</span>
-              <span class="demo-sub" data-pin="5">
-                <span class="badge done">完成</span>
-                <span class="faint">助手 · 2 小时前</span>
-              </span>
-            </button>
-            
-          </li>
-          <li class="list-row demo-row active">
-            <button type="button" class="list-row-main">
-              <span class="demo-title" title="第 12 周竞品周报（重跑）" data-pin="5">第 12 周竞品周报（重跑）</span>
-              <span class="demo-sub" data-pin="5">
-                <span class="badge in_progress">进行中</span>
-                <span class="faint">助手 · 12 分钟前</span>
-              </span>
-            </button>
-            
-          </li>
-          <li class="list-row demo-row">
-            <button type="button" class="list-row-main">
-              <span class="demo-title" title="支付链路巡检记录" data-pin="5">支付链路巡检记录</span>
-              <span class="demo-sub" data-pin="5">
-                <span class="badge in_review">待审查</span>
-                <span class="faint">巡检员 · 昨天</span>
-              </span>
-            </button>
-            <button type="button" class="list-row-action" title="删除" aria-label="删除">×</button>
-          </li>
-          <li class="list-row demo-row">
-            <button type="button" class="list-row-main">
-              <span class="demo-title" title="这是一个特别长的标题，用来演示单行省略号是否真的生效——长标题不许把行撑开、也不许顶成两行带省略号" data-pin="5">这是一个特别长的标题，用来演示单行省略号是否真的生效——长标题不许把行撑开、也不许顶成两行带省略号</span>
-              <span class="demo-sub" data-pin="5">
-                <span class="badge failed">失败</span>
-                <span class="faint">采集员 · 3 天前</span>
-              </span>
-            </button>
-            
-          </li>
+                    <!--
+                      ★ 分组（D137）：组头是标准控件 `ListGroupHead` 的样子——淡字一行
+                        （chevron + 组名 + 右侧说明与计数），样式在 app.css 的
+                        `.list-group-head` 一族；组头与行**平级**（`<li>` 里不再套 `<li>`）。
+                        组与组之间那条线由 `.list-stack > .list-group-head-wrap:not(:first-child)`
+                        自动画，页面不用判断。点组头能收起——这里点一下试试。
+                    -->
+                    <li class="list-group-head-wrap">
+                      <button type="button" class="list-group-head" aria-expanded="true" data-demo-group="this-week">
+                        <span class="chevron" aria-hidden="true">▾</span>
+                        <span class="list-group-name">本周</span>
+                        <span class="list-group-tail">
+                          <span class="faint fs-xs">按周归堆</span>
+                          <span class="list-group-count">2 份</span>
+                        </span>
+                      </button>
+                    </li>
+                    <li class="list-row demo-row">
+                      <button type="button" class="list-row-main">
+                        <span class="demo-title" title="第 12 周竞品周报" data-pin="5">第 12 周竞品周报</span>
+                        <span class="demo-sub" data-pin="5">
+                          <span class="badge done">完成</span>
+                          <span class="faint">助手 · 2 小时前</span>
+                        </span>
+                      </button>
+                    </li>
+                    <li class="list-row demo-row active">
+                      <button type="button" class="list-row-main">
+                        <span class="demo-title" title="第 12 周竞品周报（重跑）" data-pin="5">第 12 周竞品周报（重跑）</span>
+                        <span class="demo-sub" data-pin="5">
+                          <span class="badge in_progress">进行中</span>
+                          <span class="faint">助手 · 12 分钟前</span>
+                        </span>
+                      </button>
+                    </li>
+                    <li class="list-group-head-wrap">
+                      <button type="button" class="list-group-head" aria-expanded="true" data-demo-group="last-week">
+                        <span class="chevron" aria-hidden="true">▾</span>
+                        <span class="list-group-name">上周</span>
+                        <span class="list-group-tail">
+                          <span class="list-group-count">2 份</span>
+                        </span>
+                      </button>
+                    </li>
+                    <li class="list-row demo-row">
+                      <button type="button" class="list-row-main">
+                        <span class="demo-title" title="支付链路巡检记录" data-pin="5">支付链路巡检记录</span>
+                        <span class="demo-sub" data-pin="5">
+                          <span class="badge in_review">待审查</span>
+                          <span class="faint">巡检员 · 昨天</span>
+                        </span>
+                      </button>
+                      <button type="button" class="list-row-action" title="删除" aria-label="删除">×</button>
+                    </li>
+                    <li class="list-row demo-row">
+                      <button type="button" class="list-row-main">
+                        <span class="demo-title" title="这是一个特别长的标题，用来演示单行省略号是否真的生效——长标题不许把行撑开、也不许顶成两行带省略号" data-pin="5">这是一个特别长的标题，用来演示单行省略号是否真的生效——长标题不许把行撑开、也不许顶成两行带省略号</span>
+                        <span class="demo-sub" data-pin="5">
+                          <span class="badge failed">失败</span>
+                          <span class="faint">采集员 · 3 天前</span>
+                        </span>
+                      </button>
+                    </li>
                   </ul>
                 </div>
               </section>
@@ -2816,7 +2908,8 @@ a > button { width: 100%; }
           <span class="demo-pin">5</span>
           <div class="demo-legend-body">
             <b>行内容</b> <code>ListRow</code> ＋ 页面自己的 <code>.*-title</code> / <code>.*-sub</code>
-            <p>两行：第一行标题（单行省略）、第二行辅助信息（徽标 + 时间）。行壳（hover / 选中框 / 行高下限）由 <code>ListRow</code> 给。</p>
+            <p>两行：第一行标题（单行省略）、第二行辅助信息（徽标 + 时间）。行壳（hover / 选中框 / 行高下限）由 <code>ListRow</code> 给。
+            要分组时在行前面插一个 <code>ListGroupHead</code>（见左栏「本周 / 上周」，点它可收起）。</p>
           </div>
         </li>
       </ul>
@@ -3061,6 +3154,34 @@ a > button { width: 100%; }
           ['删除用危险色（不是 ghost）', !!q('.detail-head .detail-actions .btn--danger')],
           ['没有底部栏脚（主动作不在最底下）', !q('.detail-pane > .main-panel-foot')],
           ['目录选择弹层默认关着', document.getElementById('demo-dir-modal').hidden === true],
+          ['分组：两个组头、同高同字号', (() => {
+            const hs = qa('.list-pane .list-group-head')
+            if (hs.length !== 2) return false
+            return Math.abs(R(hs[0]).height - R(hs[1]).height) <= 1 &&
+              C(hs[0]).fontSize === C(hs[1]).fontSize
+          })()],
+          ['分组：只有第二组上方有分隔线', (() => {
+            const wraps = qa('.list-pane .list-group-head-wrap')
+            return wraps.length === 2 &&
+              C(wraps[0]).borderTopWidth === '0px' &&
+              C(wraps[1]).borderTopWidth === '1px'
+          })()],
+          ['分组：点组头能收起那一组', (() => {
+            const head = q('.list-pane .list-group-head')
+            const rows = () => {
+              const out = []
+              for (let el = head.parentElement.nextElementSibling; el; el = el.nextElementSibling) {
+                if (el.classList.contains('list-group-head-wrap')) break
+                if (el.classList.contains('list-row') && !el.hidden) out.push(el)
+              }
+              return out
+            }
+            const before = rows().length
+            head.click()
+            const after = rows().length
+            head.click()
+            return before > 0 && after === 0 && rows().length === before
+          })()],
           ['没有横向溢出', document.documentElement.scrollWidth <= window.innerWidth + 1],
         ]
         const bad = checks.filter(([, ok]) => !ok).map(([name]) => name)
@@ -3071,7 +3192,8 @@ a > button { width: 100%; }
           bad.length === 0
             ? '<b>自检通过 ' + checks.length + '/' + checks.length + '</b>：两栏并排且详情够宽、栏头 51px 无标题、' +
               'ul 无缩进 / 无符号 / 行距 4px、行高底线 64px、长标题单行裁切、正文自滚、' +
-              '动作在栏头一条轨道且只有一颗主操作、删除是危险色、没有底部栏脚、无横向溢出。'
+              '动作在栏头一条轨道且只有一颗主操作、删除是危险色、没有底部栏脚、' +
+              '分组两页同一个组头（可收起、组间有分隔线）、无横向溢出。'
             : '<b>自检未通过（' + bad.length + ' 项）</b>：' + bad.join('、')
       }
 
@@ -3122,6 +3244,19 @@ a > button { width: 100%; }
             '/Users/ling/agentdeck-workspace/' + name
         }),
       )
+
+      // 点组头收起/展开它那一组（真正的页面里这片状态由页面给，控件只管样式）
+      document.querySelectorAll('.list-group-head').forEach((head) => {
+        head.addEventListener('click', () => {
+          const open = head.getAttribute('aria-expanded') === 'true'
+          head.setAttribute('aria-expanded', open ? 'false' : 'true')
+          head.querySelector('.chevron').textContent = open ? '▸' : '▾'
+          for (let el = head.parentElement.nextElementSibling; el; el = el.nextElementSibling) {
+            if (el.classList.contains('list-group-head-wrap')) break
+            el.hidden = open
+          }
+        })
+      })
 
       selfCheck()
 

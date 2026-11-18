@@ -243,13 +243,13 @@
          *     "每次导航之后"调用，而不是启动时调一次。
          */
         const expandAllGroups = async () => {
-          for (const head of [...d().querySelectorAll('[data-agent-group]')]) {
+          for (const head of [...d().querySelectorAll('[data-list-group]')]) {
             if (head.getAttribute('aria-expanded') === 'false') {
               click(head)
               await untilNet(
                 () =>
                   d()
-                    .querySelector(`[data-agent-group="${head.getAttribute('data-agent-group')}"]`)
+                    .querySelector(`[data-list-group="${head.getAttribute('data-list-group')}"]`)
                     ?.getAttribute('aria-expanded') === 'true',
                 30,
               )
@@ -297,13 +297,13 @@
          *   ⑤ 分组**只归堆**：内置那组里只有 `builtin` 的，自建那组里一个内置都没有。
          */
         facts['agents.listGroups'] = await (async () => {
-          const heads = () => [...d().querySelectorAll('[data-agent-group]')]
-          const headOf = (kind) => heads().find((b) => b.getAttribute('data-agent-group') === kind)
+          const heads = () => [...d().querySelectorAll('[data-list-group]')]
+          const headOf = (kind) => heads().find((b) => b.getAttribute('data-list-group') === kind)
           const rowsOf = () =>
             [...d().querySelectorAll('.list-pane .list-row-main')].map((r) =>
               (text(r) ?? '').trim(),
             )
-          const before = heads().map((b) => b.getAttribute('data-agent-group'))
+          const before = heads().map((b) => b.getAttribute('data-list-group'))
           const labels = heads().map((b) => (text(b) ?? '').trim())
           const builtinHead = headOf('builtin')
           const ownHead = headOf('own')
@@ -1726,13 +1726,20 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
         // ── 2026-11（使用者立项，demo v3 拍板）：任务列表分组 + 状态筛选 ──
         //   分组逻辑（source 分组/组间排序）在单测里钉死；这里量界面交互：
         //   默认分组、手动组头在、组头折叠、状态筛选、平铺切换。
-        facts['tasks.groupViewDefault'] = !!d().querySelector('.list-pane .task-list--grouped')
-        facts['tasks.manualGroupHead'] = [...d().querySelectorAll('.list-pane .group-head')].some(
+        /*
+         * ⚠️ 2026-11（D137）：分组改成标准控件 `ListGroupHead` 之后，判据的**载体**换了两处：
+         *   ① `.group-head` → `.list-group-head`（组头）；
+         *   ② 组容器 `.task-group` 没了（组头与行现在是平级兄弟，原来那层 `<li>` 套 `<li>`
+         *      结构不合法）。所以"某一组里有几行"不能再靠"从这个容器里找"。
+         *   意图没变，判据照旧量同样的四件事。
+         */
+        facts['tasks.groupViewDefault'] = !!d().querySelector('.list-pane .list-group-head')
+        facts['tasks.manualGroupHead'] = [...d().querySelectorAll('.list-pane .list-group-head')].some(
           (h) => text(h).includes('手动创建'),
         )
         // 组头折叠：点第一个组头，aria-expanded true → false（再点回来）
         {
-          const head = d().querySelector('.list-pane .group-head')
+          const head = d().querySelector('.list-pane .list-group-head')
           const before = head?.getAttribute('aria-expanded')
           if (head) click(head)
           await wait(80)
@@ -1858,13 +1865,19 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
             facts['tasks.filterAllCountConstant'] =
               allTextBefore !== null && allTextBefore === allTextAfter
             // 组头计数与筛后可见行数一致（不误导）：拿第一档比一次
-            const firstGroup = d().querySelector('.list-pane .task-group')
-            const head = firstGroup ? firstGroup.querySelector('.group-head') : null
-            const countText = head ? text(head.querySelector('.group-count')) : null
-            const visibleInFirst = firstGroup
-              ? [...firstGroup.querySelectorAll('.task-row')].filter(
-                  (r) => r.style.display !== 'none',
-                ).length
+            const head = d().querySelector('.list-pane .list-group-head')
+            const countText = head ? text(head.querySelector('.list-group-count')) : null
+            // 组头与行是平级兄弟 ⇒ 往下走，直到撞上**下一个组头**为止，数这一组的行
+            const rowsAfter = (h) => {
+              const out = []
+              for (let el = h?.parentElement?.nextElementSibling; el; el = el.nextElementSibling) {
+                if (el.classList.contains('list-group-head-wrap')) break
+                if (el.classList.contains('task-row')) out.push(el)
+              }
+              return out
+            }
+            const visibleInFirst = head
+              ? rowsAfter(head).filter((r) => r.style.display !== 'none').length
               : 0
             facts['tasks.groupCountFollowsFilter'] =
               visibleInFirst === 0
@@ -4098,7 +4111,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
            *   与这里的展开毫无关系（实测就是这么红的）。
            */
           const builtinWasOpen =
-            d().querySelector('[data-agent-group="builtin"]')?.getAttribute('aria-expanded') ===
+            d().querySelector('[data-list-group="builtin"]')?.getAttribute('aria-expanded') ===
             'true'
           await expandAllGroups()
           const drafterRow2 = rowOf('起草者')
@@ -4146,13 +4159,13 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           })()
           // 量完把"内置收拢"这条默认状态还回去（见上面那段：它会影响几何快照）
           if (!builtinWasOpen) {
-            const head = d().querySelector('[data-agent-group="builtin"]')
+            const head = d().querySelector('[data-list-group="builtin"]')
             if (head && head.getAttribute('aria-expanded') === 'true') {
               click(head)
               await untilNet(
                 () =>
                   d()
-                    .querySelector('[data-agent-group="builtin"]')
+                    .querySelector('[data-list-group="builtin"]')
                     ?.getAttribute('aria-expanded') === 'false',
                 30,
               )
@@ -10384,7 +10397,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               //   分组视图的 `.group-head`（组头）。同一意图换载体继续钉：
               //   组头也是内容高度（不许被全局固定高度带成一条死带）。
               sk.separatorHeights = need('任务分组标题是内容高度', () => {
-                const seps = [...lp.querySelectorAll('.pane-body .group-head')]
+                const seps = [...lp.querySelectorAll('.pane-body .list-group-head')]
                 if (seps.length === 0) return { min: 0, max: 0 }
                 const hs = seps.map((x) => Math.round(x.getBoundingClientRect().height))
                 return { min: Math.min(...hs), max: Math.max(...hs) }
@@ -10392,7 +10405,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               // D67：删掉的解释句要**钉住"没有"**（谁把它加回来就红）——
               // 判据：组头（分组标题）的文本里不许再出现它。
               sk.separatorNoHint = need('分组标题不带解释', () => {
-                const seps = [...lp.querySelectorAll('.pane-body .group-head')]
+                const seps = [...lp.querySelectorAll('.pane-body .list-group-head')]
                 const t = seps.length > 0 ? text(seps[0]) ?? '' : ''
                 return !t.includes('执行失败') && !t.includes('——')
               })
@@ -10523,6 +10536,52 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             'rowdetail.rowBox': sk.rowBox,
             'rowdetail.hover': sk.hover,
           })
+        }
+
+        /*
+         * ══════════════ 列表分组：两页同一个组头（D137）══════════════
+         *
+         * 这一档原来**两页各写一套**（任务页是带边框卡片按钮、智能体页是淡字行，
+         * 连 DOM 结构都不同）。现在组头是标准控件 `ListGroupHead` + `app.css` 的
+         * `.list-group-head` 一族，所以这里量**等式**：
+         *   · 两页组头同高（≤1px）、同字号、组名同字重（600）；
+         *   · 都有 chevron（折叠字形），计数都在右侧；
+         *   · 组间分隔线**只在第二组有**（第一组上方没有线——否则列表顶部会多一条悬空的）。
+         * 折叠行为本身由各页自己的判据守着（`tasks.groupCollapseToggle` / `agents.listGroups`）。
+         */
+        {
+          const measureGroups = async (hash) => {
+            f.contentWindow.location.hash = hash
+            await until(() => f.contentWindow.location.hash === hash, 40)
+            await wait(400)
+            const heads = [...d().querySelectorAll('.list-pane .list-group-head')]
+            if (heads.length === 0) return null
+            const first = heads[0]
+            const second = heads[1] ?? null
+            const c = getComputedStyle(first)
+            const nameEl = first.querySelector('.list-group-name')
+            const tail = first.querySelector('.list-group-tail')
+            return {
+              n: heads.length,
+              h: Math.round(first.getBoundingClientRect().height),
+              fs: Math.round(parseFloat(c.fontSize) * 10) / 10,
+              nameWeight: nameEl ? getComputedStyle(nameEl).fontWeight : null,
+              hasChevron: !!first.querySelector('.chevron'),
+              glyph: (first.querySelector('.chevron')?.textContent ?? '').trim(),
+              countRight:
+                !!tail &&
+                Math.round(tail.getBoundingClientRect().right) >=
+                  Math.round(first.getBoundingClientRect().right) - 12,
+              sepFirst: getComputedStyle(first.closest('.list-group-head-wrap')).borderTopWidth,
+              sepSecond: second
+                ? getComputedStyle(second.closest('.list-group-head-wrap')).borderTopWidth
+                : null,
+            }
+          }
+          facts['skeleton.groupHead'] = {
+            tasks: await measureGroups('#/tasks'),
+            agents: await measureGroups('#/agents'),
+          }
         }
 
         /**

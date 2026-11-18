@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onDestroy } from 'svelte'
   import ListPane from '../components/ListPane.svelte'
-  import ListRow from '../components/ListRow.svelte'
+  import ListGroupHead from '../components/ListGroupHead.svelte'
+import ListRow from '../components/ListRow.svelte'
   import MainArea from '../components/MainArea.svelte'
   import {
     api,
@@ -920,25 +921,26 @@
       {/snippet}
       {#snippet rows()}
         {#if viewMode === 'group'}
-          <ul class="list-stack task-list task-list--grouped">
+          <ul class="list-stack task-list">
             {#each groups as g (g.key)}
-              <li class="task-group" data-task-group={g.key}>
-                <button
-                  type="button"
-                  class="group-head"
-                  onclick={() => toggleGroup(g.key)}
-                  aria-expanded={!collapsedGroups.has(g.key)}
-                >
-                  <span class="group-arrow" class:collapsed={collapsedGroups.has(g.key)}>▾</span>
-                  <span class="group-name">{g.name}</span>
-                  <span class="group-count">{$t('tasks.groupCount', { n: g.items.length })}</span>
-                </button>
-                {#if !collapsedGroups.has(g.key)}
-                  {#each g.items as { issue, info } (issue.id)}
-                    {@render row(issue, info)}
-                  {/each}
-                {/if}
-              </li>
+              <!--
+                ★ 2026-11（D137）：组头改用标准控件 `ListGroupHead`，行与它**平级**。
+                  改之前是 `<li class="task-group">` 里套 `<li class="list-row">`（结构不合法，
+                  浏览器能忍），而且组头样式与智能体页那套各写一份、还长得不一样。
+                  `data-task-group` 仍挂在组头上——探针按它认组（键没变，判据不用改）。
+              -->
+              <ListGroupHead
+                label={g.name}
+                count={$t('tasks.groupCount', { n: g.items.length })}
+                open={!collapsedGroups.has(g.key)}
+                ontoggle={() => toggleGroup(g.key)}
+                groupKey={g.key}
+              />
+              {#if !collapsedGroups.has(g.key)}
+                {#each g.items as { issue, info } (issue.id)}
+                  {@render row(issue, info)}
+                {/each}
+              {/if}
             {/each}
           </ul>
         {:else}
@@ -1460,33 +1462,12 @@
    *   结果：同一个列表，换个视图行与行就贴在一起（hover 框互相咬住）。
    *   判据是探针 `skeleton.listBox`（五页行距都是 4px）。
    */
-  .task-list--grouped .task-group {
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-1);
-    margin-bottom: var(--sp-2);
-  }
-  .group-head {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    width: 100%;
-    padding: var(--sp-2) var(--sp-3);
-    border: 1px solid var(--surface-2);
-    border-radius: var(--radius);
-    background: var(--surface);
-    color: var(--text);
-    cursor: pointer;
-  }
-  .group-head:hover { background: var(--surface-2); }
-  .group-arrow {
-    color: var(--text-faint);
-    font-size: var(--fs-2xs);
-    transition: transform 0.15s;
-  }
-  .group-arrow.collapsed { transform: rotate(-90deg); }
-  .group-name { font-weight: 600; font-size: var(--fs-sm); }
-  .group-count { margin-left: auto; color: var(--text-dim); font-size: var(--fs-xs); }
+  /*
+   * ⚠️ 2026-11（D137）：这里原来有 `.task-list--grouped .task-group` + `.group-head` /
+   *   `.group-arrow` / `.group-name` / `.group-count` 一整套（带边框的卡片式组头）。
+   *   现在组头是标准控件 `ListGroupHead`、样式在 `app.css` 的 `.list-group-head` 一族，
+   *   页面里一个字都不写。
+   */
 
   /* 跑完之后：左边结论、右边产出文件（D69.9.1 从折叠区挪回——文件是高频项） */
   .result-grid {

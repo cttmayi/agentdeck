@@ -3647,6 +3647,49 @@ const CHECKS = [
   },
   {
     view: '列表栏骨架（D61）',
+    key: 'skeleton.groupHead',
+    /**
+     * ★★ 2026-11（D137）：分组组头**两页同一个控件**。
+     *
+     * 这一档原来各写一套：任务页是带边框的卡片按钮（组名 `--fs-sm`/600），智能体页是
+     * 无边框淡字行（`--fs-xs`），连 DOM 结构都不同（一个把行套在组里、一个是兄弟）。
+     * 现在两页都用 `ListGroupHead` + `app.css` 的 `.list-group-head`，所以量**等式**。
+     */
+    label:
+      '★★ 列表分组两页同一个组头：同高（≤1px）、同字号、组名同字重（600）、都有 chevron、'
+      + '计数贴右；组间分隔线**只在第二组有**（第一组上方不许有线）',
+    ok: (v) => {
+      const a = v?.tasks
+      const b = v?.agents
+      if (!a || !b) return false
+      return (
+        Math.abs(a.h - b.h) <= 1 &&
+        a.fs === b.fs &&
+        a.nameWeight === '600' &&
+        b.nameWeight === '600' &&
+        a.hasChevron &&
+        b.hasChevron &&
+        a.countRight &&
+        b.countRight &&
+        a.sepFirst === '0px' &&
+        b.sepFirst === '0px' &&
+        // `null` = 这一页当时只有一组（量不到第二组的线），不是缺陷；量到了就必须是 1px
+        (a.sepSecond === null || a.sepSecond === '1px') &&
+        b.sepSecond === '1px'
+      )
+    },
+    show: (v) =>
+      ['tasks', 'agents']
+        .map((k) => {
+          const x = v?.[k]
+          return x
+            ? `${k}: 高${x.h}/字号${x.fs}/字重${x.nameWeight}/chev${x.hasChevron ? x.glyph : '无'}/计数贴右${x.countRight}/线(1st${x.sepFirst},2nd${x.sepSecond})`
+            : `${k}: 没量到`
+        })
+        .join('　'),
+  },
+  {
+    view: '列表栏骨架（D61）',
     key: 'skeleton.listBox',
     /**
      * ★★★ 2026-11（D136）：**行容器 `ul` 本身**——这条判据是"编排列表风格不对"那次

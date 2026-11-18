@@ -101,6 +101,7 @@
 | 空态 | `.empty`（可带 `strong` + `p`） | 别自己拼居中的灰字 |
 | 详情/栏头两行 | 栏头这类"标题 + 一串元信息"的地方同样两行：第一行 **标题 + 动作按钮**，第二行 **元信息**（执行者 / 轮数 / 技能 / 时间）。元信息元素写 `flex: 0 0 100%` 强制独占一行 | 312 批：聊天的栏头原来是"标题 + 改名 + 文章写作员 · 2 轮"三样挤一行，长标题与元信息互相抢宽度。与"列表行两行"同一条注意力顺序 |
 | 列表行两行 | 列表行（聊天/任务/智能体/沉淀/定时任务/编排）一律 **两行结构**：第一行 = 标题（`<span class="…-title">`），第二行 = 辅助信息（执行者 / 轮数 / 时间 / 阶段，`<span class="…-sub">`）。两行都由 `.list-row-main`（`display:flex; flex-direction:column`）自然堆叠，**不许把辅助信息挤进标题那一行**；标题单行省略、辅助信息也单行省略 | 311 批：使用者原话——"类似任务的类似，一行主 Title，一行辅助信息的格式"。注意力顺序是"先认这是哪一条，再看它什么状态"；挤在一行时两者互相抢宽度，长标题会把辅助信息挤没。**照抄的地方见 §2.6**（连 CSS 一起） |
+| 列表分组 | 组头 = 组件 `ListGroupHead`（淡字一行：chevron + 组名 + 右侧说明与计数）；组头与行**平级**（`<li>` 里不许再套 `<li>`）；组间分隔线由 `app.css` 的 `.list-stack > .list-group-head-wrap:not(:first-child)` 自动画 | D137：这一档原来**两页各一套**（任务页是带边框的卡片按钮、智能体页是淡字行，连 DOM 结构都不同）。组头是**分段标题**不是内容，所以不带边框、不与 `.list-row` 抢注意力；折叠状态由页面给（任务默认展开、智能体「内置」默认收拢），控件不管 |
 | 单行省略 | 列表标题一类要"一行 + 省略号"的元素必须 **`display: block` + `max-width: 100%` + `overflow: hidden` + `text-overflow: ellipsis` + `white-space: nowrap`** 五件套 | 310 批：行内元素上 `overflow`/`text-overflow` 不生效，`nowrap` 只挡换行*算法*，中文长标题在窄栏里仍会被顶成两行、末尾却还挂着省略号（使用者报的） |
 | 混排行 | 短控件（勾选）+ 长控件（标签+输入）同排时 **`align-items: flex-end`** | 308 批：`center` 会让勾选浮在中间、`flex-start` 贴着顶边——两者高度差大时都不像同一行。新写这类行照这条来 |
 | 提示条 | `.notice` + `.bad` / `.warn` / `.good` | 一句话；更长的进 body |
@@ -165,6 +166,15 @@
   {#snippet rows()}
     <!-- ★ 行容器只有这一种写法：list-stack 在 app.css 里（重置 + 4px 行距） -->
     <ul class="list-stack">
+      <!-- 要分组时：组头插在它那组第一行之前（与行平级），样式全在 app.css -->
+      <ListGroupHead
+        label={$t('xxx.groupA')}
+        count={$t('xxx.groupCount', { n: groupA.length })}
+        open={openA}
+        ontoggle={() => (openA = !openA)}
+        groupKey="a"
+      />
+
       {#each visible as item (item.id)}
         <ListRow rowClass="xxx-row" active={item.id === selectedId} onclick={() => selectOne(item)}>
           {#snippet children()}
@@ -341,6 +351,8 @@ if (!(await askConfirm({ ... }))) return
   行内标题字号字重 / 徽标形状，加上两条较新的等式：
   - `skeleton.listBox`：`ul` 的 `padding-left` = 0、`list-style` = none、行距 4px、
     行左沿贴着栏内容左缘；
+  - `skeleton.groupHead`：两页的组头**同高（≤1px）、同字号（12px）、组名同字重（600）**、
+    都有 chevron、计数贴右；组间分隔线只在第二组上方有（第一组上方不许有线）；
   - `skeleton.rowMetrics`：行高**底线**（`min-height`）= 64px、**页内**任意两行差 ≤1px
     （内容更高时行可以更高——那不算不一致，令牌才是不允许漂的东西）。
 

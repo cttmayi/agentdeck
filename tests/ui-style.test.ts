@@ -280,6 +280,30 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
     }
   })
 
+  test('★★ 组头也只有一处定义：`.list-group-*` 的样式只能在 app.css 与 ListGroupHead 里', async () => {
+    /*
+     * ★ 2026-11（D137）：列表分组原来**两页各写一套**（任务页带边框卡片、智能体页淡字行），
+     * 类名、结构、字号都不同。收编成标准控件之后，这条判据守住"别再散回去"：
+     * 除了 `app.css`（定义）与 `ListGroupHead.svelte`（它自己的 scoped 收尾样式），
+     * 任何页面/组件都不许再出现 `.list-group-*` 的选择器。
+     */
+    const files = await load()
+    const allowed = new Set([
+      APP_CSS,
+      'apps/web/src/components/ListGroupHead.svelte',
+    ])
+    const bad: string[] = []
+    for (const [file, text] of files) {
+      if (allowed.has(file)) continue
+      for (const rule of rulesOf(text)) {
+        if (/\blist-group-[a-z-]+/.test(rule.selector)) {
+          bad.push(`${file}:${rule.line}  ${rule.selector}`)
+        }
+      }
+    }
+    assert.deepEqual(bad, [], '组头的样式只许在 app.css 与 ListGroupHead.svelte 里')
+  })
+
   test('`.small` 已改名 `.fs-xs`：不许再出现在 class 里', async () => {
     const files = await load()
     const bad: string[] = []
