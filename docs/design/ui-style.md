@@ -96,6 +96,7 @@
 | 列表 + 详情 | `.split-layout`（`.board` 看板 / `.with-detail` / `.with-artifact`） | 窄屏自动退成"列表 → 详情"两层 |
 | 列表栏 | `.pane`, `.pane-head`, `.pane-body`, `.pane-foot`, `.pane-actions` | 栏头不放标题（D64） |
 | 主区面板（设置这类） | `.main-panel` + `.main-panel-head`（`h2` + `.panel-back`）+ `.main-panel-body` + `.main-panel-foot` | **所有"整块换掉右栏"的面板都长这样** |
+| 目录选择 | 组件 `DirPicker`（「浏览…」打开它，`bind:open` + `bind:value` 与表单输入框同一个值） | 路径行 + 导航行 + 列表（目录可进、文件只作佐证）+ 底部「选这个目录」；输入框始终留着，手打永远可用。**不要**自己再搭一个目录弹层 |
 | 详情头 | `.detail-head` + `.detail-sub` + `.detail-actions` | 动作按钮 ≥2 个时自动画分组轨道。所有「标题 + 元信息 + 动作」的头都用它（聊天栏头 313 批已并入，不要再自己写 flex 补丁） |
 | 空态 | `.empty`（可带 `strong` + `p`） | 别自己拼居中的灰字 |
 | 详情/栏头两行 | 栏头这类"标题 + 一串元信息"的地方同样两行：第一行 **标题 + 动作按钮**，第二行 **元信息**（执行者 / 轮数 / 技能 / 时间）。元信息元素写 `flex: 0 0 100%` 强制独占一行 | 312 批：聊天的栏头原来是"标题 + 改名 + 文章写作员 · 2 轮"三样挤一行，长标题与元信息互相抢宽度。与"列表行两行"同一条注意力顺序 |
@@ -259,10 +260,18 @@
 
 | # | 块 | 由谁给 | 要点 |
 |---|---|---|---|
-| ① | 栏头 | `MainArea` 的 `title` / `sub` / `actions` | 标题 + 动作在右列、元信息自动落第二行；窄屏「← 返回」也在它里面 |
-| ② | 正文 | `.pane-body` + 现成控件 | 字段 `.field`、提示条 `.notice`、折叠 `.fold-section`、表格 `.table-wrap > table.table`；**正文自己滚**，栏头栏脚不跟着滚 |
-| ③ | 栏脚 | `foot` snippet ＞ `.main-panel-foot` | 这一屏的主动作（只有一颗 `btn--primary`）；反馈紧贴它上面 |
-| ④ | 空态 | `empty` + `emptyTitle` / `emptyHint` | 没选中时"选一个"，不是一片空白 |
+| ① | 栏头 | `MainArea` 的 `title` / `sub` / `actions` | 标题左、**动作右**、元信息自动落第二行；窄屏「← 返回」也在它里面 |
+| ② | 正文 | `.pane-body` + 现成控件 | 字段 `.field`、提示条 `.notice`、折叠 `.fold-section`、表格 `.table-wrap > table.table`、目录选择 `DirPicker`；**正文自己滚**，栏头不跟着滚 |
+| ③ | 空态 | `empty` + `emptyTitle` / `emptyHint` | 没选中时"选一个"，不是一片空白 |
+
+**这一屏的动作全在栏头**（`actions` 里那一排），**不要再在底下加一条"保存 / 取消"栏脚**：
+
+- 顺序：主操作（`btn--primary`，只有一颗）→ 次操作（`btn--secondary`）→ 普通操作（`btn--ghost`）→
+  **销毁放最后一个**（`btn--danger`，离主操作最远）。
+- ≥2 颗时 `.detail-head .detail-actions:has(>button+button)` 自动画出分组轨道（1.9rem 高、`--line` 底），
+  **别自己套一层容器**；单颗不画。
+- `MainArea` 的 `foot` 只留给**常驻输入**那种东西（聊天的输入条）；表单式的主操作不放它。
+
 
 顶栏动作、删除确认、浮层一律走现成的：
 

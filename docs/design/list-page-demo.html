@@ -10,9 +10,12 @@
       ══════════════════════════════════════════════════════════════════════
 
       **一个「左边一列、右边看详情」的页面的完整样子**（2026-11，D136）。
-      **右栏（主区）也补全了四块**：栏头（标题/动作/元信息）→ 正文（字段 / 提示条 /
-      折叠块 + 表格，全部现成控件）→ 栏脚（这一屏的主动作）→ 没选中时的空态。
-      工具条上的「看右栏空态」能切到最后那一块。
+      **右栏（主区）是这三块 + 两个交互控件**：
+        · 栏头 `detail-head`：标题左、**动作右**（保存 → 取消 → 删除，危险动作离主操作最远），
+          元信息自动落第二行。★ 这一屏的动作**全在栏头**，底下不再来一条"保存/取消"栏脚。
+        · 正文 `.pane-body`：提示条、字段、折叠块 + 表格（全部现成控件），自己滚。
+        · 空态 `empty`：没选中时说"选一个"。工具条上的「看右栏空态」能切过去。
+        · 「浏览…」打开的是现成控件 **`DirPicker`**（页面下方那个弹层，点得开、能选目录）。
 
       新做一个这样的页面时，照这一屏抄：结构只拼现有的标准控件
       （Topbar / Sidebar / ListPane / ListRow / MainArea），页面自己的 CSS 只写
@@ -2488,6 +2491,28 @@ a > button { width: 100%; }
         white-space: pre-wrap; color: var(--text-dim);
       }
 
+      /* 目录选择弹层里那几行的布局（真页面里这是 DirPicker.svelte 的 scoped 样式） */
+      .demo-picker {{ display: flex; flex-direction: column; gap: var(--sp-2); }}
+      .demo-picker-path {{ display: flex; gap: var(--sp-2); }}
+      .demo-picker-path input {{ flex: 1; min-width: 0; }}
+      .demo-picker-nav {{ display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }}
+      .demo-picker-list {{
+        display: flex; flex-direction: column; gap: 2px;
+        border: 1px solid var(--line); border-radius: var(--radius);
+        padding: var(--sp-2); max-height: 14rem; overflow-y: auto; background: var(--panel);
+      }}
+      .demo-picker-row {{
+        display: flex; align-items: center; gap: var(--sp-2);
+        padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm);
+        background: transparent; color: var(--text-dim); font: inherit; font-size: var(--fs-sm);
+        text-align: left; width: 100%;
+      }}
+      .demo-picker-row.dir {{ cursor: pointer; }}
+      .demo-picker-row.dir:hover {{ background: var(--surface-hover); color: var(--text); }}
+      .demo-picker-row.active {{ background: var(--surface-2); color: var(--text); }}
+      .demo-picker-row .glyph {{ color: var(--text-faint); }}
+      .demo-picker-now {{ flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); }}
+
       /* 行内容：这两块**是**范例的一部分（`ui-style.md` §2.6.2 写的就是它们） */
       .demo-title {
         display: block;
@@ -2642,8 +2667,17 @@ a > button { width: 100%; }
                 <!-- ① 栏头：标题 + 动作（右列）+ 元信息（自动落第二行） -->
                 <header class="detail-head" data-demo-detail>
                   <h2 data-pin="4">第 12 周竞品周报（重跑）</h2>
-                  <div class="detail-actions">
-                    <button type="button" class="btn btn--ghost btn--sm">删除</button>
+                  <!--
+                    ★ 动作全在**栏头右侧**这一条上（`MainArea` 的 `actions`）：主操作（保存）
+                      在最前、取消在中间、销毁（删除）**离它最远**。≥2 颗时
+                      `.detail-head .detail-actions:has(>button+button)` 会自动画出那条分组轨道
+                      （1.9rem 高、`--line` 底），单颗则不画——所以别自己套一层容器。
+                    ⚠️ 删除是 `btn--danger`（销毁 = 危险色，按钮族里的那一档），不是 ghost。
+                  -->
+                  <div class="detail-actions" data-pin="4">
+                    <button type="button" class="btn btn--primary">保存并运行</button>
+                    <button type="button" class="btn btn--ghost">取消</button>
+                    <button type="button" class="btn btn--danger">删除</button>
                   </div>
                   <p class="detail-sub" data-pin="4">
                     <span class="badge in_progress">进行中</span>
@@ -2675,7 +2709,8 @@ a > button { width: 100%; }
                     <label for="demo-dir">工作目录</label>
                     <div class="workdir-row">
                       <input id="demo-dir" type="text" value="~/agentdeck-workspace/weekly-12" />
-                      <button type="button" class="btn btn--secondary">浏览…</button>
+                      <!-- 「浏览…」打开的是现成控件 `DirPicker`（本页那个弹层，点得开） -->
+                      <button type="button" class="btn btn--secondary" id="demo-browse" data-pin="7">浏览…</button>
                     </div>
                     <p class="hint">留空即自动分配一个独立目录；填了就是它直接在那里干活。</p>
                   </div>
@@ -2719,14 +2754,6 @@ a > button { width: 100%; }
                   </div>
                 </div>
 
-                <!-- ③ 栏脚：这一屏的主动作（`MainArea` 的 foot snippet；Skills/Settings 用的是同一款） -->
-                <div class="main-panel-foot" data-pin="7" data-demo-detail>
-                  <span class="faint fs-xs">改动只写在这一份上</span>
-                  <span style="flex: 1"></span>
-                  <button type="button" class="btn btn--secondary">取消</button>
-                  <button type="button" class="btn btn--primary">保存并运行</button>
-                </div>
-
                 <!-- ④ 没选中时的那一屏（`MainArea` 的 empty：说"选一个"，不是一片空白） -->
                 <div class="pane-body" hidden data-demo-empty>
                   <div class="empty">
@@ -2766,7 +2793,8 @@ a > button { width: 100%; }
           <span class="demo-pin">4</span>
           <div class="demo-legend-body">
             <b>详情头</b> <code>MainArea</code> ＞ <code>.detail-head</code> + <code>.detail-sub</code>
-            <p>标题 + 动作在右、元信息自动落到第二行；窄屏返回按钮也在它里面。</p>
+            <p>标题左、动作右（<b>这一屏的动作全在栏头</b>：主操作 → 取消 → 删除，危险动作离主操作最远），
+            元信息自动落到第二行；窄屏返回按钮也在它里面。<b>不要</b>再在底下加一条"保存/取消"栏脚。</p>
           </div>
         </li>
         <li>
@@ -2780,8 +2808,8 @@ a > button { width: 100%; }
         <li>
           <span class="demo-pin">7</span>
           <div class="demo-legend-body">
-            <b>栏脚动作</b> <code>.main-panel-foot</code>（<code>MainArea</code> 的 <code>foot</code>）
-            <p>这一屏的主动作放这里，只有一颗 <code>btn--primary</code>。反馈（<code>.notice</code>）紧贴在它上面。</p>
+            <b>目录选择</b> <code>DirPicker</code>（现成控件，点「浏览…」能打开）
+            <p>路径行 + 导航行 + 列表（目录可进、文件只作佐证）+ 底部「选这个目录」。输入框始终留着，手打永远可用。</p>
           </div>
         </li>
         <li>
@@ -2794,6 +2822,62 @@ a > button { width: 100%; }
       </ul>
 
       <!-- ══════════════════ 三种错的样子 ══════════════════ -->
+
+      <!-- ══════════════════ 目录选择（现成控件 `DirPicker`）══════════════════ -->
+      <!--
+        这是 `components/DirPicker.svelte` 的样子：`Modal`（头/正文/脚）+ 路径行 +
+        导航行（上一级 / 家目录 / 工作区 / 刷新 + 目录与文件计数）+ 列表（目录可进、
+        文件只列出来佐证"就是我的仓库"）+ 底部（当前路径 + 取消 + 选这个目录）。
+        ⚠️ 输入框**始终留着**：选择框不是唯一入口，手打永远可用（隐藏目录、网络盘、
+           拼出来的路径都只能打）。
+      -->
+      <div class="modal-host" id="demo-dir-modal" hidden>
+        <div class="drawer-backdrop" role="presentation" data-dir-close></div>
+        <div class="modal" role="dialog" aria-modal="true" aria-label="选择一个目录">
+          <div class="modal-head">
+            <div>
+              <h2>选择一个目录</h2>
+              <p class="hint">列的是这台机器上的真实目录。选中之后，那个绝对路径会填进「工作目录」。</p>
+            </div>
+            <button type="button" class="ghost" data-dir-close>关闭</button>
+          </div>
+          <div class="modal-body">
+            <div class="demo-picker">
+              <div class="demo-picker-path">
+                <input class="mono" type="text" value="/Users/ling/agentdeck-workspace" aria-label="路径" />
+                <button type="button" class="btn btn--ghost">去</button>
+              </div>
+              <div class="demo-picker-nav">
+                <button type="button" class="btn btn--ghost" disabled>上一级</button>
+                <button type="button" class="btn btn--ghost">家目录</button>
+                <button type="button" class="btn btn--ghost">工作区</button>
+                <button type="button" class="btn btn--ghost">刷新</button>
+                <span class="faint fs-xs">3 个目录 · 2 个文件</span>
+              </div>
+              <div class="demo-picker-list">
+                <button type="button" class="demo-picker-row dir">
+                  <span class="glyph" aria-hidden="true">▸</span><span class="name mono">weekly-11</span>
+                </button>
+                <button type="button" class="demo-picker-row dir active">
+                  <span class="glyph" aria-hidden="true">▸</span><span class="name mono">weekly-12</span>
+                </button>
+                <button type="button" class="demo-picker-row dir">
+                  <span class="glyph" aria-hidden="true">▸</span><span class="name mono">weekly-13</span>
+                </button>
+                <span class="demo-picker-row file"><span class="glyph" aria-hidden="true">·</span><span class="name mono">README.md</span></span>
+                <span class="demo-picker-row file"><span class="glyph" aria-hidden="true">·</span><span class="name mono">notes.md</span></span>
+              </div>
+              <p class="hint">文件列出来只为了让你确认「是不是这个目录」，不能选。</p>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <code class="mono demo-picker-now">/Users/ling/agentdeck-workspace/weekly-12</code>
+            <button type="button" class="btn btn--ghost" data-dir-close>取消</button>
+            <button type="button" class="btn btn--primary" id="demo-dir-pick">选这个目录</button>
+          </div>
+        </div>
+      </div>
+
       <h2 class="demo-section-title">三种错的样子（这三种都真的发生过）</h2>
       <div class="demo-bad-grid">
         <div class="demo-case">
@@ -2951,7 +3035,7 @@ a > button { width: 100%; }
         const C = (el) => (el ? getComputedStyle(el) : null)
         const rows = qa('.pane-body > ul.list-stack > .list-row')
         const body = q('.detail-pane > .pane-body.detail-scroll')
-        const foot = q('.detail-pane > .main-panel-foot')
+        const acts = q('.detail-head .detail-actions')
         const longTitle = qa('.demo-title').find((t) => t.textContent.includes('特别长'))
         const checks = [
           ['两栏并排', (R(q('.detail-pane'))?.left ?? 0) > (R(q('.list-pane'))?.left ?? 0) + 40],
@@ -2972,8 +3056,11 @@ a > button { width: 100%; }
           ['正文有高度（≥200px）', Math.round(R(body)?.height ?? 0) >= 200],
           ['正文是自滚容器（overflow-y: auto）', C(body)?.overflowY === 'auto'],
           ['正文内容没有被裁掉（首屏装得下）', !!body && body.scrollHeight <= R(body).height + 2],
-          ['栏脚贴住面板底', !!foot && Math.abs(R(foot).bottom - R(q('.detail-pane')).bottom) < 2],
-          ['栏脚只有一颗主操作', qa('.detail-pane > .main-panel-foot .btn--primary').length === 1],
+          ['动作在栏头、且排成一条轨道', !!acts && Math.round(R(acts).height) === 30],
+          ['动作里只有一颗主操作', qa('.detail-head .detail-actions .btn--primary').length === 1],
+          ['删除用危险色（不是 ghost）', !!q('.detail-head .detail-actions .btn--danger')],
+          ['没有底部栏脚（主动作不在最底下）', !q('.detail-pane > .main-panel-foot')],
+          ['目录选择弹层默认关着', document.getElementById('demo-dir-modal').hidden === true],
           ['没有横向溢出', document.documentElement.scrollWidth <= window.innerWidth + 1],
         ]
         const bad = checks.filter(([, ok]) => !ok).map(([name]) => name)
@@ -2983,7 +3070,8 @@ a > button { width: 100%; }
         box.innerHTML =
           bad.length === 0
             ? '<b>自检通过 ' + checks.length + '/' + checks.length + '</b>：两栏并排且详情够宽、栏头 51px 无标题、' +
-              'ul 无缩进 / 无符号 / 行距 4px、行高底线 64px、长标题单行裁切、正文自滚、栏脚贴底、无横向溢出。'
+              'ul 无缩进 / 无符号 / 行距 4px、行高底线 64px、长标题单行裁切、正文自滚、' +
+              '动作在栏头一条轨道且只有一颗主操作、删除是危险色、没有底部栏脚、无横向溢出。'
             : '<b>自检未通过（' + bad.length + ' 项）</b>：' + bad.join('、')
       }
 
@@ -3011,6 +3099,29 @@ a > button { width: 100%; }
         root.setAttribute('data-theme', dark ? 'light' : 'dark');
         e.currentTarget.textContent = dark ? '切到暗色' : '切到亮色';
       });
+
+      // 目录选择弹层：「浏览…」打开，「取消 / 关闭 / 点遮罩」关掉，「选这个目录」把路径写回输入框
+      const dirModal = document.getElementById('demo-dir-modal')
+      const dirInput = document.getElementById('demo-dir')
+      document.getElementById('demo-browse').addEventListener('click', () => (dirModal.hidden = false))
+      dirModal.querySelectorAll('[data-dir-close]').forEach((el) =>
+        el.addEventListener('click', () => (dirModal.hidden = true)),
+      )
+      document.getElementById('demo-dir-pick').addEventListener('click', () => {
+        const chosen = dirModal.querySelector('.demo-picker-now').textContent.trim()
+        dirInput.value = chosen
+        dirModal.hidden = true
+      })
+      // 列表里点一个目录 = 进去（演示里只把选中态挪过去，路径那行跟着变）
+      dirModal.querySelectorAll('.demo-picker-row.dir').forEach((row) =>
+        row.addEventListener('click', () => {
+          dirModal.querySelectorAll('.demo-picker-row.dir').forEach((r) => r.classList.remove('active'))
+          row.classList.add('active')
+          const name = row.querySelector('.name').textContent.trim()
+          dirModal.querySelector('.demo-picker-now').textContent =
+            '/Users/ling/agentdeck-workspace/' + name
+        }),
+      )
 
       selfCheck()
 
