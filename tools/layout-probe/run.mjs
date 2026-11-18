@@ -3701,7 +3701,8 @@ const CHECKS = [
      */
     label:
       '★★ 列表分组两页同一个组头：同高（≤1px）、同字号、组名同字重（600）、都有 chevron、'
-      + '计数贴右；组间分隔线**只在第二组有**（第一组上方不许有线）',
+      + '计数贴右；组间分隔线**只在第二组有**（第一组上方不许有线）；'
+      + '且组头**不靠缩小区分**（字号 ≥ 行标题、有底色带、与行背景不同）',
     ok: (v) => {
       const a = v?.tasks
       const b = v?.agents
@@ -3717,6 +3718,14 @@ const CHECKS = [
         b.countRight &&
         a.sepFirst === '0px' &&
         b.sepFirst === '0px' &&
+        // ★ D140：组头**不靠"缩小"区分**（字号 ≥ 行标题），且靠**底色**分段
+        a.nameFs >= (a.rowTitleFs ?? 99) &&
+        b.nameFs >= (b.rowTitleFs ?? 99) &&
+        a.headBg !== a.rowBg &&
+        b.headBg !== b.rowBg &&
+        // 组头底色也不能等于**选中行**的底色（否则选中的那一行会被读成分组头）
+        (a.activeRowBg === null || a.headBg !== a.activeRowBg) &&
+        (b.activeRowBg === null || b.headBg !== b.activeRowBg) &&
         // `null` = 这一页当时只有一组（量不到第二组的线），不是缺陷；量到了就必须是 1px
         (a.sepSecond === null || a.sepSecond === '1px') &&
         b.sepSecond === '1px'

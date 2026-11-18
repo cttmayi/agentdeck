@@ -863,7 +863,20 @@ hr {
   margin: 0;
 }
 
-/* 组头：淡字一行。hover 才有底（它是个按钮，但不该一直看起来像卡片） */
+/* 组头：**一条分段带**（2026-11 使用者两轮反馈之后的形状）。
+ *
+ * 第一版是"淡字一行"（透明底 + `--fs-xs` + 组名 `--text`），使用者看下来两条意见：
+ *   ① "头和内容的颜色太接近，看不清楚分割"——组名用了正文色，读起来就是一行内容；
+ *   ② "头的字体比内容的字还小"——`--fs-xs`(12) 比行标题 `--fs-base`(14) 还小，
+ *      缩小本来是"次级"的信号，放在**分段头**上正好反了：头比它管的内容还弱。
+ *
+ * 所以现在**靠底色分段、不靠缩小**：
+ *   · 整行铺 `--bg` 的带子（圆角 `--radius-sm`）——扫列表时一眼看出"这里换组了"。
+     ⚠️ 用的是 `--bg` 而不是 `--surface-2`：**选中行**的底色就是 `--surface-2`
+     （`.list-row.active`），两者同色的话"选中的那一行"会被读成"一个分组头"。
+ *   · 字号与行标题同级 `--fs-base`，字重 600（只有组名加粗）；
+ *   · 字色降一档 `--text-dim`（行标题是 `--text`）：**同字号、淡一档**才是"它是标签"；
+ *   · 计数留在 `--fs-xs` + `--text-faint`（它是附注，不是标题的一部分）。 */
 .list-group-head {
   display: flex;
   align-items: center;
@@ -872,10 +885,10 @@ hr {
   padding: var(--sp-1) var(--sp-2);
   border: 0;
   border-radius: var(--radius-sm);
-  background: transparent;
+  background: var(--bg);
   color: var(--text-dim);
   font: inherit;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-base);
   text-align: left;
   cursor: pointer;
 }
@@ -890,20 +903,22 @@ hr {
   outline-offset: 1px;
 }
 
-/* chevron 跟组头同字号（`.chevron` 那一档是给 `.fold-head` 的 `--fs-sm`） */
+/* chevron 跟组头同字号（`.chevron` 那一档本来是给 `.fold-head` 的 `--fs-sm`） */
 .list-group-head .chevron {
   font-size: inherit;
+  color: var(--text-faint);
 }
 
-/* 组名：淡字行里唯一的强调（600），与 `.fold-title` 同一档 */
+/* 组名：分段带里唯一的强调（600 + 淡一档的正文色） */
 .list-group-name {
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: var(--text);
+  color: var(--text-dim);
 }
 
-/* 计数：右侧那一簇里的最后一个（整体贴右由组件的 `.list-group-tail` 负责） */
+/* 计数：附注，留在小号（整体贴右由组件的 `.list-group-tail` 负责） */
 .list-group-count {
+  font-size: var(--fs-xs);
   color: var(--text-faint);
   white-space: nowrap;
 }

@@ -10672,6 +10672,9 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
          * 折叠行为本身由各页自己的判据守着（`tasks.groupCollapseToggle` / `agents.listGroups`）。
          */
         {
+          /** 按页面取"行标题"的类名（组头要跟它比字号与字色）。 */
+          const pgTitleClass = (hash) =>
+            hash === '#/tasks' ? 'task-title' : hash === '#/agents' ? 'agent-line' : null
           const measureGroups = async (hash) => {
             f.contentWindow.location.hash = hash
             await until(() => f.contentWindow.location.hash === hash, 40)
@@ -10694,6 +10697,28 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
                 !!tail &&
                 Math.round(tail.getBoundingClientRect().right) >=
                   Math.round(first.getBoundingClientRect().right) - 12,
+              // ★ D140：组头与行的**可分辨性**（使用者两轮反馈：颜色太接近 / 头比内容还小）
+              headBg: c.backgroundColor,
+              nameFs: nameEl ? Math.round(parseFloat(getComputedStyle(nameEl).fontSize) * 10) / 10 : null,
+              nameColor: nameEl ? getComputedStyle(nameEl).color : null,
+              // 未选中的行（`.list-row.active` 是选中态，底色本来就不同——见 app.css 的注释）
+              rowBg: (() => {
+                const r = d().querySelector('.list-pane .list-row:not(.active)') ?? d().querySelector('.list-pane .list-row')
+                return r ? getComputedStyle(r).backgroundColor : null
+              })(),
+              // 选中行的底色：组头**也不能**跟它同色，否则"选中的那一行"会被读成分组头
+              activeRowBg: (() => {
+                const r = d().querySelector('.list-pane .list-row.active')
+                return r ? getComputedStyle(r).backgroundColor : null
+              })(),
+              rowTitleFs: (() => {
+                const t = d().querySelector('.list-pane .list-row .' + (pgTitleClass(hash) ?? 'x'))
+                return t ? Math.round(parseFloat(getComputedStyle(t).fontSize) * 10) / 10 : null
+              })(),
+              rowTitleColor: (() => {
+                const t = d().querySelector('.list-pane .list-row .' + (pgTitleClass(hash) ?? 'x'))
+                return t ? getComputedStyle(t).color : null
+              })(),
               sepFirst: getComputedStyle(first.closest('.list-group-head-wrap')).borderTopWidth,
               sepSecond: second
                 ? getComputedStyle(second.closest('.list-group-head-wrap')).borderTopWidth
