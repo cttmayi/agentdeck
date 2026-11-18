@@ -423,7 +423,19 @@
   /* ── 行内容（壳不在这里：hover / 选中框 / 行高下限归 ListRow） ── */
   /* ⚠️ 2026-11：重置 + 行距在全局 `.list-stack`（markup：`class="list-stack
      crystal-list"`）。 */
+  /*
+   * ★ 2026-11（D138）：这一页的行内容原来与其它五页不一致（D138 体检量到的）：
+   *   · `.crystal-title` 缺 `display:block` / `max-width:100%` / `font-weight:600`
+   *     ——字重实际是 400（别的页都是 600），省略号也只是"碰巧"生效（flex 子项被块化，
+   *     靠的是父容器的 display，不在规则里）；
+   *   · `.crystal-meta` 是 `--fs-sm` 且**没写字色**（继承 `--text`），别的页是
+   *     `--fs-xs` + `--text-faint`——这一页的辅助信息大一号、深一档。
+   * 现在照 §2.4 的五件套与"辅助信息显式字色/字号"补齐。
+   */
   .crystal-title {
+    display: block;
+    max-width: 100%;
+    font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -432,7 +444,8 @@
     display: flex;
     align-items: center;
     gap: var(--sp-2);
-    font-size: var(--fs-sm);
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
   }
 
 </style>

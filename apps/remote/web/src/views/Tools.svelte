@@ -119,7 +119,7 @@
     <h3>{$t('remote.toolDocs', { file: 'TOOL.md' })}</h3>
     <pre class="file-text">{detail!.docs}</pre>
     <h3>{$t('remote.detailFiles')}</h3>
-    <ul class="faint fs-xs">
+    <ul class="plain faint fs-xs">
       {#each Object.keys(detail!.files).sort() as path (path)}
         <li><code>{path}</code></li>
       {/each}

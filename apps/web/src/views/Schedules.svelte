@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte'
   import ListPane from '../components/ListPane.svelte'
+import MainArea from '../components/MainArea.svelte'
 import ListRow from '../components/ListRow.svelte'
   import PromptField from '../components/PromptField.svelte'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
@@ -128,6 +129,25 @@ import type { WebTextId } from '@agentdeck/i18n'
   $: executor = executorAgents.find((a) => a.id === formAgentId) ?? null
   $: executorName = executor?.name ?? null
   $: enabledCount = list.filter((s) => s.enabled).length
+
+  /*
+   * 右栏（D138 起走标准控件 `MainArea`）：这几个派生值就是"右栏现在该画什么"的全部判断。
+   *
+   * ⚠️ `detailOpen` 同时决定 `.split-layout` 的 `with-detail`——窄屏（≤72rem）时有这个类
+   *    才显示右栏、藏掉列表；反过来（没选中、也没开表单）时必须**没有**它，否则一进这
+   *    一页列表就是空的、还没有回去的路（D133 在编排页修过的同款缺陷）。
+   */
+  $: selected = list.find((x) => x.id === selectedId) ?? null
+  $: detailOpen = $schedForm !== null || selected !== null
+  $: detailTitle = $schedForm
+    ? $t($schedForm.mode === 'create' ? 'schedules.createTitle' : 'schedules.updateTitle')
+    : (selected?.name ?? '')
+
+  /** 回列表：清掉选中与表单（窄屏「← 返回」与「取消」都走它）。 */
+  function closeDetail(): void {
+    selectedId = null
+    closeForm()
+  }
   /*
    * 搜索（D136）：栏头带的搜索框按**名字**过滤。
    * ⚠️ 只按名字、不按 cron 人话：那一栏是"什么时候跑"，人搜它的时候多半在找
@@ -462,7 +482,8 @@ import type { WebTextId } from '@agentdeck/i18n'
 </script>
 
 <div
-  class="split-layout with-detail"
+  class="split-layout"
+  class:with-detail={detailOpen}
   data-list-key="schedules"
   data-list-label={$t('shell.resizeList')}
   use:listGrip
@@ -535,44 +556,78 @@ import type { WebTextId } from '@agentdeck/i18n'
     {/snippet}
   </ListPane>
 
-  <!-- ══════════ 右栏 ══════════ -->
-  <section class="pane-body schedules-main">
+  <!-- ══════════ 右栏（标准控件 MainArea：栏头 + 正文 + 窄屏返回 + 空态）══════════ -->
+  <!--
+    ★ 2026-11（D138）：这里原来是**手搭的** `<section class="pane-body schedules-main">`
+    + 自写的 `.detail-head`；而且 `.split-layout` 上 `with-detail` **恒写**、全页没有
+    `.back-to-list` —— 窄屏（≤72rem）时列表被 CSS 藏掉，右栏又给不出"回去"的路：
+    一进这一页就无路可走（D133 在编排页修过的同一个缺陷，这一页当时漏了）。
+    现在换成标准控件 `MainArea`：窄屏返回、空态、滚动容器都由它给；没选中任何一条时
+    右栏说的是「选一条看详情」，不再是"还没有定时任务"（那是假话——左栏明明列着）。
+  -->
+  <MainArea
+    empty={!detailOpen}
+    emptyTitle={$t('schedules.pickHint')}
+    emptyHint={$t('schedules.titleHint')}
+    backLabel={detailOpen ? $t('schedules.backToList') : undefined}
+    onBack={closeDetail}
+    title={detailTitle}
+    bodyClass="detail-scroll"
+  >
+    {#snippet sub()}
+      {@const s = selected}
+      {#if s !== null && !$schedForm}
+        <span class="pill">{s.humanCron}</span>
+        {#if s.enabled && s.nextRunAt !== null}
+          <span class="muted">{$t('schedules.next')} {relativeTime(s.nextRunAt, Date.now())}</span>
+        {:else if !s.enabled}
+          <span class="faint">{$t('schedules.disabled')}</span>
+        {/if}
+        {#if s.triggerCount > 0}
+          <span class="muted">{$t('schedules.triggeredCount', { n: s.triggerCount })}</span>
+        {/if}
+      {/if}
+    {/snippet}
+
+    {#snippet actions()}
+      {@const s = selected}
+      {#if $schedForm}
+        <!-- ★ 保存放栏头（使用者要求：主操作在表单上部，不在最底下） -->
+        <button
+          type="button"
+          class="btn btn--primary"
+          disabled={busy}
+          onclick={() => void save()}
+        >
+          {$t('schedules.save')}
+        </button>
+        <!-- 2026-11（使用者要求）：保存后立刻测试——新建/编辑都显示（保存完马上触发一次） -->
+        <button
+          type="button"
+          class="btn btn--secondary"
+          disabled={busy}
+          onclick={() => void save(true)}
+        >
+          {$t('schedules.saveAndTrigger')}
+        </button>
+        <button type="button" class="btn btn--ghost" onclick={closeForm}>
+          {$t('schedules.cancel')}
+        </button>
+      {:else if s !== null}
+        <button type="button" class="btn btn--secondary" onclick={() => void triggerNow(s)}>
+          {$t('schedules.triggerNow')}
+        </button>
+        <button type="button" class="btn btn--ghost" onclick={() => openEdit(s)}>
+          {$t('schedules.edit')}
+        </button>
+        <button type="button" class="btn btn--danger" onclick={() => void deleteSchedule(s)}>
+          {$t('schedules.delete')}
+        </button>
+      {/if}
+    {/snippet}
+    {#snippet body()}
+
     {#if $schedForm}
-      <!-- ── 新建 / 编辑表单 ──
-           ★ 2026-11 定稿：右栏表单容器与任务页/聊天页同款——栏头用 `detail-head`
-            （两列网格：标题左、动作右），动作走 `detail-actions` 工具条（透明胶囊，
-            app.css 265 批那条「栏头那一排动作也走同一条工具条」）；不用 `.main-panel`
-            卡片（那是设置/安装那种次级面板的容器，使用者说"和其他页面风格完全不同"）。
-            `.main-panel-body` 的留白与 detail-head 同套（sp-4/sp-5），正文直接铺。 -->
-      <div class="detail-head">
-        <div class="detail-sub">
-          <h2>{$t($schedForm.mode === 'create' ? 'schedules.createTitle' : 'schedules.updateTitle')}</h2>
-        </div>
-        <div class="detail-actions">
-          <!-- ★ 保存放栏头（使用者要求：主操作在表单上部，不在最底下）——在动作
-               工具条里它就是一颗透明胶囊，与任务页/聊天页栏头动作同一长相 -->
-          <button
-            type="button"
-            class="btn btn--primary"
-            disabled={busy}
-            onclick={() => void save()}
-          >
-            {$t('schedules.save')}
-          </button>
-          <!-- 2026-11（使用者要求）：保存后立刻测试——新建/编辑都显示（保存完马上触发一次） -->
-          <button
-            type="button"
-            class="btn btn--secondary"
-            disabled={busy}
-            onclick={() => void save(true)}
-          >
-            {$t('schedules.saveAndTrigger')}
-          </button>
-          <button type="button" class="btn btn--ghost" onclick={closeForm}>
-            {$t('schedules.cancel')}
-          </button>
-        </div>
-      </div>
       <div class="schedule-form-body form-grid">
           <!-- 名称全宽；「什么时候跑 | 要做什么」「交给谁 | 启动方式」两列并排，
                高级/错误全宽——2026-11 使用者要求紧凑：尽量不往下拉就能配置完 -->
@@ -799,37 +854,8 @@ import type { WebTextId } from '@agentdeck/i18n'
 
 
         </div>
-    {:else if selectedId}
-      {@const s = list.find((x) => x.id === selectedId)}
-      {#if s}
-        <!-- ── 详情 ── -->
-        <div class="detail-head">
-          <div class="detail-sub">
-            <h2>{s.name}</h2>
-            <p>
-              <span class="pill">{s.humanCron}</span>
-              {#if s.enabled && s.nextRunAt !== null}
-                <span class="muted">{$t('schedules.next')} {relativeTime(s.nextRunAt, Date.now())}</span>
-              {:else if !s.enabled}
-                <span class="faint">{$t('schedules.disabled')}</span>
-              {/if}
-              {#if s.triggerCount > 0}
-                <span class="muted">已触发 {s.triggerCount} 次</span>
-              {/if}
-            </p>
-          </div>
-          <div class="detail-actions">
-            <button type="button" class="btn btn--secondary btn--sm" onclick={() => void triggerNow(s)}>
-              {$t('schedules.triggerNow')}
-            </button>
-            <button type="button" class="btn btn--ghost btn--sm" onclick={() => openEdit(s)}>
-              {$t('schedules.edit')}
-            </button>
-            <button type="button" class="btn btn--danger btn--sm" onclick={() => void deleteSchedule(s)}>
-              {$t('schedules.delete')}
-            </button>
-          </div>
-        </div>
+    {:else if selected !== null}
+      {@const s = selected}
 
         <div class="drawer-section">
           <h3>{$t('schedules.executorLabel')}</h3>
@@ -896,14 +922,10 @@ import type { WebTextId } from '@agentdeck/i18n'
             </table>
           {/if}
         </div>
-      {/if}
-    {:else}
-      <div class="empty">
-        <strong>{$t('schedules.empty')}</strong>
-        <p>{$t('schedules.titleHint')}</p>
-      </div>
     {/if}
-  </section>
+    {/snippet}
+  </MainArea>
+
 </div>
 
 <style>
@@ -976,9 +998,8 @@ import type { WebTextId } from '@agentdeck/i18n'
   :global(.switch.on)::after {
     left: calc(100% - 1.05rem);
   }
-  .schedules-main {
-    overflow-y: auto;
-  }
+  /* ⚠️ 2026-11（D138）：`.schedules-main { overflow-y: auto }` 删了——右栏改走标准控件
+     `MainArea`，滚动容器是它里面的 `.pane-body.detail-scroll`。 */
   /* 表单式调度 */
   .freq-picker {
     display: flex;

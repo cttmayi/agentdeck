@@ -20,6 +20,10 @@ export const schedulesText = {
   'schedules.emptyFilteredHint': { zh: '换个关键词试试。', en: 'Try another keyword.' },
   'schedules.enabledCount': { zh: '{enabled} 个启用 · 共 {total} 个', en: '{enabled} enabled · {total} total' },
   'schedules.empty': { zh: '还没有定时任务。到点会自动跑起来的任务，从这里建。', en: 'No schedules yet. Tasks that run on their own start here.' },
+  // 右栏空态（D138）：没选中时说的是"选一条"，不是"还没有定时任务"（那是假话——左栏明明列着）
+  'schedules.pickHint': { zh: '选一条定时任务', en: 'Pick a schedule' },
+  'schedules.backToList': { zh: '← 返回列表', en: '← Back to list' },
+  'schedules.triggeredCount': { zh: '已触发 {n} 次', en: 'Triggered {n} times' },
   'schedules.next': { zh: '下次', en: 'Next' },
   'schedules.last': { zh: '最近', en: 'Last' },
   'schedules.disabled': { zh: '停用中', en: 'Paused' },

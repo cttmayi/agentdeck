@@ -3066,7 +3066,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
 
         // ── 定时任务（D115）：右栏可见 + 点「新建定时任务」表单出现 ──
         //
-        //   2026-11 修过一版布局缺陷：右栏（`.schedules-main`）没放进 `split-layout`
+        //   2026-11 修过一版布局缺陷：右栏（`.detail-pane`）没放进 `split-layout`
         //   的把手列布局里，被网格塞进 0.375rem 的缝隙——点「新建定时任务」界面毫无
         //   反应（表单其实渲染了，只是看不见）。类型检查看不见这种缺陷（CLAUDE.md
         //   §8.3：布局类缺陷只有浏览器量得出来），这条判据是它的守卫：右栏必须
@@ -3076,12 +3076,12 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         //   2026-11 v8 还踩过预览脚本的 SyntaxError（`do` 是保留字）——交互断言
         //   是真浏览器点击，专防"界面画出来了但脚本挂了"这类回归。
         f.contentWindow.location.hash = '#/schedules'
-        await until(() => !!d().querySelector('.schedules-main'))
+        await until(() => !!d().querySelector('.detail-pane'))
         await wait(300)
         facts['schedules.mainPaneWidth'] = await (async () => {
-          const right = d().querySelector('.schedules-main')
+          const right = d().querySelector('.detail-pane')
           if (!right) {
-            errors.push('定时任务页右栏 .schedules-main 不存在')
+            errors.push('定时任务页右栏 .detail-pane 不存在')
             return -1
           }
           const w = Math.round(right.getBoundingClientRect().width)
@@ -3099,26 +3099,26 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           click(newBtn)
           // 2026-11 表单容器改为与任务页同款（detail-head + 动作工具条），
           // 判据跟着走：栏头存在 + 工具条里有「保存」
-          const panel = await until(() => d().querySelector('.schedules-main .detail-actions'))
+          const panel = await until(() => d().querySelector('.detail-pane .detail-actions'))
           if (!panel) {
             errors.push('点「新建定时任务」后表单没出现（.detail-actions 没有）')
             return false
           }
-          const saveBtn = [...d().querySelectorAll('.schedules-main .detail-actions button')].find(
+          const saveBtn = [...d().querySelectorAll('.detail-pane .detail-actions button')].find(
             (b) => text(b) === '保存',
           )
           if (!saveBtn) {
             errors.push('表单栏头工具条里没有「保存」按钮')
             return false
           }
-          const freq = d().querySelectorAll('.schedules-main .freq-picker button').length
+          const freq = d().querySelectorAll('.detail-pane .freq-picker button').length
           // 2026-11：变量 chips 已搬进大编辑器弹层（.pe-var-chip）——表单里不再有
           //   .var-chip，改为断言「⛶ 展开」按钮存在（chips 的数量在 promptEditor
           //   判据里量弹层）
-          const expandBtn = !!d().querySelector('.schedules-main .prompt-expand')
-          const nameField = !!d().querySelector('.schedules-main input[type=text]')
-          const timeField = d().querySelectorAll('.schedules-main .schedule-time input').length === 2
-          const resultRows = d().querySelectorAll('.schedules-main .schedule-result-row').length
+          const expandBtn = !!d().querySelector('.detail-pane .prompt-expand')
+          const nameField = !!d().querySelector('.detail-pane input[type=text]')
+          const timeField = d().querySelectorAll('.detail-pane .schedule-time input').length === 2
+          const resultRows = d().querySelectorAll('.detail-pane .schedule-result-row').length
           if (freq !== 5 || !expandBtn || !nameField || !timeField || resultRows !== 3) {
             errors.push(`表单不完整：预设键 ${freq}/5、展开按钮 ${expandBtn}、名字框 ${nameField}、时间行 ${timeField}、结果区三行 ${resultRows}/3`)
             return false
@@ -3128,29 +3128,29 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         facts['schedules.formPresets'] = await (async () => {
           // 预设交互（v8 定型）：每周 → 工作日快捷 + 7 天；快捷点亮后 cron 行出 1-5；
           // 每月 → 下拉含「最后一天（L）」；自定义 → cron 输入框出现；回每天恢复。
-          const freqBtns = [...d().querySelectorAll('.schedules-main .freq-picker button')]
+          const freqBtns = [...d().querySelectorAll('.detail-pane .freq-picker button')]
           const byText = (t) => freqBtns.find((b) => text(b) === t)
           const clickByText = (t) => { const b = byText(t); if (!b) return false; click(b); return true }
-          const cronText = () => d().querySelector('.schedules-main .schedule-result code')?.textContent ?? ''
+          const cronText = () => d().querySelector('.detail-pane .schedule-result code')?.textContent ?? ''
 
           if (!clickByText('每周')) { errors.push('预设键「每周」找不到'); return false }
           await wait(60)
-          const dayBtns = d().querySelectorAll('.schedules-main .weekday-btn').length
-          const quick = !!d().querySelector('.schedules-main .quick-weekdays')
+          const dayBtns = d().querySelectorAll('.detail-pane .weekday-btn').length
+          const quick = !!d().querySelector('.detail-pane .quick-weekdays')
           if (dayBtns !== 7 || !quick) {
             errors.push(`每周视图不对：星期键 ${dayBtns}/7、工作日快捷 ${quick}`)
             return false
           }
           // 2026-11 v8：星期按钮曾是 1.9rem 圆形，「周一」两个字出框（使用者抓到）——
           // 量每个按钮有没有文字溢出（scrollWidth > clientWidth 就是溢出）
-          const overflowDays = [...d().querySelectorAll('.schedules-main .weekday-btn')].filter(
+          const overflowDays = [...d().querySelectorAll('.detail-pane .weekday-btn')].filter(
             (b) => b.scrollWidth > b.clientWidth,
           )
           if (overflowDays.length > 0) {
             errors.push(`星期按钮文字出框：${overflowDays.length} 个（scrollWidth > clientWidth）`)
             return false
           }
-          const quickBtn = d().querySelector('.schedules-main .quick-weekdays')
+          const quickBtn = d().querySelector('.detail-pane .quick-weekdays')
           click(quickBtn)
           await wait(60)
           const quickActive = quickBtn.classList.contains('active')
@@ -3162,7 +3162,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
 
           if (!clickByText('每月')) { errors.push('预设键「每月」找不到'); return false }
           await wait(60)
-          const lastDayOption = [...d().querySelectorAll('.schedules-main select option')].some(
+          const lastDayOption = [...d().querySelectorAll('.detail-pane select option')].some(
             (o) => o.value === 'L',
           )
           if (!lastDayOption) {
@@ -3172,7 +3172,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
 
           if (!clickByText('自定义')) { errors.push('预设键「自定义」找不到'); return false }
           await wait(60)
-          const customInput = !!d().querySelector('.schedules-main .custom-cron input')
+          const customInput = !!d().querySelector('.detail-pane .custom-cron input')
           if (!customInput) {
             errors.push('自定义视图缺 cron 输入框')
             return false
@@ -3185,7 +3185,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           //   than maximum value of part (60)"。选间隔→240→结果区无 bad + cron 对
           if (!clickByText('间隔')) { errors.push('预设键「间隔」找不到'); return false }
           await wait(60)
-          const mins = d().querySelector('.schedules-main .schedule-line select')
+          const mins = d().querySelector('.detail-pane .schedule-line select')
           if (!mins) {
             errors.push('间隔视图缺分钟下拉')
             return false
@@ -3193,7 +3193,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           mins.value = '240'
           mins.dispatchEvent(new Event('change', { bubbles: true }))
           await wait(500) // preview 是 300ms debounce + 网络，等它跑完
-          const badRow = d().querySelector('.schedules-main .schedule-result-row .bad')
+          const badRow = d().querySelector('.detail-pane .schedule-result-row .bad')
           if (badRow) {
             errors.push(`间隔 240 的 preview 报错：${text(badRow)}`)
             return false
@@ -3208,7 +3208,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           // 注意 .source-toggle 有两条轨道（交给谁 + 启动方式），只取含三档文案的
           // 那条，且顺序必须 ①②③（②③换过序，防回归）。
           const resumeBtnTexts = [
-            ...d().querySelectorAll('.schedules-main .source-toggle button'),
+            ...d().querySelectorAll('.detail-pane .source-toggle button'),
           ]
             .map((b) => text(b))
             .filter((t) => ['新启动', '新启动 · 原目录', '接续 · 原目录'].includes(t))
@@ -3217,7 +3217,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             errors.push(`启动方式三档不对（应 ${expectOrder.join(' / ')}）：${JSON.stringify(resumeBtnTexts)}`)
             return false
           }
-          const advSummary = [...d().querySelectorAll('.schedules-main summary')].find(
+          const advSummary = [...d().querySelectorAll('.detail-pane summary')].find(
             (b) => text(b) === '高级选项',
           )
           if (!advSummary) {
@@ -3226,8 +3226,8 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           }
           click(advSummary)
           await wait(60)
-          const wdInput = d().querySelector('.schedules-main #sched-workdir')
-          const browse = d().querySelector('.schedules-main [data-sched-workdir-browse]')
+          const wdInput = d().querySelector('.detail-pane #sched-workdir')
+          const browse = d().querySelector('.detail-pane [data-sched-workdir-browse]')
           if (!wdInput || !browse) {
             errors.push(`高级区展开后缺工作目录控件：input ${!!wdInput}、浏览 ${!!browse}`)
             return false
@@ -3260,13 +3260,13 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         // ⚠️ 放表单开着时（cancelCloses 前）；formPresets 把 freq 留在 custom，
         //    这里自己点「每月」「间隔」。
         facts['schedules.scheduleLineOneRow'] = await (async () => {
-          const monthlyBtn = [...d().querySelectorAll('.schedules-main .freq-picker button')].find(
+          const monthlyBtn = [...d().querySelectorAll('.detail-pane .freq-picker button')].find(
             (b) => text(b) === '每月',
           )
           if (!monthlyBtn) return false
           click(monthlyBtn)
-          await until(() => !!d().querySelector('.schedules-main .schedule-line select'))
-          const everyMonth = [...d().querySelectorAll('.schedules-main .schedule-line span')].find(
+          await until(() => !!d().querySelector('.detail-pane .schedule-line select'))
+          const everyMonth = [...d().querySelectorAll('.detail-pane .schedule-line span')].find(
             (l) => text(l) === '每月',
           )
           // ⚠️ 别量元素 top：span 与 select 垂直居中（align-items:center），一行时
@@ -3274,16 +3274,16 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           //    就 ~60px+，阈值 48 分得开。
           const monthLine = everyMonth?.closest('.schedule-line')
           const row1 = !!monthLine && monthLine.getBoundingClientRect().height < 48
-          const intervalBtn = [...d().querySelectorAll('.schedules-main .freq-picker button')].find(
+          const intervalBtn = [...d().querySelectorAll('.detail-pane .freq-picker button')].find(
             (b) => text(b) === '间隔',
           )
           if (!intervalBtn) return row1
           click(intervalBtn)
-          await until(() => !!d().querySelector('.schedules-main .schedule-line select'))
-          const every = [...d().querySelectorAll('.schedules-main .schedule-line span')].find(
+          await until(() => !!d().querySelector('.detail-pane .schedule-line select'))
+          const every = [...d().querySelectorAll('.detail-pane .schedule-line span')].find(
             (l) => text(l) === '每',
           )
-          const minuteSpan = [...d().querySelectorAll('.schedules-main .schedule-line span')].find(
+          const minuteSpan = [...d().querySelectorAll('.detail-pane .schedule-line span')].find(
             (l) => text(l) === '分钟',
           )
           const intervalLine = every?.closest('.schedule-line')
@@ -3296,7 +3296,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         })()
 
         facts['schedules.cancelCloses'] = await (async () => {
-          const cancel = [...d().querySelectorAll('.schedules-main button')].find(
+          const cancel = [...d().querySelectorAll('.detail-pane button')].find(
             (b) => text(b) === '取消',
           )
           if (!cancel) {
@@ -3304,8 +3304,8 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             return false
           }
           click(cancel)
-          await until(() => !d().querySelector('.schedules-main .detail-actions'))
-          return !d().querySelector('.schedules-main .detail-actions')
+          await until(() => !d().querySelector('.detail-pane .detail-actions'))
+          return !d().querySelector('.detail-pane .detail-actions')
         })()
 
         // 2026-11（使用者报"没点取消切到其他页面，切回来新建任务消失了"）：
@@ -3317,13 +3317,13 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             return false
           }
           click(newBtn)
-          await until(() => !!d().querySelector('.schedules-main .detail-actions'))
+          await until(() => !!d().querySelector('.detail-pane .detail-actions'))
           f.contentWindow.location.hash = '#/chat'
-          await until(() => !d().querySelector('.schedules-main'))
+          await until(() => !d().querySelector('.detail-pane'))
           f.contentWindow.location.hash = '#/schedules'
-          await until(() => !!d().querySelector('.schedules-main .detail-actions'))
-          const still = !!d().querySelector('.schedules-main .detail-actions')
-          const save = [...d().querySelectorAll('.schedules-main .detail-actions button')].find(
+          await until(() => !!d().querySelector('.detail-pane .detail-actions'))
+          const still = !!d().querySelector('.detail-pane .detail-actions')
+          const save = [...d().querySelectorAll('.detail-pane .detail-actions button')].find(
             (b) => text(b) === '保存',
           )
           if (!still || !save) {
@@ -3331,9 +3331,9 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             return false
           }
           // 收尾：取消关掉（别影响后续判据）
-          const cancel = [...d().querySelectorAll('.schedules-main button')].find((b) => text(b) === '取消')
+          const cancel = [...d().querySelectorAll('.detail-pane button')].find((b) => text(b) === '取消')
           if (cancel) click(cancel)
-          await until(() => !d().querySelector('.schedules-main .detail-actions'))
+          await until(() => !d().querySelector('.detail-pane .detail-actions'))
           return true
         })()
 
@@ -3348,20 +3348,20 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             return false
           }
           click(openBtn)
-          await until(() => !!d().querySelector('.schedules-main .detail-actions'))
+          await until(() => !!d().querySelector('.detail-pane .detail-actions'))
           const pv = (el, v) => {
             el.value = v
             el.dispatchEvent(new Event('input', { bubbles: true }))
           }
-          const expand = d().querySelector('.schedules-main .prompt-expand')
+          const expand = d().querySelector('.detail-pane .prompt-expand')
           if (!expand) {
             errors.push('promptEditor：表单里没有「⛶ 展开」按钮')
             return false
           }
           click(expand)
-          await until(() => !!d().querySelector('.schedules-main .pe-panel'), 40)
-          const chips = d().querySelectorAll('.schedules-main .pe-var-chip').length
-          const bigTa = d().querySelector('.schedules-main .pe-textarea')
+          await until(() => !!d().querySelector('.detail-pane .pe-panel'), 40)
+          const chips = d().querySelectorAll('.detail-pane .pe-var-chip').length
+          const bigTa = d().querySelector('.detail-pane .pe-textarea')
           if (chips !== 6 || !bigTa) {
             errors.push(`promptEditor：弹层缺变量 chips（${chips}/6）或 textarea`)
             return false
@@ -3369,26 +3369,26 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           const before = bigTa.value
           // 取消：改了不生效（快照语义）
           pv(bigTa, before + '\n不该有的草稿')
-          click(d().querySelector('.schedules-main .pe-actions .btn--ghost'))
-          await until(() => !d().querySelector('.schedules-main .pe-panel'), 40)
-          const afterCancel = d().querySelector('.schedules-main .field-prompt textarea').value
+          click(d().querySelector('.detail-pane .pe-actions .btn--ghost'))
+          await until(() => !d().querySelector('.detail-pane .pe-panel'), 40)
+          const afterCancel = d().querySelector('.detail-pane .field-prompt textarea').value
           if (afterCancel !== before) {
             errors.push(`promptEditor：取消后原值变了：${afterCancel} vs ${before}`)
             return false
           }
           // 保存：改动生效 + 变量插入
           click(expand)
-          await until(() => !!d().querySelector('.schedules-main .pe-panel'), 40)
-          const ta2 = d().querySelector('.schedules-main .pe-textarea')
+          await until(() => !!d().querySelector('.detail-pane .pe-panel'), 40)
+          const ta2 = d().querySelector('.detail-pane .pe-textarea')
           pv(ta2, before + '\n正式草稿')
-          click(d().querySelectorAll('.schedules-main .pe-var-chip')[0])
+          click(d().querySelectorAll('.detail-pane .pe-var-chip')[0])
           // ⚠️ Svelte 5 的 DOM 更新在微任务 flush——点完 chip 立即读 value 拿到的是
           //   旧值（踩过：插入后 "\n正式草稿" 没有 {{date}}）。等一拍再读。
           await wait(150)
-          const withVar = d().querySelector('.schedules-main .pe-textarea').value
-          click(d().querySelector('.schedules-main .pe-actions .btn--primary'))
-          await until(() => !d().querySelector('.schedules-main .pe-panel'), 40)
-          const afterSave = d().querySelector('.schedules-main .field-prompt textarea').value
+          const withVar = d().querySelector('.detail-pane .pe-textarea').value
+          click(d().querySelector('.detail-pane .pe-actions .btn--primary'))
+          await until(() => !d().querySelector('.detail-pane .pe-panel'), 40)
+          const afterSave = d().querySelector('.detail-pane .field-prompt textarea').value
           if (!afterSave.includes(before + '\n正式草稿') || !withVar.includes('{{date}}')) {
             errors.push(`promptEditor：保存/插入不对：before=${JSON.stringify(before)}、保存后 ${JSON.stringify(afterSave)}、插入后 ${JSON.stringify(withVar)}`)
             return false
@@ -3396,10 +3396,10 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           // ★ 2026-11（使用者："刚编辑完，点开，里面是空的，重新打开又是好的"）：
           //   保存后**立刻**重开弹层，内容必须在（第一次打开空 = 快照没落上）
           click(expand)
-          await until(() => !!d().querySelector('.schedules-main .pe-panel'), 40)
-          const reopenValue = d().querySelector('.schedules-main .pe-textarea').value
-          click(d().querySelector('.schedules-main .pe-actions .btn--ghost'))
-          await until(() => !d().querySelector('.schedules-main .pe-panel'), 40)
+          await until(() => !!d().querySelector('.detail-pane .pe-panel'), 40)
+          const reopenValue = d().querySelector('.detail-pane .pe-textarea').value
+          click(d().querySelector('.detail-pane .pe-actions .btn--ghost'))
+          await until(() => !d().querySelector('.detail-pane .pe-panel'), 40)
           if (reopenValue !== afterSave) {
             errors.push(`promptEditor：保存后重开为空：重开 ${JSON.stringify(reopenValue)} vs 保存后 ${JSON.stringify(afterSave)}`)
             return false
@@ -3431,9 +3431,9 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           if (res.status !== 201) return false
           const created = await res.json()
           f.contentWindow.location.hash = '#/chat'
-          await until(() => !d().querySelector('.schedules-main'))
+          await until(() => !d().querySelector('.detail-pane'))
           f.contentWindow.location.hash = '#/schedules'
-          await until(() => !!d().querySelector('.schedules-main'))
+          await until(() => !!d().querySelector('.detail-pane'))
           await untilNet(
             () => [...d().querySelectorAll('.sched-row')].some((r) => text(r).includes(longName)),
             60,
@@ -3482,18 +3482,18 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             return false
           }
           click(newBtn2)
-          await until(() => !!d().querySelector('.schedules-main .detail-actions'))
+          await until(() => !!d().querySelector('.detail-pane .detail-actions'))
           const createTriggerBtn = [
-            ...d().querySelectorAll('.schedules-main .detail-actions button'),
+            ...d().querySelectorAll('.detail-pane .detail-actions button'),
           ].find((b) => text(b) === '保存并立即触发')
           if (!createTriggerBtn) {
             errors.push('editHasTrigger：新建表单缺「保存并立即触发」按钮')
             return false
           }
           // 关掉新建表单再走编辑路径
-          const cancel0 = [...d().querySelectorAll('.schedules-main button')].find((b) => text(b) === '取消')
+          const cancel0 = [...d().querySelectorAll('.detail-pane button')].find((b) => text(b) === '取消')
           if (cancel0) click(cancel0)
-          await until(() => !d().querySelector('.schedules-main .detail-actions'))
+          await until(() => !d().querySelector('.detail-pane .detail-actions'))
           const res = await f.contentWindow.fetch('/api/schedules', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -3513,9 +3513,9 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           // hash 已在 '#/schedules' 时直接切回不会重挂载/重拉列表（探针踩过）——
           // 先切走再切回，强制重挂载 + load()
           f.contentWindow.location.hash = '#/chat'
-          await until(() => !d().querySelector('.schedules-main'))
+          await until(() => !d().querySelector('.detail-pane'))
           f.contentWindow.location.hash = '#/schedules'
-          await until(() => !!d().querySelector('.schedules-main'))
+          await until(() => !!d().querySelector('.detail-pane'))
           await untilNet(
             () => [...d().querySelectorAll('.sched-row')].some((r) => text(r).includes('探针编辑测试')),
             60,
@@ -3523,8 +3523,8 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           const row = [...d().querySelectorAll('.sched-row')].find((r) => text(r).includes('探针编辑测试'))
           // ListRow 的 onclick 绑在 `.list-row-main`（整行按钮），点 li 根不触发
           if (row) click(row.querySelector('.list-row-main'))
-          await until(() => !!d().querySelector('.schedules-main .detail-actions'), 60)
-          const editBtn = [...d().querySelectorAll('.schedules-main .detail-actions button')].find(
+          await until(() => !!d().querySelector('.detail-pane .detail-actions'), 60)
+          const editBtn = [...d().querySelectorAll('.detail-pane .detail-actions button')].find(
             (b) => text(b) === '编辑',
           )
           if (!editBtn) {
@@ -3533,20 +3533,71 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             return false
           }
           click(editBtn)
-          await until(() => !!d().querySelector('.schedules-main .detail-actions'))
-          const triggerBtn = [...d().querySelectorAll('.schedules-main .detail-actions button')].find(
+          await until(() => !!d().querySelector('.detail-pane .detail-actions'))
+          const triggerBtn = [...d().querySelectorAll('.detail-pane .detail-actions button')].find(
             (b) => text(b) === '保存并立即触发',
           )
           // 清理：取消表单 + 删除造的条目
-          const cancel = [...d().querySelectorAll('.schedules-main button')].find((b) => text(b) === '取消')
+          const cancel = [...d().querySelectorAll('.detail-pane button')].find((b) => text(b) === '取消')
           if (cancel) click(cancel)
-          await until(() => !d().querySelector('.schedules-main .detail-actions'))
+          await until(() => !d().querySelector('.detail-pane .detail-actions'))
           await f.contentWindow.fetch(`/api/schedules/${created.id}`, { method: 'DELETE' })
           if (!triggerBtn) {
             errors.push('editHasTrigger：编辑表单缺「保存并立即触发」按钮')
             return false
           }
           return true
+        })()
+
+        /*
+         * ══════════════ 定时任务：窄屏两态 + 空态不说假话（D138）══════════════
+         *
+         * 这一页原来是**手搭右栏**、`.split-layout` 上 `with-detail` 恒写、全页没有
+         * `.back-to-list` ⇒ 窄屏（≤72rem）一进来列表被 CSS 藏掉、右栏又给不出回去的路；
+         * 而且没选中任何一条时右栏写"还没有定时任务"——左栏明明列着（假话）。
+         * 现在走标准控件 `MainArea`，这两条各量一次。
+         */
+        facts['schedules.narrow'] = await (async () => {
+          f.contentWindow.location.hash = '#/schedules'
+          await until(() => !!d().querySelector('.split-layout .list-pane'), 60)
+          await wait(300)
+          const cs = (sel) => {
+            const el = d().querySelector(sel)
+            return el === null ? null : getComputedStyle(el).display
+          }
+          f.style.width = '800px'
+          await wait(400)
+          // 没选中时：列表必须在（with-detail 不能有）
+          const noSel = {
+            withDetail: (d().querySelector('.split-layout')?.className ?? '').includes('with-detail'),
+            左栏: cs('.list-pane'),
+            右栏: cs('.detail-pane'),
+          }
+          // 选中一条之后：右栏可见、有「← 返回列表」，点它回列表
+          const row = d().querySelector('.list-pane .sched-row .list-row-main') ?? d().querySelector('.list-pane .list-row-main')
+          if (row) click(row)
+          const selected = await until(
+            () => (d().querySelector('.split-layout')?.className ?? '').includes('with-detail'),
+            60,
+          )
+          const back = d().querySelector('.detail-pane .back-to-list')
+          const selectedState = {
+            选中后withDetail: selected,
+            右栏: cs('.detail-pane'),
+            返回可见: back === null ? null : getComputedStyle(back).display !== 'none',
+          }
+          if (back) click(back)
+          const backHome = await until(() => !(d().querySelector('.split-layout')?.className ?? '').includes('with-detail'), 60)
+          f.style.width = ''
+          await wait(300)
+          return { 未选中态: noSel, 选中态: selectedState, 点返回回列表: backHome }
+        })()
+
+        facts['schedules.pickEmpty'] = await (async () => {
+          // 空态说的必须是「选一条」，不是「还没有定时任务」（后者在有数据时是假话）
+          const empty = d().querySelector('.detail-pane .empty strong')
+          const t = empty ? (text(empty) ?? '').trim() : null
+          return { 文案: t, 说选一条: !!t && t.includes('选一条'), 说没有: !!t && t.includes('还没有') }
         })()
 
         // ── 编排（2026-11 立项；2026-11 D133 按「页面基本规范」重排之后重量）──
@@ -10306,7 +10357,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         {
           const sk = {
             headH: {}, searchInHead: {}, rowH: {}, delInset: {}, titleInHead: {},
-            title: {}, chip: {}, rowBox: {}, hover: {}, listBox: {}, rowMetrics: {},
+            title: {}, chip: {}, rowBox: {}, hover: {}, listBox: {}, rowMetrics: {}, sub: {},
           }
           /**
            * ★ 2026-11（D136）：采样页从 **3 页扩到 5 页**——加了定时任务与编排。
@@ -10322,8 +10373,12 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             { key: 'chat', hash: '#/chat', rows: '.conv-row', titleSel: '.conv-title', chipSel: null },
             { key: 'tasks', hash: '#/tasks', rows: '.task-row', titleSel: '.task-title', chipSel: '.stage-tag' },
             { key: 'agents', hash: '#/agents', rows: '.agent-row', titleSel: '.agent-line strong', chipSel: '.badge' },
-            { key: 'schedules', hash: '#/schedules', rows: '.sched-row', titleSel: '.sched-title', chipSel: null },
-            { key: 'workflows', hash: '#/workflows', rows: '.wf-row', titleSel: '.wf-title', chipSel: '.badge' },
+            { key: 'schedules', hash: '#/schedules', rows: '.sched-row', titleSel: '.sched-title', chipSel: null, subSel: '.sched-sub' },
+            { key: 'workflows', hash: '#/workflows', rows: '.wf-row', titleSel: '.wf-title', chipSel: '.badge', subSel: '.wf-sub' },
+            // ★ 2026-11（D138）：「沉淀」也是列表页（ListPane + ListRow），原来**不在采样表里**
+            //   ——它的行内容与另外五页不一致（标题字重 400、辅助信息大一号且字色更深）就是
+            //   这么漏掉的。凡是"左列表右详情"的页面都必须在这张表里，否则它只有自证。
+            { key: 'crystallize', hash: '#/crystallize', rows: '.crystal-row', titleSel: '.crystal-title', chipSel: '.badge', subSel: '.crystal-meta' },
           ]
           /*
            * ⚠️ 骨架/行内细节对比要求**每页都有行**。定时任务那一段的夹具是"量完就删"的，
@@ -10450,6 +10505,21 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
                 return b ? getComputedStyle(b).borderRadius : null
               })
             }
+            /*
+             * ★ 2026-11（D138）：**辅助信息那一行的字号与字色**。
+             *   沉淀页原来这里比别的页大一号（`--fs-sm`）且没写字色（继承 `--text`）——
+             *   而"标题字号/字重"那条量不到它。只在**容器自己声明**了这两项的三页量
+             *   （定时任务 / 编排 / 沉淀）；另外三页把 `faint fs-xs` 写在元素或子元素上，
+             *   容器级读数是继承值，不比。
+             */
+            if (pg.subSel) {
+              sk.sub[pg.key] = need(`辅助行（${pg.key}）`, () => {
+                const el = first?.querySelector(pg.subSel)
+                if (!el) return null
+                const c = getComputedStyle(el)
+                return { fs: Math.round(parseFloat(c.fontSize) * 10) / 10, color: c.color }
+              })
+            }
             sk.rowBox[pg.key] = need(`行容器（${pg.key}）`, () => {
               const c = first ? getComputedStyle(first) : null
               return c ? { align: c.alignItems, gap: c.gap } : null
@@ -10531,6 +10601,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             'skeleton.separatorHeights': sk.separatorHeights,
             'skeleton.separatorNoHint': sk.separatorNoHint,
             'skeleton.listBox': sk.listBox,
+            'skeleton.subRow': sk.sub,
             'rowdetail.title': sk.title,
             'rowdetail.chip': sk.chip,
             'rowdetail.rowBox': sk.rowBox,

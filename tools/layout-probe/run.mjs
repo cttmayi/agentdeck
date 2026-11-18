@@ -140,7 +140,7 @@ const CHAIN_EXECUTOR = '探针用的三步链执行者'
  * 所以：`LIST_PAGES` 是**要求一致的页**（栏头 / 行高 / 行内标题 / 行盒 / hover /
  * 行容器）。**新增一个列表页就往这里加一行**，否则它就是在自证。
  */
-const LIST_PAGES = ['chat', 'tasks', 'agents', 'schedules', 'workflows']
+const LIST_PAGES = ['chat', 'tasks', 'agents', 'schedules', 'workflows', 'crystallize']
 
 const CHECKS = [
   // ══════════════════════════════════════════════════════════════════
@@ -1738,6 +1738,32 @@ const CHECKS = [
   { view: '定时任务（D115）', key: 'schedules.cancelCloses',
     label: '★ 点「取消」表单消失、回到空态',
     ok: (v) => v === true },
+  {
+    view: '定时任务（D115）',
+    key: 'schedules.narrow',
+    label:
+      '★★★ 窄屏两态都对：**没选中时**列表必须在（`.with-detail` 不能恒写——改之前一进这一页'
+      + '列表被藏、右栏又给不出回去的路）；**选中后**右栏可见且「← 返回列表」可点、'
+      + '点了回列表',
+    ok: (v) =>
+      !!v &&
+      v['未选中态']['withDetail'] === false &&
+      v['未选中态']['左栏'] !== 'none' &&
+      v['选中态']['选中后withDetail'] === true &&
+      v['选中态']['右栏'] !== 'none' &&
+      v['选中态']['返回可见'] === true &&
+      v['点返回回列表'] === true,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '定时任务（D115）',
+    key: 'schedules.pickEmpty',
+    label:
+      '★★ 右栏空态说的是「选一条定时任务」，**不是**「还没有定时任务」——'
+      + '后者在有数据的页面上是假话（左栏明明列着）',
+    ok: (v) => !!v && v['说选一条'] === true && v['说没有'] === false,
+    show: (v) => JSON.stringify(v),
+  },
   // ── 编排：按「页面基本规范」重量（2026-11，D133）──
   //
   // ⚠️ 这一页原来只有三条判据（右栏宽度 / 空态 / 新建能开），而它**自己一套**：
@@ -3685,6 +3711,27 @@ const CHECKS = [
           return x
             ? `${k}: 高${x.h}/字号${x.fs}/字重${x.nameWeight}/chev${x.hasChevron ? x.glyph : '无'}/计数贴右${x.countRight}/线(1st${x.sepFirst},2nd${x.sepSecond})`
             : `${k}: 没量到`
+        })
+        .join('　'),
+  },
+  {
+    view: '列表栏骨架（D61）',
+    key: 'skeleton.subRow',
+    label:
+      '★★ 行的第二行（辅助信息）在**声明了它的三页**（定时任务 / 编排 / 沉淀）同字号同字色：'
+      + '沉淀页原来大一号（`--fs-sm`）且没写字色（继承 `--text`），与另外五页不一致',
+    ok: (v) => {
+      const a = v?.schedules
+      const b = v?.workflows
+      const c = v?.crystallize
+      if (!a || !b || !c) return false
+      return a.fs === 12 && b.fs === 12 && c.fs === 12 && a.color === b.color && b.color === c.color
+    },
+    show: (v) =>
+      ['schedules', 'workflows', 'crystallize']
+        .map((k) => {
+          const x = v?.[k]
+          return x ? `${k}: ${x.fs}/${x.color}` : `${k}: 没量到`
         })
         .join('　'),
   },

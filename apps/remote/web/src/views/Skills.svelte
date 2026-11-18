@@ -372,14 +372,14 @@
       <p class="warn fs-xs">{detail!.needs}</p>
     {/if}
     <h3>{$t('remote.detailFiles')}</h3>
-    <ul class="faint fs-xs">
+    <ul class="plain faint fs-xs">
       {#each Object.keys(detail!.files).sort() as path (path)}
         <li><code>{path}</code></li>
       {/each}
     </ul>
     {#if detail!.excluded.length > 0}
       <h3>{$t('remote.detailExcluded')}</h3>
-      <ul class="warn fs-xs">
+      <ul class="plain warn fs-xs">
         {#each detail!.excluded as path (path)}
           <li><code>{path}</code></li>
         {/each}
