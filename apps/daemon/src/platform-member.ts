@@ -37,6 +37,7 @@
 import type { Agent, WorkspaceId } from '@agentdeck/protocol'
 import type { Store } from '@agentdeck/domain'
 import type { BuiltinKind } from './builtin-drafter.ts'
+import { PLATFORM_ACTION_IDS, actionEntriesFor } from './platform-actions.ts'
 
 /* ══════════════════════════════════════════════════════════════════
  * 值域
@@ -51,20 +52,15 @@ import type { BuiltinKind } from './builtin-drafter.ts'
  */
 export type MemberEntry = 'chat' | 'task' | 'workflow' | `action:${string}`
 
-/** 与动作注册表一一对应的 action id（封闭值域）。 */
-export const MEMBER_ACTION_IDS = [
-  /** 沉淀起草（run 的 subject.type 就是它）。 */
-  'skill-draft',
-  /** 「整理成记忆」那条分析 run。 */
-  'memory-tidy',
-  /** 智能体生成者写岗位卡的那条 run。 */
-  'agent-draft',
-  /** 「确认生成智能体」（采纳）。 */
-  'agent-commit',
-  /** 「确认采纳编排」（采纳）。 */
-  'workflow-commit',
-] as const
-export type MemberActionId = (typeof MEMBER_ACTION_IDS)[number]
+/**
+ * 与动作注册表一一对应的 action id（封闭值域）。
+ *
+ * ★ 2026-11（D148）：**派生自 `PLATFORM_ACTIONS`**，不再手写一份。原来是两处各写
+ *   一份（这里一份、`PLATFORM_MEMBER_ENTRIES` 里的 `action:` 一份），加一个动作时
+ *   漏改一处不会报错——症状是"成员有这条动作，却谁也不许调它"。
+ */
+export const MEMBER_ACTION_IDS: readonly string[] = PLATFORM_ACTION_IDS
+export type MemberActionId = (typeof PLATFORM_ACTION_IDS)[number]
 
 /** 三个"非动作"接入点。 */
 export const MEMBER_PLAIN_ENTRIES = ['chat', 'task', 'workflow'] as const
@@ -156,17 +152,46 @@ export function parseUserEntries(
  * ⚠️ 平台成员**默认不给 `task` / `workflow`**（2026-11 拍板）：起草者被派活会按
  *    "你是 skill 作者"的指令跑偏；被编排引用同理。
  */
-export const PLATFORM_MEMBER_ENTRIES: Record<BuiltinKind, readonly MemberEntry[]> = {
-  drafter: ['action:skill-draft'],
-  'memory-tidy': ['action:memory-tidy'],
-  'agent-maker': ['chat', 'action:agent-draft', 'action:agent-commit'],
-  'workflow-maker': ['chat', 'action:workflow-commit'],
+/**
+ * 每个平台成员的**非动作**接入点（`chat`；`task` / `workflow` 一个都不给）。
+ *
+ * `action:` 那几条**不在这里**——它们由 `actionEntriesFor()` 从动作注册表派生，
+ * 见 `PLATFORM_MEMBER_ENTRIES` 下面那句。
+ */
+export const PLATFORM_MEMBER_PLAIN_ENTRIES: Record<BuiltinKind, readonly MemberEntry[]> = {
+  drafter: [],
+  'memory-tidy': [],
+  // 两个生成者要能在聊天里起草，所以有 chat；起草者与整理者各走各的页面按钮。
+  'agent-maker': ['chat'],
+  'workflow-maker': ['chat'],
   /*
    * 已下线（沉淀线的评审整条退场）：**没有任何接入点**——谁也进不去。
    * 它的归属见 `ownerOf()`：这一类按 `user` 处理（可删、可改），因为默认身份已经删了、
    * 没有任何链路在用它，把它当"用户的旧记录"最省事（删除路由今天也正好放行它）。
    */
   'skill-reviewer': [],
+}
+
+function memberEntries(kind: BuiltinKind): readonly MemberEntry[] {
+  return [...PLATFORM_MEMBER_PLAIN_ENTRIES[kind], ...actionEntriesFor(kind)]
+}
+
+/**
+ * 四条出厂成员各自"谁能叫它"——**派生出的结果**（普通入口 + 注册表里的动作）。
+ *
+ * ⚠️ 新增一条平台成员 = 注册表里加一行动作（若它有动作）+ 上面那张普通入口表加一行；
+ *    别的地方（对账、迁移、判据、日志）都从这里读——上一轮的教训是"启动对账日志"
+ *    这个清单漏过一次（D144）。
+ *
+ * ⚠️ 平台成员**默认不给 `task` / `workflow`**（2026-11 拍板）：起草者被派活会按
+ *    "你是 skill 作者"的指令跑偏；被编排引用同理。
+ */
+export const PLATFORM_MEMBER_ENTRIES: Record<BuiltinKind, readonly MemberEntry[]> = {
+  drafter: memberEntries('drafter'),
+  'memory-tidy': memberEntries('memory-tidy'),
+  'agent-maker': memberEntries('agent-maker'),
+  'workflow-maker': memberEntries('workflow-maker'),
+  'skill-reviewer': memberEntries('skill-reviewer'),
 }
 
 /* ══════════════════════════════════════════════════════════════════

@@ -104,6 +104,7 @@ import {
   migratePlatformSkillsToExclusive,
 } from './agent-maker-skills.ts'
 import { ensureBuiltinWorkflowMakerSkills } from './workflow-maker-skills.ts'
+import { MEMORY_EXISTING_MEMORY_FILE, MEMORY_TRANSCRIPT_FILE } from './platform-actions.ts'
 import {
   canBeDispatched,
   canBeReferencedByWorkflow,
@@ -4751,7 +4752,7 @@ async function injectedSkillsOf(
         return
       }
       await mkdir(dir, { recursive: true })
-      await writeFile(join(dir, 'existing-memory.md'), renderExistingMemory(existing), 'utf8')
+      await writeFile(join(dir, MEMORY_EXISTING_MEMORY_FILE), renderExistingMemory(existing), 'utf8')
       const newRunId = ulid() as RunId
       const outcome = await executor.submit({
         runId: newRunId,
@@ -8604,7 +8605,7 @@ async function injectedSkillsOf(
         turns: tidyTurns,
       })
       await mkdir(tidyDir, { recursive: true })
-      await writeFile(join(tidyDir, 'transcript.md'), transcript.text, 'utf8')
+      await writeFile(join(tidyDir, MEMORY_TRANSCRIPT_FILE), transcript.text, 'utf8')
       /**
        * ★ 分批第 251 批：**把"它已经记住的"也交给分析 run**。
        *
@@ -8614,7 +8615,7 @@ async function injectedSkillsOf(
        * 的那一对重合），所以语义判断只能交给它——而它得先知道有什么。
        */
       await writeFile(
-        join(tidyDir, 'existing-memory.md'),
+        join(tidyDir, MEMORY_EXISTING_MEMORY_FILE),
         renderExistingMemory(await listActiveMemory(store, workspaceId, agent.id)),
         'utf8',
       )
