@@ -328,9 +328,11 @@
           }
           const builtinCollapsed = builtinHead.getAttribute('aria-expanded') === 'false'
           const ownExpanded = ownHead.getAttribute('aria-expanded') === 'true'
-          // 内置那组收着 ⇒ 列表里不该出现任何「内置」行（内置 agent 的名字里带「（内置）」）
+          // 内置那组收着 ⇒ 列表里不该出现任何平台成员行（判据是 DOM 上的 `data-slot`：
+          // ★ 2026-11（D161）名字里的「（内置）」后缀去掉了，而名字是使用者能改的、槽位不是）
           const rowsNow = rowsOf()
-          const builtinRowsHidden = !rowsNow.some((t) => t.includes('（内置）'))
+          const isPlatformRow = (row) => (row.getAttribute('data-slot') ?? 'user') !== 'user'
+          const builtinRowsHidden = ![...d().querySelectorAll('.list-pane .list-row')].some(isPlatformRow)
           const ownRowsVisible = rowsNow.length > 0
           // 点一下展开
           click(builtinHead)
@@ -339,7 +341,7 @@
             40,
           )
           const rowsAfterExpand = rowsOf()
-          const builtinRowsShown = rowsAfterExpand.some((t) => t.includes('（内置）'))
+          const builtinRowsShown = [...d().querySelectorAll('.list-pane .list-row')].some(isPlatformRow)
           /**
            * 再点一次收回 —— 验证"能收"。
            * ⚠️ 但**最后要留在展开态**：这一节后面还有三条判据要量内置那两行
@@ -483,10 +485,13 @@
          * ★ 分批第 273 批：**只点自建那一条**，不要点"全表第一条"。
          *   内置 agent 现在整份只读（没有角色二选一、CLI/指令锁着、保存那栏换成「恢复成默认值」），
          *   而上面 `listGroups` **故意把内置那组留在展开态**（要量那两行的徽标）⇒ 全表第一条
-         *   是「起草者（内置）」。点它的话，下面一整串"卡片里真的能改"的判据会全红——
+         *   是「起草者」。点它的话，下面一整串"卡片里真的能改"的判据会全红——
          *   那是判据选错了人，不是界面坏了。
          */
-        const firstOwn = cards().find((c) => !(text(c) ?? '').includes('（内置）'))
+        // ★ 2026-11（D161）：自建 = `data-slot="user"`（名字不再带后缀）
+        const firstOwn = cards().find(
+          (c) => (c.closest('.list-row')?.getAttribute('data-slot') ?? 'user') === 'user',
+        )
         facts['agents.firstCardIsOwn'] = !!firstOwn
         click(firstOwn ?? cards()[0])
         const entered = await until(() => layout()?.className.includes('with-detail'))
@@ -802,11 +807,13 @@
               )
               if (refreshBtn) click(refreshBtn)
               await untilNet(() => !!d().querySelector('.card.agent-card'), 60)
-              await selectAgentByName('助手')
-              await selectAgentByName('起草者（内置）')
+              // ★ 2026-11（D161）：这里原来选「助手」当"自建 agent"的样本——它现在是**平台成员**
+              //   （只读），所以换成本探针自己造的自建夹具（`短名`，见 run.mjs 的长名字夹具）。
+              await selectAgentByName('短名')
+              await selectAgentByName('起草者')
             }
           }
-          const picked = await selectAgentByName('起草者（内置）')
+          const picked = await selectAgentByName('起草者')
           if (!picked) {
             if (prevName !== '') await selectAgentByName(prevName)
             return { found: false }
@@ -887,7 +894,7 @@
             // ⑦ 另一半：自建 agent 必须还是能改的（用「助手」，它一定不是内置）
             ownEditable: false,
           }
-          const own = await selectAgentByName('助手')
+          const own = await selectAgentByName('短名')
           const ownCli = d().querySelector('#agent-runtime')
           const ownTa = d().querySelector('#agent-instructions')
           const ownHead = d().querySelector('.detail-pane .detail-head')
@@ -910,7 +917,7 @@
             ownTa !== null &&
             !ownTa.hasAttribute('readonly') &&
             ownLabels.some((l) => l.includes('保存'))
-          if (prevName !== '' && prevName !== '助手') await selectAgentByName(prevName)
+          if (prevName !== '' && prevName !== '短名') await selectAgentByName(prevName)
           return out
         })()
 
@@ -944,11 +951,11 @@
               memorySwitch: d().querySelector('[data-memory-enabled]') !== null,
             }
           }
-          if (!(await selectAgentByName('起草者（内置）'))) return { found: false }
+          if (!(await selectAgentByName('起草者'))) return { found: false }
           const builtin = shape()
-          if (!(await selectAgentByName('助手'))) return { found: false }
+          if (!(await selectAgentByName('短名'))) return { found: false }
           const own = shape()
-          if (prevName !== '' && prevName !== '助手') await selectAgentByName(prevName)
+          if (prevName !== '' && prevName !== '短名') await selectAgentByName(prevName)
           const keys = Object.keys(builtin)
           // 高度按 ±2px 比（亚像素取整不该让这条变红）
           const same = (k) => builtin[k] === own[k]
@@ -982,7 +989,10 @@
           // 找两条**能改名**的（自建）行
           const editable = rows().filter((r) => (text(r) ?? '').includes(''))
           const prev = headName()
-          const ownRows = rows().filter((r) => !(text(r) ?? '').includes('（内置）'))
+          // ★ 2026-11（D161）：自建 = `data-slot="user"`
+          const ownRows = rows().filter(
+            (r) => (r.getAttribute('data-slot') ?? 'user') === 'user',
+          )
           if (ownRows.length < 2) return { skipped: '自建的智能体不足两条' }
           const first = ownRows[0]
           click(first.querySelector('.list-row-main') ?? first)
@@ -1473,7 +1483,7 @@
          *   一个"(当前)"选项（正确行为），比较就红。
          *   ⇒ 明确选「助手」（探针夹具里它是 `claude`，一定在身份接口的 runtimes 里）。
          */
-        await selectAgentByName('助手')
+        await selectAgentByName('短名')
         {
           const sel = d().querySelector('select#agent-runtime')
           const runtimeOpts = sel ? [...sel.options].map((o) => o.value) : null
@@ -1600,10 +1610,19 @@
         facts['agents.sidebarNavNoOpWhenSelected'] = need('点侧边栏「智能体」是不是空操作', () =>
           layout()?.className.includes('with-detail') === true,
         )
-        const cancelBtn = [...d().querySelectorAll('.detail-pane .detail-actions button')].find(
-          (b) => text(b).trim() === '取消',
-        )
+        /*
+         * ★ 2026-11（D161）：窄屏出口优先用**规范的返回按钮**（`.back-to-list`，D156 补的）；
+         *   没有的话再退到动作里那颗（自建是「取消」、平台成员是「关闭」）——
+         *   因为探针可能停在任意一条上，而"出口"这件事对两者都该成立。
+         */
+        const backBtn = d().querySelector('.detail-pane .detail-head .back-to-list')
+        const cancelBtn =
+          backBtn ??
+          [...d().querySelectorAll('.detail-pane .detail-actions button')].find((b) =>
+            ['取消', '关闭'].includes((text(b) ?? '').trim()),
+          )
         facts['agents.narrowExitFound'] = !!cancelBtn
+        facts['agents.narrowExitIsBackToList'] = !!backBtn
         if (cancelBtn) {
           click(cancelBtn)
           await until(() => !layout()?.className.includes('with-detail'), 60)
@@ -3926,7 +3945,9 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
               name: '探针编排（页面规范）',
-              code: "await flow([agent('助手')], '{{task}}')",
+              // ★ 2026-11（D161）：编排只能引用**自建**智能体（平台成员不接编排入口），
+              //   所以夹具用探针自己的自建那条（`短名`）。
+              code: "await flow([agent('短名')], '{{task}}')",
             }),
           })
           .then((r) => r.ok)
@@ -4102,7 +4123,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         //   ② 落在**起草态**（右栏栏头是「新建对话」、`#chat-agent` 在下拉里）——
         //      第一版只在 `startDrafting()` 里读意图，有历史对话的机器上点它只会
         //      打开旧对话：页面上什么都不报，就是没反应；
-        //   ③ 执行者已经选中「编排生成者（内置）」（`#chat-agent` 的值 = 那条内置岗位）。
+        //   ③ 执行者已经选中「编排生成者」（`#chat-agent` 的值 = 那条内置岗位）。
         facts['workflows.aiGenerateJump'] = await (async () => {
           const btn = [...d().querySelectorAll('.topbar .page-actions button')].find(
             (b) => (text(b) ?? '').trim() === 'AI 生成…',
@@ -8188,7 +8209,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           }
           return (orphanOpt.textContent ?? '').includes('chat-orphan-skill')
         })()
-        // ★ 2026-11（D109 智能体生成者）：新对话下拉里要有「智能体生成者（内置）」——
+        // ★ 2026-11（D109 智能体生成者）：新对话下拉里要有「智能体生成者」——
         //   它是唯一能聊天的内置岗位（判据 `builtinKind === undefined || === 'agent-maker'`，
         //   `chat.test.ts` 钉住纯函数那一半，这里钉住真的渲染在下拉里）。
         facts['chat.agentMakerChoice'] = await (async () => {

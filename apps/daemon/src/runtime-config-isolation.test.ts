@@ -525,7 +525,18 @@ describe('★ 分批第 61 批：删除实体时清掉它那份 CODEX_HOME', () 
       //    ⚠️ agentId 要用**播种出来的那条**（假 id 会 404 `agent_not_found`——第一次就这么红的）
       const agentsRes = await json(h, '/api/agents')
       const seeded = (agentsRes.body as { agents: Array<{ id: string; builtin?: boolean }> }).agents
-      const execId = seeded.find((a) => a.builtin !== true)?.id ?? ''
+      /*
+       * ★ 2026-11（D161）：首启不再播种普通 agent（「助手」成了平台成员）⇒ 这里
+       *   **自己建一条**执行者，而不是在播种结果里找。
+       */
+      const madeExec = await json(h, '/api/agents', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '隔离夹具执行者', instructions: '' }),
+      })
+      assert.equal(madeExec.status, 201, JSON.stringify(madeExec.body))
+      const execId = (madeExec.body as { id: string }).id
+      void seeded
       assert.notEqual(execId, '', '要先拿到播种出来的执行者')
       /**
        * ⚠️ 必须把这条执行者改成 `default`（= 跟随全局 ⇒ 落到 daemon 侦测到的 codex）：
@@ -635,7 +646,18 @@ describe('★ 分批第 62 批：claude 也关掉自带 skills', () => {
     try {
       const agentsRes = await json(h, '/api/agents')
       const seeded = (agentsRes.body as { agents: Array<{ id: string; builtin?: boolean }> }).agents
-      const execId = seeded.find((a) => a.builtin !== true)?.id ?? ''
+      /*
+       * ★ 2026-11（D161）：首启不再播种普通 agent（「助手」成了平台成员）⇒ 这里
+       *   **自己建一条**执行者，而不是在播种结果里找。
+       */
+      const madeExec = await json(h, '/api/agents', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '隔离夹具执行者', instructions: '' }),
+      })
+      assert.equal(madeExec.status, 201, JSON.stringify(madeExec.body))
+      const execId = (madeExec.body as { id: string }).id
+      void seeded
       const patched = await putJson(h, `/api/agents/${execId}`, {
         env: { CLAUDE_CODE_DISABLE_BUNDLED_SKILLS: '0' },
       })

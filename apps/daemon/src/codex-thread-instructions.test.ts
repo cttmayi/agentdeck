@@ -91,14 +91,23 @@ async function executorOnCodex(url: string): Promise<string> {
   const body = (await (await fetch(`${url}/api/agents`)).json()) as {
     agents: Array<{ id: string; builtin?: boolean }>
   }
-  const executor = body.agents.find((a) => a.builtin !== true)
-  assert.ok(executor, '启动时该播种一个执行者')
-  const res = await fetch(`${url}/api/agents/${executor.id}`, {
-    method: 'PATCH',
+  /*
+   * ★ 2026-11（D161）：首启不再播种普通 agent ⇒ 直接**建一条走 codex 的执行者**
+   *   （建的时候就把 runtimeKey 给它，比"建了再 PATCH"少一次往返，也更像使用者的做法）。
+   */
+  void body
+  const created = await fetch(`${url}/api/agents`, {
+    method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ runtimeKey: 'codex' }),
+    // ★ 指令要带上（下面的判据用 '严谨的协作者' 认"② 身份"那一段）
+    body: JSON.stringify({
+      name: 'codex 执行者',
+      instructions: '你是一个严谨的协作者。先理解任务，再动手。',
+      runtimeKey: 'codex',
+    }),
   })
-  assert.equal(res.status, 200, await res.text())
+  const executor = (await created.json()) as { id: string }
+  assert.equal(created.status, 201, `建 codex 执行者失败：${JSON.stringify(executor)}`)
   return executor.id
 }
 
@@ -222,10 +231,13 @@ describe('★★★ codex：①② 走线程级指令，每轮只发 ③', () =>
       onInfo: () => {},
     })
     try {
-      const agents = (await (await fetch(`${d.url}/api/agents`)).json()) as {
-        agents: Array<{ id: string; runtimeKey: string; builtin?: boolean }>
-      }
-      const executor = agents.agents.find((a) => a.builtin !== true)!
+      // ★ 2026-11（D161）：首启不播种普通 agent ⇒ 建一条（用哪个 CLI 由用例自己说）
+      const madeExec = await fetch(`${d.url}/api/agents`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'claude 执行者', instructions: '', runtimeKey: 'claude' }),
+      })
+      const executor = (await madeExec.json()) as { id: string }
       const createdClaude = await fetch(`${d.url}/api/conversations`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },

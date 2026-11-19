@@ -94,10 +94,22 @@ describe('★★ 真跑一遍：内置成员齐了、owner/entries 写进了数�
       await reconcileStartup({ store, workspaceId: WS, workflows: [], info: () => {}, warn: () => {} })
       const agents = await store.listAgents(WS)
       const platform = agents.filter((a) => a.owner === 'platform')
-      assert.equal(platform.length, 4, `平台成员该有 4 个，实际 ${platform.map((a) => a.name).join('、')}`)
+      assert.equal(platform.length, 5, `平台成员该有 5 个（含助手），实际 ${platform.map((a) => a.name).join('、')}`)
       for (const a of platform) {
         assert.ok(Array.isArray(a.entries), `${String(a.name)} 没有 entries`)
         assert.ok((a.entries ?? []).length > 0, `${String(a.name)} 一个接入点都没有`)
+        /*
+         * ⚠️ 2026-11（D161）：「助手」是唯一**没有** `action:` 接入点的成员（它不做平台
+         *   发起的动作，它就是"默认那个干活的"）⇒ 对它单独钉"三项全开"。
+         */
+        if (String(a.name) === '助手') {
+          assert.deepEqual(
+            [...(a.entries ?? [])].sort(),
+            ['chat', 'task', 'workflow'],
+            '助手：三项入口全开（唯一一个）',
+          )
+          continue
+        }
         assert.ok(
           (a.entries ?? []).some((e) => e.startsWith('action:')),
           `${String(a.name)} 的接入点里没有它自己的动作`,
@@ -147,7 +159,7 @@ describe('★★ 真跑一遍：内置成员齐了、owner/entries 写进了数�
   test('★★ 启动对账把平台成员的 entries 对齐注册表；用户的 entries 不碰', async () => {
     await withStore(async (store) => {
       await reconcileStartup({ store, workspaceId: WS, workflows: [], info: () => {}, warn: () => {} })
-      const maker = (await store.listAgents(WS)).find((a) => a.name === '智能体生成者（内置）')!
+      const maker = (await store.listAgents(WS)).find((a) => a.name === '智能体生成者')!
       // 造一份"过期"的接入点（老版本写进去的，含已删除的 agent-draft）
       await store.insertAgent({ ...maker, entries: ['chat', 'action:agent-draft', 'action:agent-commit'] })
       // 用户智能体：他自己勾的，绝不能被"对齐"掉
@@ -181,7 +193,7 @@ describe('★★ 真跑一遍：内置成员齐了、owner/entries 写进了数�
       // ⚠️ 编排**不在 store 里**（它是数据目录下的一个文件，由 `loadWorkflows` 读），
       //    所以这里传一份数组进去，并断言它**一个字节都没被动过**——"只报不改"。
       const workflows = [
-        { name: '老编排', code: "await flow([agent('沉淀起草者（内置）')], '{{task}}')" },
+        { name: '老编排', code: "await flow([agent('沉淀起草者')], '{{task}}')" },
       ]
       const snapshot = JSON.stringify(workflows)
       await reconcileStartup({

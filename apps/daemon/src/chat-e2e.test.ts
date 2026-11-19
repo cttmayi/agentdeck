@@ -101,6 +101,22 @@ const postJson = (path: string, body: unknown): Promise<{ status: number; body: 
     body: JSON.stringify(body),
   })
 
+/**
+ * ★ 2026-11（D161）：首启**不再播种普通智能体**（「助手」现在是平台成员），所以这些
+ *   e2e 原来那句 `list.find((a) => a.builtin !== true)` 已经取不到任何东西。
+ *   它们真正需要的是"一个能改指令的执行者" ⇒ 自己建一条（这也是使用者的常规路径）。
+ */
+async function createExecutor(name: string): Promise<string> {
+  const res = await fetch(`${daemon.url}/api/agents`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, instructions: '' }),
+  })
+  const body = (await res.json()) as { id: string }
+  if (res.status !== 201) throw new Error(`建执行者失败：${res.status} ${JSON.stringify(body)}`)
+  return body.id
+}
+
 before(async () => {
   dataDir = await makeTempDir('chat-e2e-data')
   backend = new RecordingBackend()
@@ -114,7 +130,8 @@ before(async () => {
   })
   const agents = await json('/api/agents')
   const list = (agents.body as { agents: Array<{ id: string; builtin?: boolean }> }).agents
-  agentId = list.find((a) => a.builtin !== true)!.id
+  // ★ 2026-11（D161）：首启不播种普通 agent 了 ⇒ 自己建一条执行者
+  agentId = await createExecutor('聊天夹具执行者')
   // ★ 给这个执行者写一段"指令"：任务那条路上它由模版的 {{instructions}} 送出去，
   //   而聊天那条路上没有模版——这条用例要把"它确实不在聊天里出现"也钉住。
   const patched = await json(`/api/agents/${agentId}`, {
@@ -264,7 +281,7 @@ describe('D49 端到端：聊天投递的就是那句话', () => {
       agents: Array<{ id: string; builtin?: boolean; builtinKind?: string; owner?: string; entries?: string[]; slot?: string | null }>
     }).agents
     const maker = agents.find((a) => a.slot === 'agent-maker')
-    assert.ok(maker !== undefined, '启动对账要建出智能体生成者（内置）')
+    assert.ok(maker !== undefined, '启动对账要建出智能体生成者')
     const made = await postJson('/api/conversations', {
       agentId: maker!.id,
       text: '帮我理清一个岗位：把会议纪要变成一页纪要。',

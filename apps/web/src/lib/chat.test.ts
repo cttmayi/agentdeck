@@ -100,7 +100,7 @@ describe('新对话的下拉：skill 是执行者的另一条入口', () => {
      *   `role === 'reviewer'` 的人不能出现在下拉里。**角色退场**之后，唯一进不来的
      *   是**平台内置岗位**（起草者 / 记忆整理 / 沉淀审核者）；用户建的 agent 一律能聊。
      */
-    const withDrafter = [...executors, agent('r1', '起草者（内置）', ['s2'], 'drafter')]
+    const withDrafter = [...executors, agent('r1', '起草者', ['s2'], 'drafter')]
     const out = executorChoices(withDrafter, skills, null, true)
     assert.equal(out.some((c) => c.value === 'agent:r1'), false, '内置岗位不能出现在下拉里')
     // s2 仍然没有"能聊的人"挂着 ⇒ 它的选项不带主人，选的时候落到当前那个人身上
@@ -113,11 +113,11 @@ describe('新对话的下拉：skill 是执行者的另一条入口', () => {
   test('★ 2026-11：智能体生成者（agent-maker）能出现在下拉里——它是唯一能聊天的内置岗位', () => {
     // 与 memory-tidy / drafter / skill-reviewer 相反：生成者的全部工作就是聊天，
     // 判据写**等值**（`builtinKind === undefined || === 'agent-maker'`），不写 !==。
-    const withMaker = [...executors, agent('m1', '智能体生成者（内置）', [], 'agent-maker')]
+    const withMaker = [...executors, agent('m1', '智能体生成者', [], 'agent-maker')]
     const out = executorChoices(withMaker, skills, null, true)
     assert.equal(out.some((c) => c.value === 'agent:m1'), true, '智能体生成者要在下拉里')
     // 其它内置岗位仍然进不来（起草者 / 记忆整理者）
-    const withTidy = [...executors, agent('t1', '记忆整理者（内置）', [], 'memory-tidy')]
+    const withTidy = [...executors, agent('t1', '记忆整理者', [], 'memory-tidy')]
     const out2 = executorChoices(withTidy, skills, null, true)
     assert.equal(out2.some((c) => c.value === 'agent:t1'), false, '记忆整理者不能出现在下拉里')
   })
@@ -129,11 +129,11 @@ describe('新对话的下拉：skill 是执行者的另一条入口', () => {
      * "谁都不像"的空下拉。它与智能体生成者是同一类岗位（工作就是聊天、产出草稿），
      * 所以判据也走同一份等值集合。
      */
-    const withWf = [...executors, agent('w1', '编排生成者（内置）', [], 'workflow-maker')]
+    const withWf = [...executors, agent('w1', '编排生成者', [], 'workflow-maker')]
     const out = executorChoices(withWf, skills, null, true)
     assert.equal(out.some((c) => c.value === 'agent:w1'), true, '编排生成者要在下拉里')
     // 起草者仍然进不来（集合是**只能**往里加的那一份，不是"所有内置")
-    const withDrafter2 = [...executors, agent('d1', '起草者（内置）', [], 'drafter')]
+    const withDrafter2 = [...executors, agent('d1', '起草者', [], 'drafter')]
     assert.equal(
       executorChoices(withDrafter2, skills, null, true).some((c) => c.value === 'agent:d1'),
       false,

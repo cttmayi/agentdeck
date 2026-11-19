@@ -218,7 +218,11 @@ export const effectiveDefaultAgentId = derived([agents, defaultAgentId], ([$agen
    *   "能不能当默认"与"能不能派活"必须是同一句话（服务端 `PUT /api/agents/default`
    *   用的就是 `canBeDispatched`），否则会出现"设得了默认、派不动活"的组合。
    */
-  const executors = $agents.filter((a) => hasEntry(a, 'task'))
+  /*
+   * ★ 2026-11（D161）：默认智能体要**同时**有「任务」与「聊天」（与服务端同一句判据）。
+   *   只有任务的那条能接活却聊不了——那种组合在界面上不该被选成默认。
+   */
+  const executors = $agents.filter((a) => hasEntry(a, 'task') && hasEntry(a, 'chat'))
   if ($id && executors.some((a) => a.id === $id)) return $id
   return executors[0]?.id ?? null
 })

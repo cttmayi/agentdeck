@@ -40,7 +40,7 @@ import { ownerOf } from './platform-member.ts'
  * ⚠️ 退役的 `skill-reviewer` **不在**这里：那条流程整条退场（D125），老记录归用户
  *    （可删），没有槽位可认领——也就不该有"平台还认它"的错觉。
  */
-export const PLATFORM_SLOTS = ['drafter', 'memory-tidy', 'agent-maker', 'workflow-maker'] as const
+export const PLATFORM_SLOTS = ['assistant', 'drafter', 'memory-tidy', 'agent-maker', 'workflow-maker'] as const
 export type PlatformSlot = (typeof PLATFORM_SLOTS)[number]
 
 /** 槽位 → agentId。缺 = 那条还没被认领（或工作区是老的、还没跑过对账）。 */
@@ -226,6 +226,7 @@ export async function slotOf(
 
 /** 给界面/日志的一句中文件名（"沉淀起草者" 这种），未知槽位给通用说法。 */
 export const SLOT_LABELS: Record<PlatformSlot, string> = {
+  assistant: '助手',
   drafter: '沉淀起草者',
   'memory-tidy': '记忆整理者',
   'agent-maker': '智能体生成者',

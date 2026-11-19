@@ -34,7 +34,7 @@ function withStores(list: Agent[], preferred: string | null): string | null {
   return get(effectiveDefaultAgentId) as string | null
 }
 
-describe('★ 默认执行者：判据是接入点里有 task', () => {
+describe('★ 默认执行者：判据是接入点里有 task **和** chat', () => {
   test('设过的那个在列表里就用它', () => {
     assert.equal(withStores([agent('a1'), agent('a2')], 'a2'), 'a2')
   })
@@ -49,12 +49,24 @@ describe('★ 默认执行者：判据是接入点里有 task', () => {
     assert.equal(withStores([member, agent('a1')], null), 'a1')
   })
 
-  test('★★ 但只要它的接入点里真有 task，它就合格——判据是数据，不是岗位', () => {
+  test('★★ 两个接入点都要有：只有 task 不够（能接活却聊不了），只有 chat 也不够', () => {
+    /*
+     * ★ 2026-11（D161）：默认智能体要**同时**具备「任务」与「聊天」——那条任务跑起来之后
+     *   人还要能接着跟它聊。只有一边的组合在界面上不该被选成默认。
+     */
+    const taskOnly = agent('t', { owner: 'user', entries: ['task'] })
+    assert.equal(withStores([taskOnly], null), null, '只有任务 ⇒ 不合格')
+    const chatOnly = agent('c', { owner: 'user', entries: ['chat'] })
+    assert.equal(withStores([chatOnly], null), null, '只有聊天 ⇒ 不合格')
+    assert.equal(withStores([chatOnly, taskOnly], null), null, '两个都不是"两个都有"')
+  })
+
+  test('★★ 两个都有就合格——判据是数据，不是岗位', () => {
     const memberWithTask = agent('m', {
       owner: 'platform',
       builtin: true,
       builtinKind: 'drafter',
-      entries: ['task'],
+      entries: ['chat', 'task'],
     })
     assert.equal(
       withStores([agent('a1'), memberWithTask], null),

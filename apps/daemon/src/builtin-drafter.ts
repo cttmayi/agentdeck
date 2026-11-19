@@ -87,7 +87,7 @@ export function effectiveInstructions(agent: Agent): string {
  *   ——在聊天里问五字段、规则由它描述，产出岗位卡（agent-draft.md）供确认生成。它取代了
  *   早先设想的「访谈官」与「岗位卡起草者」两条（问和写合并成一个内置，见设计稿 §2）。
  */
-export type BuiltinKind = 'drafter' | 'skill-reviewer' | 'memory-tidy' | 'agent-maker' | 'workflow-maker'
+export type BuiltinKind = 'assistant' | 'drafter' | 'skill-reviewer' | 'memory-tidy' | 'agent-maker' | 'workflow-maker'
 
 /**
  * 这条 agent 是内置的哪一条？**不是内置的返回 null**。
@@ -128,15 +128,40 @@ export function builtinKindOf(
  * 内置起草者的默认名字（使用者可改，改名不影响它是不是内置——认的是 `builtin` + `role`）。
  *
  * ★ 2026-11（使用者："内置智能体的名字'起草者'是不是应该改名为'沉淀起草者'，
- *   不然很容易误解"）：改成「沉淀起草者（内置）」——它干的是**沉淀这条链**的
+ *   不然很容易误解"）：改成「沉淀起草者」——它干的是**沉淀这条链**的
  *   起草（把素材写成 skill），光叫"起草者"容易被当成"随便什么起草"（比如生成者
  *   也在起草岗位卡）。`ensure` 会把名字仍是旧默认值的老工作区同步过来
  *   （判据"逐字等于旧默认"：使用者改过的名字不动）。
  */
-export const DRAFTER_NAME = '沉淀起草者（内置）'
+/**
+ * ★★ 2026-11（D161）：**内置「助手」**——平台唯一一个"三项入口全开 + 默认智能体"的成员。
+ *
+ * 为什么要有它（使用者的要求）："增加一个内置智能体（助手），它默认是勾选『聊天』和
+ * 『编排』和『任务』的，同时它也是默认智能体"。在此之前「助手」是**首启播种的一条普通
+ * agent**（`server.ts` 的引导流程里就地造），于是：
+ *   · 它是使用者自己的记录 ⇒ 可以被删掉，删完默认智能体就悬空；
+ *   · "默认那个"与"平台成员"是两套东西，列表里却并排摆着，谁是谁只能靠名字后缀区分。
+ * 现在它是一条**平台成员**（只读、删不掉、缺了会对账建回来），并且**默认就是它**。
+ *
+ * ⚠️ 它的指令与当初播种的那条**逐字相同**（那是使用者天天看的那份），
+ *    记忆默认**开**（它是天天用的那个，也是当初唯一的例外）。
+ */
+export const ASSISTANT_NAME = '助手'
+export const ASSISTANT_INSTRUCTIONS =
+  '你是一个严谨的协作者。先理解任务，再动手；报告要写清楚结论与不确定的地方。'
 
-/** 改名前的旧默认值（迁移判据，见 `ensureBuiltinDrafter`）。 */
+export const DRAFTER_NAME = '沉淀起草者'
+
+/**
+ * 改名前的**两个旧默认值**（迁移判据，见 `ensureBuiltinDrafter`）。
+ *
+ * ⚠️ 它们的值里**必须保留**那个后缀——这两个常量存在的意义就是"认出老数据里那个带后缀的
+ *    名字"。批量清理时我一度把它们也替换成了新名字，于是 DRAFTER_NAME_SUFFIXED === DRAFTER_NAME
+ *    ⇒ 每次对账都判成"名字还是旧默认" ⇒ 每次都 healed（幂等判据当场红）。
+ */
 export const DRAFTER_NAME_LEGACY = '起草者（内置）'
+/** ★ 2026-11（D161）：**上一版默认名**（带「（内置）」后缀）。它要被认出来并同步成新默认名。 */
+export const DRAFTER_NAME_SUFFIXED = '沉淀起草者（内置）'
 
 /**
  * 默认指令。
@@ -206,17 +231,17 @@ export const DRAFTER_INSTRUCTIONS_BODY =
 export const DRAFTER_INSTRUCTIONS = withConduct(DRAFTER_INSTRUCTIONS_BODY)
 
 /** 内置「记忆整理者」的默认名字（与起草者同一套：名字可改，认的是 `builtin` + `role`）。 */
-export const MEMORY_TIDY_NAME = '记忆整理者（内置）'
+export const MEMORY_TIDY_NAME = '记忆整理者'
 
 /** 内置「智能体生成者」的默认名字（与起草者同一套：名字可改，认的是 `builtin` + `role`）。 */
-export const AGENT_MAKER_NAME = '智能体生成者（内置）'
+export const AGENT_MAKER_NAME = '智能体生成者'
 
 /**
  * 内置「编排生成者」的默认名字（2026-11，D135）。
  *
  * 与「智能体生成者」并列：那个问"一个岗位"，这个问"一条流程"。
  */
-export const WORKFLOW_MAKER_NAME = '编排生成者（内置）'
+export const WORKFLOW_MAKER_NAME = '编排生成者'
 
 /**
  * 「编排生成者」的默认身份（2026-11，设计 `docs/tmp/workflow-maker-design.md`）。
@@ -910,6 +935,13 @@ export function builtinDefaultsOf(kind: BuiltinKind): {
 } {
   // ★ 2026-11（D111）：恢复默认写的是**组装前**正文（存进 instructions.md 的
   //    就是它；运行时组装见 `effectiveInstructions`）。
+  if (kind === 'assistant') {
+    return {
+      name: ASSISTANT_NAME,
+      instructions: ASSISTANT_INSTRUCTIONS,
+      label: '平台内置的助手（默认那个：接任务、能聊天、也能被编排引用）',
+    }
+  }
   if (kind === 'drafter') {
     return { name: DRAFTER_NAME, instructions: DRAFTER_INSTRUCTIONS_BODY, label: '平台内置的沉淀起草者（沉淀这条链的作者）' }
   }
@@ -938,7 +970,7 @@ export function builtinDefaultsOf(kind: BuiltinKind): {
   //   智能体仍是使用者的数据（不自动删），但**没有默认值可恢复**——所以这里的
   //   `instructions` 是空串，调用方（恢复默认那条路由）会在写库之前就拒绝它。
   return {
-    name: 'Skill 审核者（内置）',
+    name: 'Skill 审核者',
     instructions: '',
     // ⚠️ 2026-11（S4）：叫法用「沉淀审核」，与界面同一个词（同一个东西只许有一个词）。
     label: '平台内置的沉淀审核者（已下线：沉淀线不再评审）',
@@ -1051,7 +1083,7 @@ async function syncDrafterSkillMountInner(
  *
  * 这一串是「分批第 26 批加 `3b`」**之前**的默认指令，冻结成字面量。
  *
- * 为什么要它（使用者问"当前是不是没有使用 智能体『起草者（内置）』"）：
+ * 为什么要它（使用者问"当前是不是没有使用 智能体『起草者』"）：
  * 起草者的升级只处理"指令被清空"，**没有**"还停在旧默认"这一支——而第 26 批往
  * `DRAFTER_INSTRUCTIONS` 里加了第 3b 条（使用者的要求是默认约定），老工作区盘上那份
  * 永远不会跟着换。真机上量到：代码当前默认 462 字、盘上存着 288 字，
@@ -1227,6 +1259,17 @@ export async function ensureBuiltinWorkflowMaker(
   )
 }
 
+/** ★ 2026-11（D161）：确保内置「助手」在（默认那个；三项入口全开、记忆默认开）。 */
+export async function ensureBuiltinAssistant(
+  store: Store,
+  workspaceId: WorkspaceId,
+  slots?: SlotTable,
+): Promise<EnsureDrafterResult> {
+  return await withSlots(store, workspaceId, slots, (t) =>
+    ensureBuiltinAssistantInner(store, workspaceId, t),
+  )
+}
+
 export async function ensureBuiltinAgents(
   store: Store,
   workspaceId: WorkspaceId,
@@ -1239,6 +1282,7 @@ export async function ensureBuiltinAgents(
    */
   slots?: SlotTable,
 ): Promise<{
+  assistant: EnsureDrafterResult
   drafter: EnsureDrafterResult
   memoryTidy: EnsureDrafterResult
   agentMaker: EnsureDrafterResult
@@ -1253,12 +1297,13 @@ export async function ensureBuiltinAgents(
    */
   const own = slots === undefined
   const table = slots ?? (await loadSlotTable(store, workspaceId))
+  const assistant = await ensureBuiltinAssistant(store, workspaceId, table)
   const drafter = await ensureBuiltinDrafter(store, workspaceId, table)
   const memoryTidy = await ensureBuiltinMemoryTidy(store, workspaceId, table)
   const agentMaker = await ensureBuiltinAgentMaker(store, workspaceId, table)
   const workflowMaker = await ensureBuiltinWorkflowMaker(store, workspaceId, table)
   if (own) await saveSlotTable(store, workspaceId, table)
-  return { drafter, memoryTidy, agentMaker, workflowMaker, slots: table }
+  return { assistant, drafter, memoryTidy, agentMaker, workflowMaker, slots: table }
 }
 
 /**
@@ -1492,6 +1537,62 @@ async function ensureBuiltinMemoryTidyInner(
   return { action: 'left-alone', agentId: found.id as string }
 }
 
+/**
+ * ★★ 2026-11（D161）：内置「助手」的对账。
+ *
+ * 三条纪律与其它成员完全一致（幂等 / 自愈 / 使用者改过的不覆盖）。它的特别之处只有两条：
+ *   · **接入点三项全开**（`chat` / `task` / `workflow`）——它是"默认那个干活的"；
+ *   · **记忆默认开**（当初播种那条普通 agent 就是开着的，使用者天天用它记事）。
+ *
+ * ⚠️ 升级路径：老工作区里已经有一条**普通**「助手」（当年 `server.ts` 首启播的那条，
+ *   `owner: 'user'`）。这里**不**把它改成平台成员——那会把使用者能改的记录悄悄锁成只读
+ *   （`detach` 的反向操作）。所以：槽位表里没有 `assistant` 时才建一条**新的**平台助手，
+ *   老那条原样留着（它仍然是使用者自己的智能体）。
+ *   ⇒ 升级后的表现是"列表里出现两条助手"（一条你的、一条内置的），这**是刻意的**：
+ *   把"哪条是你的"这件事留给使用者，而不是平台替他决定。
+ */
+async function ensureBuiltinAssistantInner(
+  store: Store,
+  workspaceId: WorkspaceId,
+  slots: SlotTable,
+): Promise<EnsureDrafterResult> {
+  const found = await resolveSlot(store, workspaceId, slots, 'assistant')
+  if (!found) {
+    const now = Date.now()
+    const agent: Agent = {
+      id: ulid() as Agent['id'],
+      workspaceId,
+      name: ASSISTANT_NAME,
+      instructions: ASSISTANT_INSTRUCTIONS,
+      /*
+       * ⚠️ 记忆**开**：当初播种那条普通助手就是开着的（分批第 259 批：只有它默认带记忆）。
+       *   现在它成了平台成员，"记忆开关"仍然是平台给的默认值——使用者要关就复制一份去关
+       *   （平台成员只读，这是 D160 定下的统一口径）。
+       */
+      memoryEnabled: true,
+      model: null,
+      // 跟随全局默认（与其它内置成员同一条：内置的应当最跟随平台设置）
+      runtimeKey: 'default',
+      workDir: null,
+      skillIds: [],
+      env: {},
+      owner: 'platform',
+      entries: [...PLATFORM_MEMBER_ENTRIES['assistant']],
+      reviewStandard: null,
+      createdAt: now,
+      updatedAt: now,
+    }
+    await store.insertAgent(agent)
+    claimSlot(slots, 'assistant', agent.id as string)
+    return { action: 'created', agentId: agent.id as string }
+  }
+  if (found.instructions.trim() === '') {
+    await store.insertAgent({ ...found, instructions: ASSISTANT_INSTRUCTIONS, updatedAt: Date.now() })
+    return { action: 'healed', agentId: found.id as string, why: '指令被清空了' }
+  }
+  return { action: 'left-alone', agentId: found.id as string }
+}
+
 async function ensureBuiltinDrafterInner(
   store: Store,
   workspaceId: WorkspaceId,
@@ -1557,18 +1658,23 @@ async function ensureBuiltinDrafterInner(
     return { action: 'healed', agentId: found.id as string, why: '指令被清空了' }
   }
   // ★ 2026-11（使用者："名字'起草者'是不是应该改名为'沉淀起草者'"）：老工作区里
-  //    名字还是旧默认「起草者（内置）」的同步成「沉淀起草者（内置）」。判据是
+  //    名字还是旧默认「起草者」的同步成「沉淀起草者」。判据是
   //    "逐字等于旧默认值"——使用者**改过的名字**（自定义）不动（内置智能体的名字
   //    可改，认的是 `builtin` + `role`，不靠名字认身份）。
-  if (found.name === DRAFTER_NAME_LEGACY) {
+  /*
+   * ★ 2026-11（D161）：名字里的「（内置）」后缀去掉了（使用者："内置智能体的名称都有一个
+   *   『（内置）』，不好看，有没有简洁的表达"）。所以**两种旧形态**都要认出来并同步：
+   *   「起草者」（更早的默认）与「沉淀起草者」（上一版默认）。
+   */
+  if (found.name === DRAFTER_NAME_LEGACY || found.name === DRAFTER_NAME_SUFFIXED) {
     await store.insertAgent({ ...found, name: DRAFTER_NAME, updatedAt: Date.now() })
-    return { action: 'healed', agentId: found.id as string, why: '内置名字还是旧默认（起草者 → 沉淀起草者）' }
+    return { action: 'healed', agentId: found.id as string, why: '内置名字还是旧默认（去掉「（内置）」后缀）' }
   }
   // ══════════════════════════════════════════════════════════════════
   // ★ 分批第 31 批：**平台改了默认指令，老工作区要跟上来**
   // ══════════════════════════════════════════════════════════════════
   //
-  // 使用者问："当前是不是没有使用 智能体『起草者（内置）』"。量下来不是"没用它"，
+  // 使用者问："当前是不是没有使用 智能体『起草者』"。量下来不是"没用它"，
   // 是**它的规则还停在旧版**：代码默认 462 字、盘上 288 字，逐字等于"当前默认去掉
   // 3b 那条"——第 26 批加的「使用者的要求是默认约定」从没进过起草者的身份块。
   //

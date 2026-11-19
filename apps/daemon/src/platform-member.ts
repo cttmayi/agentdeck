@@ -165,6 +165,13 @@ export const PLATFORM_MEMBER_PLAIN_ENTRIES: Record<BuiltinKind, readonly MemberE
   'agent-maker': ['chat'],
   'workflow-maker': ['chat'],
   /*
+   * ★ 2026-11（D161）：**内置「助手」是唯一的例外**——它同时接 `chat` / `task` /
+   *   `workflow`（使用者定："它默认是勾选『聊天』和『编排』和『任务』的，同时它也是
+   *   默认智能体"）。它是"默认那个干活的人"，所以这三项都该有；其余平台成员仍然
+   *   只有它们自己那一件事。
+   */
+  assistant: ['chat', 'task', 'workflow'],
+  /*
    * 已下线（沉淀线的评审整条退场）：**没有任何接入点**——谁也进不去。
    * 它的归属见 `ownerOf()`：这一类按 `user` 处理（可删、可改），因为默认身份已经删了、
    * 没有任何链路在用它，把它当"用户的旧记录"最省事（删除路由今天也正好放行它）。
@@ -187,6 +194,7 @@ function memberEntries(kind: BuiltinKind): readonly MemberEntry[] {
  *    "你是 skill 作者"的指令跑偏；被编排引用同理。
  */
 export const PLATFORM_MEMBER_ENTRIES: Record<BuiltinKind, readonly MemberEntry[]> = {
+  assistant: memberEntries('assistant'),
   drafter: memberEntries('drafter'),
   'memory-tidy': memberEntries('memory-tidy'),
   'agent-maker': memberEntries('agent-maker'),

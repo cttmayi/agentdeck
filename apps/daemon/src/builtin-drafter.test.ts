@@ -92,7 +92,7 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
   })
 
   /**
-   * ★★★ 分批第 31 批：使用者问「当前是不是没有使用 智能体『起草者（内置）』」。
+   * ★★★ 分批第 31 批：使用者问「当前是不是没有使用 智能体『起草者』」。
    *
    * 量下来不是"没用它"，是**它带的规则还停在旧版**。而升级只处理"指令被清空"，
    * 没有"还停在旧默认"这一支 ⇒ 它看起来一切正常（没坏、不报错、连自愈都不触发）。
@@ -130,7 +130,7 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
     assert.equal(after.instructions, '我们团队的规范：每条 skill 都要带一个检查清单。')
   })
 
-  test('★★★ 名字还是旧默认「起草者（内置）」⇒ 同步成「沉淀起草者（内置）」', async () => {
+  test('★★★ 名字还是旧默认「起草者」⇒ 同步成「沉淀起草者」', async () => {
     const mine = (await drafterOf())!
     await store.insertAgent({ ...mine, name: DRAFTER_NAME_LEGACY })
 
@@ -320,12 +320,12 @@ describe('ensureBuiltinMemoryTidy：建 / 幂等 / 自愈', () => {
     assert.equal(out.agentMaker.action, 'created')
     assert.equal(out.workflowMaker.action, 'created')
     // 四个槽位都认领上了
-    assert.equal(Object.keys(table).length, 4)
+    assert.equal(Object.keys(table).length, 5)
     assert.equal((await platformMemberOf(store, WS3, 'drafter'))?.name, DRAFTER_NAME)
     assert.equal((await platformMemberOf(store, WS3, 'memory-tidy'))?.name, MEMORY_TIDY_NAME)
     // 平台上正好四条（没有多出来的）
     const platform = (await store.listAgents(WS3)).filter((a) => a.owner === 'platform')
-    assert.equal(platform.length, 4)
+    assert.equal(platform.length, 5)
   })
 })
 
@@ -335,7 +335,7 @@ describe('ensureBuiltinMemoryTidy：建 / 幂等 / 自愈', () => {
  * 这条判据来自一次**真机上量到的事故**：改成槽位表之后，`syncDrafterSkillMount(store, ws)`
  * 的第三个参数被写成了默认值 `= {}`（空表）。于是每次"起草前对齐挂载"都拿着**空表**
  * 去认人 ⇒ `resolveSlot` 回退老字段 ⇒ 新记录根本没有老字段 ⇒ **认不出 ⇒ 建一条新的**。
- * crystallize-e2e 当场红了一条 `还有 48 个智能体挂着「distilly」：沉淀起草者（内置）…`
+ * crystallize-e2e 当场红了一条 `还有 48 个智能体挂着「distilly」：沉淀起草者…`
  * ——48 个同名起草者并存的画面，比任何断言都清楚。
  *
  * 判据落在**库里的条数**上（不是"函数返回了什么"）：跑五遍，平台上永远只有那四条。
@@ -351,7 +351,7 @@ describe('★★★ 幂等：反复对齐挂载 / 反复对账，平台上永远
     assert.equal(drafters.length, 1, `起草者只该有一条，实际 ${drafters.length} 条`)
   })
 
-  test('ensureBuiltinAgents 跑五遍 ⇒ 四个槽位指向同四条记录，且没有多出来的', async () => {
+  test('ensureBuiltinAgents 跑五遍 ⇒ 五个槽位指向同五条记录，且没有多出来的', async () => {
     const WS_MANY = wsId('ws-many-idempotent')
     await ensureTestWorkspace(store, WS_MANY)
     const first = await ensureBuiltinAgents(store, WS_MANY)
@@ -362,10 +362,10 @@ describe('★★★ 幂等：反复对齐挂载 / 反复对账，平台上永远
       assert.deepEqual(Object.values(again.slots).sort(), firstIds, '槽位指向的 id 不许变')
     }
     const platform = (await store.listAgents(WS_MANY)).filter((a) => a.owner === 'platform')
-    assert.equal(platform.length, 4, `平台上正好四条，实际 ${platform.length} 条`)
+    assert.equal(platform.length, 5, `平台上正好五条（D161 含助手），实际 ${platform.length} 条`)
   })
 
-  test('★ 槽位表被清空再跑一次 ⇒ 只补**缺的那四条**（旧记录原样留着，不重复建）', async () => {
+  test('★ 槽位表被清空再跑一次 ⇒ 只补**缺的那五条**（旧记录原样留着，不重复建）', async () => {
     const WS_RESET = wsId('ws-reset-idempotent')
     await ensureTestWorkspace(store, WS_RESET)
     await ensureBuiltinAgents(store, WS_RESET)
@@ -373,12 +373,12 @@ describe('★★★ 幂等：反复对齐挂载 / 反复对账，平台上永远
     await ensureBuiltinAgents(store, WS_RESET)
     const platform = (await store.listAgents(WS_RESET)).filter((a) => a.owner === 'platform')
     // 表清空 = 认不出 ⇒ 每条各建一条新的（4 旧 + 4 新）。旧的不删（使用者的数据）。
-    assert.equal(platform.length, 8, '新补四条；旧的四条原样留着')
+    assert.equal(platform.length, 10, '新补五条；旧的那五条原样留着')
     // 再跑一遍就不再增长（表已经认领好了）
     await ensureBuiltinAgents(store, WS_RESET)
     assert.equal(
       (await store.listAgents(WS_RESET)).filter((a) => a.owner === 'platform').length,
-      8,
+      10,
       '认领之后就稳住，不再增长',
     )
   })

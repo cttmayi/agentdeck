@@ -111,7 +111,7 @@ describe('★ 复制智能体：抄配置、给自建身份、不动原件', () 
       const after = (await agentsOf(url)).find((a) => a.id === before.id)!
       assert.deepEqual(after, before, '平台那条原样留着')
       // 平台上仍然是四条（复制不会让平台"少一条"再补一条）
-      assert.equal((await agentsOf(url)).filter((a) => a.owner === 'platform').length, 4)
+      assert.equal((await agentsOf(url)).filter((a) => a.owner === 'platform').length, 5, '平台成员现在是五个（D161 加了助手）')
     })
   })
 
@@ -235,5 +235,58 @@ describe('★ 复制时滤掉悬空引用', () => {
       await d.close()
       await cleanup(dir)
     }
+  })
+})
+
+/**
+ * ★ 2026-11（D161）：**内置「助手」**——平台唯一一个三项接入点全开的成员，而且**是默认**。
+ */
+describe('★ 内置助手：三项入口 + 默认智能体', () => {
+  test('★★ 启动之后它在，接入点是 chat + task + workflow，而且它就是默认', async () => {
+    await withDaemon(async (url) => {
+      const agents = await agentsOf(url)
+      const assistant = agents.find((a) => a.slot === 'assistant')
+      assert.ok(assistant, '启动对账要建出内置「助手」')
+      assert.equal(assistant.name, '助手', '名字不带「（内置）」后缀（D161）')
+      assert.equal(assistant.owner, 'platform')
+      assert.deepEqual(
+        [...(assistant.entries ?? [])].sort(),
+        ['chat', 'task', 'workflow'],
+        '三项入口全开（其余平台成员只有自己那一件事）',
+      )
+      const ws = (await json<{ defaultAgentId?: string }>(`${url}/api/identity`)) as never
+      void ws
+      const list = await json<{ defaultAgentId: string | null }>(`${url}/api/agents`)
+      assert.equal(list.defaultAgentId, assistant.id, '它就是默认智能体')
+    })
+  })
+
+  test('★★ 名字里不再有「（内置）」后缀，但"哪条是内置的"仍认得出来（槽位）', async () => {
+    await withDaemon(async (url) => {
+      const agents = await agentsOf(url)
+      assert.equal(
+        agents.some((a) => String(a.name).includes('（内置）')),
+        false,
+        '所有内置成员的名字都不再带后缀',
+      )
+      // 五个平台成员都还认得出来（slot 不是 null）
+      const platform = agents.filter((a) => a.owner === 'platform')
+      assert.equal(platform.length, 5)
+      assert.ok(platform.every((a) => typeof a.slot === 'string' && a.slot !== ''),
+        '每一条都有槽位（名字变了，身份没变）')
+    })
+  })
+
+  test('★ 复制内置助手 ⇒ 得到一条自建的普通智能体（三项入口照旧全开）', async () => {
+    await withDaemon(async (url) => {
+      const assistant = (await agentsOf(url)).find((a) => a.slot === 'assistant')!
+      const res = await copy(url, assistant.id)
+      assert.equal(res.status, 201)
+      const made = res.body['agent'] as AgentRow
+      assert.equal(made.owner, 'user')
+      assert.deepEqual(made.entries, ['chat', 'task', 'workflow'])
+      assert.equal(made.name, '助手（副本）')
+      assert.equal(made.slot, null)
+    })
   })
 })

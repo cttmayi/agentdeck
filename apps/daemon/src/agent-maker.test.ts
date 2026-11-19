@@ -213,7 +213,7 @@ describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）',
       const maker: Agent = {
         id: 'maker-1' as Agent['id'],
         workspaceId: WS,
-        name: '智能体生成者（内置）',
+        name: '智能体生成者',
         instructions: '身份块',
         model: null,
         runtimeKey: 'default',

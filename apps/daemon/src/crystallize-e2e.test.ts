@@ -244,8 +244,22 @@ before(async () => {
   const agents = await (
     await fetch(`${daemon.url}/api/agents`)
   ).json() as { agents: Array<{ id: string; builtin?: boolean }> }
-  agentId = agents.agents.find((a) => a.builtin !== true)!.id
-  reviewerId = agents.agents.find((a) => a.builtin !== true)!.id
+  /*
+   * ★ 2026-11（D161）：首启不再播种普通 agent（「助手」成了平台成员）⇒ 自己建一条。
+   *   这原本是"使用者的执行者"，`reviewerId` 在评审退场（D125）之后已经没有语义，
+   *   沿用同一个 id（历史上它就是同一条）。
+   */
+  {
+    const made = await fetch(`${daemon.url}/api/agents`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: '沉淀夹具执行者', instructions: '' }),
+    })
+    const row = (await made.json()) as { id: string }
+    agentId = row.id
+    reviewerId = row.id
+  }
+  void agents
 
   const issueRes = await fetch(`${daemon.url}/api/issues`, {
     method: 'POST',

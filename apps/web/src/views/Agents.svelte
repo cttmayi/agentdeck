@@ -105,7 +105,7 @@ import ListRow from '../components/ListRow.svelte'
    * ★ 2026-11（D155）：这里原来有两个函数（`roleLabelOf` / `roleBadgeOf`）给每行画一枚
    *   "这条是哪一条出厂成员"的徽标。使用者："智能体的徽标就不显示了吧，都是智能体"——
    *   在列表里它什么都多余：**它们都是智能体**，而"是哪一条出厂成员"名字里就有
-   *   （`沉淀起草者（内置）`），要看细节有详情页的「入口」与平台动作徽标。
+   *   （`沉淀起草者`），要看细节有详情页的「入口」与平台动作徽标。
    *   判据（探针那两条"起草者的徽标说「起草」而不是「执行」"）随之删掉——意图本身没了。
    */
 
@@ -334,9 +334,12 @@ import ListRow from '../components/ListRow.svelte'
     -->
     {#snippet rows()}
       {#snippet agentRow(a: Agent)}
+        <!-- ★ 2026-11（D161）：`slot` 落到 DOM 上（探针与"哪条是内置的"都靠它——
+             名字里的「（内置）」后缀已经去掉了，而名字是使用者能改的，槽位不是）。 -->
         <ListRow
           rowClass="agent-row"
           active={a.id === selectedId}
+          dataSlot={a.slot ?? 'user'}
           onclick={() => {
             selectedId = a.id
             // ★ 2026-10：新建表单住在右栏了——点清单行就退出"正在新建"

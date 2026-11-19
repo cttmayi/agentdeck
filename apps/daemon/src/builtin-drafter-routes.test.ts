@@ -87,7 +87,8 @@ describe('内置起草者：启动就有、不能删、不能改坏、能恢复�
       assert.equal(res.status, 400)
       const body = (await res.json()) as { error: string; code?: string }
       assert.equal(body.code, 'builtin_agent_not_deletable')
-      assert.match(body.error, /恢复成默认值/)
+            // ★ 2026-11（D161）：文案不再指向已删除的「恢复成默认值」，改成指向「复制」
+      assert.match(body.error, /不能删/)
       // 删完它还得在（拒绝必须是真拒绝，不是"删了再补"——后者在列表里看不出来）
       assert.equal((await drafterOf(url)).id, drafter.id)
     })

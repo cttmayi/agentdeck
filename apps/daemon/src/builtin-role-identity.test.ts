@@ -17,7 +17,7 @@
  *   ② 审核者的指令被清空 ⇒ 起草者指令被写进**审核者**（我把指令整块换成起草者的，
  *      于是审核者去起草、起草者去审核）；随后审核者自己的对账看到"非空且不在历史里"
  *      ⇒ `left-alone`，**永久静默损坏**，重启也不会修。
- *   ③ 对审核者按「恢复成默认值」⇒ 200，名字变「起草者（内置）」、指令变起草者文本，
+ *   ③ 对审核者按「恢复成默认值」⇒ 200，名字变「起草者」、指令变起草者文本，
  *      而角色还是 `skill-reviewer`。界面上那个按钮对**两条内置都出现**
  *      （`AgentDetail.svelte` 的 `{#if agent.builtin}`），所以这是一点就中的坑。
  *
@@ -52,7 +52,7 @@ import {
  * 所以这一组用例仍然要覆盖"它还在盘上时会发生什么"——只是现在用本地常量造出它的旧形状，
  * 不再从 `builtin-drafter.ts` 导出一份已经删掉的默认身份。
  */
-const LEGACY_REVIEWER_NAME = 'Skill 审核者（内置）'
+const LEGACY_REVIEWER_NAME = 'Skill 审核者'
 const LEGACY_REVIEWER_INSTRUCTIONS = '你是平台内置的审核者：只指出哪里不合格，不要重写产出。'
 import { startDaemon } from './server.ts'
 import { builtinAccountingRows } from './startup-reconcile.ts'
@@ -211,6 +211,7 @@ describe('智能体生成者（agent-maker）的对账（2026-11 设计定稿 §
        *   "平台上到底有几条"。
        */
       for (const [slot, label] of [
+        ['assistant', '助手'],
         ['drafter', '起草者'],
         ['memory-tidy', '记忆整理者'],
         ['agent-maker', '智能体生成者'],
@@ -218,7 +219,7 @@ describe('智能体生成者（agent-maker）的对账（2026-11 设计定稿 §
       ] as const) {
         assert.ok(await platformMemberOf(store, WS, slot), `${label}要在`)
       }
-      assert.equal(all.filter((a) => a.owner === 'platform').length, 4, '平台上正好四条')
+      assert.equal(all.filter((a) => a.owner === 'platform').length, 5, '平台上正好五条（D161 含助手）')
     })
   })
 
@@ -238,6 +239,7 @@ describe('智能体生成者（agent-maker）的对账（2026-11 设计定稿 §
        *   "内置岗位对账结果"——所以这里只遍历**四条结果**，不遍历整个返回值。
        */
       const perMember = {
+        assistant: result.assistant,
         drafter: result.drafter,
         memoryTidy: result.memoryTidy,
         agentMaker: result.agentMaker,

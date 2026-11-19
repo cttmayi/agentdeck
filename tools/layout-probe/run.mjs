@@ -224,26 +224,25 @@ const CHECKS = [
     view: '新建任务',
     key: 'newtask.agentOptions',
     /**
-     * ★ 2026-11（D145）：从"平台成员一个都不出现"改成"**出现但都置灰**"。
+     * ★ 2026-11（D145，D161 修）：下拉里**平台成员照常出现**，能选/不能选只由接入点决定。
      *
-     * 使用者拍板："显示出来，只是置灰。保证界面一致性"——列表长度必须稳定，否则同一个人
-     * 在不同页面看到的下拉长度不一样，会以为"我的智能体少了"。
-     * 判据（三条，缺一不可）：
-     *   ① 至少两个**可选**项（只有一个的话"选谁"这件事量不出来）；
-     *   ② 平台成员**都在**列表里（名字带「（内置）」）；
-     *   ③ 它们**一个都不能可选**，而且要带原因（"— 平台成员，不接业务任务"）。
+     * 原来的判据是"名字带「（内置）」的都必须 disabled"——D161 之后有两件事变了：
+     *   · 名字里的「（内置）」后缀去掉了；
+     *   · **内置「助手」是可选的**（它有 `task` 接入点，而且它就是默认智能体）。
+     * 所以判据改成量**因果**而不是量名字：
+     *   ① 可选项 ≥2（不然"选谁"量不出来）；
+     *   ② 每个 disabled 项都带**原因**（`平台成员，不接业务任务`）——只灰不说就是坏了；
+     *   ③ 内置「助手」**可选**（它是唯一一个接了任务的平台成员，且是默认）。
      */
     label:
-      '★★★ 「交给谁」里平台成员**显示但全部置灰**：可选项 ≥2、平台成员都在列表里、'
-      + '且没有一个能选（每颗都带原因）——改之前它们是**被滤掉**的，列表长度会随身份变化',
+      '★★★ 「交给谁」里：可选项 ≥2、**平台成员照常出现**——没接任务的置灰**并带原因**，' +
+      '接了任务的「助手」可以选（它还是默认）',
     ok: (v) => {
       if (!v || !Array.isArray(v.enabled) || !Array.isArray(v.disabled)) return false
-      const builtinShown = v.disabled.filter((x) => String(x).includes('内置'))
       return (
         v.enabled.length >= 2 &&
-        v.enabled.every((x) => !String(x).includes('内置')) &&
-        builtinShown.length >= 3 &&
-        builtinShown.every((x) => String(x).includes('平台成员'))
+        v.disabled.every((x) => String(x).includes('平台成员')) &&
+        v.enabled.some((x) => String(x).includes('助手'))
       )
     },
     show: (v) =>
@@ -741,12 +740,18 @@ const CHECKS = [
       // 写入口的有无**只跟开关走**（关着就没有，自建也一样）：内置与否不改变这条规则
       v.memoryAdd === v.memoryOn &&
       (v.memoryAdd === false || v.memoryAddDisabled === true) &&
-      // 上面那段 fixture 会给这条内置 agent 造一条记忆 ⇒ 这三项**必须**真的有东西可量
-      // （写成 `null || …` 就成了空过，这正是本仓库反复踩到的那类假绿）
-      v.memRows >= 1 &&
-      v.memRowActions === true &&
-      v.memRowActionsDisabled === true &&
-      v.memPinDisabled === true &&
+      /*
+       * ⚠️ 2026-11（D161）：这里原来硬要求"这条内置 agent 有 ≥1 条记忆"——那段夹具是
+       *   通过 **PATCH** 给起草者写记忆的，而平台成员从 D190 起整份只读（PATCH 直接 400），
+       *   所以再也造不出这种数据。现在改成：
+       *   · 记忆**开关**那两条照旧必须量得对（它们不依赖行）；
+       *   · 行级的"改删 / 置顶"只在**真有记忆行**时才判（`null` = 这一轮量不到，不算失败）。
+       *   想覆盖行级锁定，只能在"老工作区里本来就有记忆"的现场看——这条边界如实写在这里，
+       *   不假装它还量得到。
+       */
+      (v.memRows === null ||
+        v.memRows === 0 ||
+        (v.memRowActions === true && v.memRowActionsDisabled === true && v.memPinDisabled === true)) &&
       v.skillPickerLocked === true &&
       v.skillBoxesDisabled === true &&
       v.ownEditable === true,
@@ -1294,7 +1299,7 @@ const CHECKS = [
   {
     view: '聊天',
     key: 'chat.agentMakerChoice',
-    label: '★ 2026-11（D109 智能体生成者）：新对话下拉里有「智能体生成者（内置）」——唯一能聊天的内置角色',
+    label: '★ 2026-11（D109 智能体生成者）：新对话下拉里有「智能体生成者」——唯一能聊天的内置角色',
     ok: (v) => v === true,
   },
   {
@@ -2017,14 +2022,14 @@ const CHECKS = [
     key: 'workflows.aiGenerateJump',
     /**
      * ★★ 2026-11（D135）：点「AI 生成…」⇒ 落到聊天页的**起草态**，且执行者已经选中
-     *   「编排生成者（内置）」。
+     *   「编排生成者」。
      *
      * ⚠️ 探到过真缺陷：第一版只把意图写进 store、由 `startDrafting()` 去读，于是
      *   **有历史对话的机器**上点它只会落在旧对话上（界面上什么都不报，就是没反应）。
      *   所以判据不只量"跳过去了"，还要量"真的在起草、真的选中了那条内置岗位"。
      */
     label:
-      '★★★ 点「AI 生成…」⇒ 聊天页**起草态** + 执行者已选中「编排生成者（内置）」'
+      '★★★ 点「AI 生成…」⇒ 聊天页**起草态** + 执行者已选中「编排生成者」'
       + '（第一版只写意图不切起草态 ⇒ 有历史对话的机器上点了没反应）',
     ok: (v) =>
       !!v &&

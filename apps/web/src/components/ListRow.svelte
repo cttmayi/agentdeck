@@ -21,6 +21,14 @@
     onclick,
     children,
     action,
+    /**
+     * ★ 2026-11（D161）：**这条占哪个出厂槽位**（`drafter` 等；自建是 `'user'`）。
+     *
+     * 为什么要落到 DOM 上：名字里的「（内置）」后缀去掉之后，探针（以及任何需要区分
+     * "这是平台成员还是你自己的"的地方）就需要一个**稳定的**判据——名字是使用者能改的，
+     * 槽位不是。它只是如实映射，不参与任何样式判断。
+     */
+    dataSlot = 'user',
   }: {
     /** 行盒的标记类名（如 `conv-row` / `task-row`；任务页带分组时传
         `task-row attention`——注意那条左边警告条是页面自己的样式）。 */
@@ -29,10 +37,12 @@
     onclick: () => void
     children: Snippet
     action?: Snippet
+    /** ⚠️ 不能叫 `slot`——那是 Svelte 自己的保留属性（组件插槽名）。 */
+    dataSlot?: string
   } = $props()
 </script>
 
-<li class="list-row {rowClass}" class:active>
+<li class="list-row {rowClass}" class:active data-slot={dataSlot}>
   <!--
     整行可点 + 右侧独立的动作按钮（`li` 里一条整行可点的 `<button>` + 兄弟按钮）：
     按钮里套按钮是非法结构，浏览器会把里层那个拆出去。`active` 挂在**整个 li**

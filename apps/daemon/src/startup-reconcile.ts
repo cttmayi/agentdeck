@@ -32,7 +32,7 @@
  *    `startup-reconcile.test.ts` 会红（"计划里有、实现里没有"是本仓库最怕的那类死接口）。
  */
 
-import type { WorkspaceId } from '@agentdeck/protocol'
+import type { Agent, WorkspaceId } from '@agentdeck/protocol'
 import type { Store } from '@agentdeck/domain'
 import {
   ensureBuiltinAgents,
@@ -51,8 +51,14 @@ import {
   platformMemberRefsInWorkflows,
 } from './platform-member.ts'
 import { DRAFTER_SKILL_SLUG } from './builtin-drafter.ts'
-import { alignMemberEntries, loadSlotTable, saveSlotTable, type SlotTable } from './platform-slots.ts'
-import { PLATFORM_MEMBER_ENTRIES } from './platform-member.ts'
+import {
+  PLATFORM_SLOTS,
+  alignMemberEntries,
+  loadSlotTable,
+  saveSlotTable,
+  type SlotTable,
+} from './platform-slots.ts'
+import { PLATFORM_MEMBER_ENTRIES, canBeDispatched, canChat, ownerOf } from './platform-member.ts'
 
 /* ══════════════════════════════════════════════════════════════════
  * 内置成员对账结果的"日志行"（D144：逐项都要说得出来）
@@ -71,6 +77,8 @@ export function builtinAccountingRows(
   builtin: Awaited<ReturnType<typeof ensureBuiltinAgents>>,
 ): ReadonlyArray<readonly [string, EnsureDrafterResult, string]> {
   return [
+    // ★ 2026-11（D161）：默认那个（唯一一个三项接入点全开的成员）
+    ['内置助手', builtin.assistant, '默认那个：接任务、能聊天、也能被编排引用'],
     ['内置起草者', builtin.drafter, '沉淀这条链用的'],
     ['内置记忆整理者', builtin.memoryTidy, '「整理记忆」用的'],
     ['内置智能体生成者', builtin.agentMaker, '「确认生成智能体」用的'],
@@ -215,6 +223,33 @@ export async function reconcileStartup(deps: ReconcileDeps): Promise<ReconcileRe
        *   不修的话同一页会出现"老成员多一枚没人认的动作徽标、新成员没有"。
        *   ⚠️ 只动平台成员；用户智能体的 `entries` 是使用者勾的，不碰。
        */
+      /*
+       * ★ 2026-11（D161）：**把名字里的「（内置）」后缀去掉**（使用者："内置智能体的名称都有
+       *   一个『（内置）』，不好看，有没有简洁的表达"）。
+       *
+       * 为什么"哪条是内置的"仍然说得清：列表本来就按**内置 / 自建**分组，详情页标题栏
+       * 有「平台内置」徽标——名字不必再背一个后缀。
+       *
+       * ⚠️ 只改**平台成员**的名字，且只去掉**结尾**那一个后缀（使用者自己起的名字不动）。
+       *   老工作区里那五条会在这一次启动里一起变干净。
+       */
+      {
+        const renamed: string[] = []
+        for (const slot of PLATFORM_SLOTS) {
+          const id = table[slot]
+          if (id === undefined) continue
+          const agent = await store.getAgent(id as Agent['id'])
+          if (agent === null || ownerOf(agent) !== 'platform') continue
+          const name = String(agent.name)
+          if (!name.endsWith('（内置）')) continue
+          const next = name.slice(0, -'（内置）'.length).trim()
+          if (next === '') continue
+          await store.insertAgent({ ...agent, name: next, updatedAt: Date.now() })
+          renamed.push(`${name} → ${next}`)
+        }
+        if (renamed.length > 0) info(`内置成员的名字去掉了「（内置）」后缀：${renamed.join('、')}`)
+      }
+
       const realigned = await alignMemberEntries(
         store,
         workspaceId,
@@ -224,6 +259,37 @@ export async function reconcileStartup(deps: ReconcileDeps): Promise<ReconcileRe
       if (realigned.length > 0) {
         info(`平台成员的接入点已对齐注册表：${realigned.join('、')}`)
       }
+      /*
+       * ★★ 2026-11（D161）：**首启把内置助手设为默认智能体**（使用者的要求："它也是默认
+       *   智能体"）。
+       *
+       * 三条边界（每一条都是刻意选的）：
+       *   · 只在 `defaultAgentId` **为空**、**悬空**（指向已删的记录）、或**不合格**
+       *     （那条没有同时具备 `chat` + `task`）时才写；
+       *   · **不覆盖使用者的选择**——他改成别的之后，重启不会再被抢回来；
+       *   · 用的是"能不能当默认"的那一句判据（`canChat && canBeDispatched`），
+       *     与 `PUT /api/agents/default` 同一句话。
+       */
+      const slotAssistant = table['assistant']
+      if (slotAssistant !== undefined) {
+        const workspace = await store.getWorkspace(workspaceId)
+        const currentId = (workspace?.defaultAgentId as string | null | undefined) ?? null
+        const current =
+          currentId === null ? null : await store.getAgent(currentId as Agent['id'])
+        const usable = current !== null && canChat(current) && canBeDispatched(current)
+        if (!usable) {
+          const assistant = await store.getAgent(slotAssistant as Agent['id'])
+          if (assistant !== null && workspace !== null) {
+            await store.insertWorkspace({
+              ...workspace,
+              defaultAgentId: assistant.id,
+              updatedAt: Date.now(),
+            })
+            info(`默认智能体：${currentId === null ? '还没有默认，' : '原来那个不可用，'}已设为「${String(assistant.name)}」`)
+          }
+        }
+      }
+
       for (const [label, r, why] of builtinAccountingRows(ensured)) {
         if (r.action === 'created') {
           info(`已建立${label}（${why}，可在「智能体」页查看与编辑）`)
@@ -312,7 +378,7 @@ export async function reconcileStartup(deps: ReconcileDeps): Promise<ReconcileRe
         warn(
           `有 ${migrated.halfBuiltin.length} 条记录配置损坏（builtin 标记在、岗位值缺）：` +
             `${migrated.halfBuiltin.join('、')}——已按「用户的普通智能体」处理（可改可删），` +
-            '要恢复平台成员请用「恢复成默认值」或重新出厂',
+            '平台成员缺了会对账重新建一条（这条坏记录按你自己的智能体处理）',
         )
       }
     },

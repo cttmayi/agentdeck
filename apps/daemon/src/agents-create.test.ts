@@ -479,7 +479,8 @@ describe('★ 默认智能体：设 / 取消 / 只认执行者', () => {
        *   但**必须仍然说清为什么**，否则人会以为是 bug。
        */
       assert.equal(body.code, 'agent_not_dispatchable')
-      assert.match(body.error, /不接业务任务/)
+      // ★ 2026-11（D161）：文案改成"要同时具备任务与聊天"（意思没变：平台成员当不了默认）
+      assert.match(body.error, /不能当默认执行者/)
       assert.match(body.error, /接入点|entries/, '要说清判据是什么（改哪个属性能让它接）')
     })
   })
@@ -608,7 +609,7 @@ describe('★ 入口（entries）：不传 = 三项全开，能改，值域封�
         body: JSON.stringify({ agentId }),
       })
       assert.equal(def.status, 400, '不能当默认执行者')
-      assert.match(((await def.json()) as { error: string }).error, /接入点|入口/)
+      assert.match(((await def.json()) as { error: string }).error, /不能当默认执行者/)
     })
   })
 

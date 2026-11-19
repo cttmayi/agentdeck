@@ -137,6 +137,22 @@ async function makeConversation(): Promise<{ id: string; dir: string }> {
   return { id: conversation.id, dir: (listing.body as Listing).workDir }
 }
 
+/**
+ * ★ 2026-11（D161）：首启**不再播种普通智能体**（「助手」现在是平台成员），所以这些
+ *   e2e 原来那句 `list.find((a) => a.builtin !== true)` 已经取不到任何东西。
+ *   它们真正需要的是"一个能改指令的执行者" ⇒ 自己建一条（这也是使用者的常规路径）。
+ */
+async function createExecutor(name: string): Promise<string> {
+  const res = await fetch(`${daemon.url}/api/agents`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, instructions: '' }),
+  })
+  const body = (await res.json()) as { id: string }
+  if (res.status !== 201) throw new Error(`建执行者失败：${res.status} ${JSON.stringify(body)}`)
+  return body.id
+}
+
 before(async () => {
   dataDir = await makeTempDir('conv-files-data')
   workRoot = await makeTempDir('conv-files-root')
@@ -151,7 +167,7 @@ before(async () => {
   })
   const agents = await json('/api/agents')
   const list = (agents.body as { agents: Array<{ id: string; builtin?: boolean }> }).agents
-  agentId = list.find((a) => a.builtin !== true)!.id
+  agentId = await createExecutor('文件夹具执行者')
 })
 
 after(async () => {

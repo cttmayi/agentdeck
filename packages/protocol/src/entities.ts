@@ -607,7 +607,7 @@ export const Agent = z.object({
    *   就是"字段在、没路径"，或者更糟：界面按名字猜它是不是内置（本仓库明令禁止）。
    */
   builtinKind: z
-    .enum(['drafter', 'skill-reviewer', 'memory-tidy', 'agent-maker', 'workflow-maker'])
+    .enum(['assistant', 'drafter', 'skill-reviewer', 'memory-tidy', 'agent-maker', 'workflow-maker'])
     .optional(),
   /*
    * ⚠️⚠️ 2026-11（D154）：**这个字段已经不再是"归属"或"身份"的权威**，新记录**不写**它。

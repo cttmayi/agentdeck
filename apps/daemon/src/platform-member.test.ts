@@ -156,7 +156,7 @@ describe('迁移：把推导结果写进数据（幂等、不删老字段、半�
       assert.deepEqual(again.halfBuiltin, [], '也不该再点名（它已经有 owner 了）')
 
       // ★ 出厂成员本身不带老字段（新记录只写 owner + entries）
-      const fresh = (await store.listAgents(WS)).find((a) => a.name === '沉淀起草者（内置）')!
+      const fresh = (await store.listAgents(WS)).find((a) => a.name === '沉淀起草者')!
       assert.equal(fresh.owner, 'platform')
       assert.equal(
         (fresh as { builtin?: boolean }).builtin,
@@ -181,18 +181,18 @@ describe('上线前的体检：现有编排里引用平台成员的，启动时�
       await store.insertAgent(member({ name: '撰稿员' }))
       const workflows = [
         { name: '好的', code: "await flow([agent('撰稿员')], '{{task}}')" },
-        { name: '坏的', code: "await flow([agent('沉淀起草者（内置）')], '{{task}}')" },
+        { name: '坏的', code: "await flow([agent('沉淀起草者')], '{{task}}')" },
         { name: '拼出来的', code: 'await flow(名单.map((n) => agent(n)), "{{task}}")' },
       ]
       const stale = await platformMemberRefsInWorkflows(store, WS, workflows)
       assert.equal(stale.length, 1, `只该有"坏的"那一条：${JSON.stringify(stale)}`)
       assert.match(stale[0]!, /坏的/)
-      assert.match(stale[0]!, /沉淀起草者（内置）/, '要点名是谁')
+      assert.match(stale[0]!, /沉淀起草者/, '要点名是谁')
 
       // 采纳校验用的名单与引擎同一句判据：平台成员不在里面
       const names = workflowReferenceableNames(await store.listAgents(WS))
       assert.ok(names.includes('撰稿员'))
-      assert.ok(!names.includes('沉淀起草者（内置）'))
+      assert.ok(!names.includes('沉淀起草者'))
     } finally {
       await store.close()
       await cleanup(dir)

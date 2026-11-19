@@ -3187,11 +3187,19 @@ async function injectedSkillsOf(
        *   哪个岗位"。同一个判据也用在派活（`POST /api/runs` / `POST /api/issues`）与
        *   任务下拉上——今天那三处各摸一个字段，正是"半内置"能钻过去的原因。
        */
-      if (!canBeDispatched(agent)) {
+      /*
+       * ★★ 2026-11（D161）：默认智能体要**同时**具备「任务」与「聊天」两个接入点。
+       *
+       * 为什么加后半句（使用者的要求）：默认智能体是"新建任务交给谁"，而那条任务跑起来
+       * 之后人还要能**接着跟它聊**（追问、改方向、接着做）。只有 `task` 没有 `chat` 的
+       * 记录能接活却聊不了——那是个能配出来、用起来才发现别扭的组合。
+       * ⚠️ 与界面同一句话（`AgentDetail` 那颗「设为默认」的出现条件）。
+       */
+      if (!canBeDispatched(agent) || !canChat(agent)) {
         sendJson(res, 400, {
           error:
-            `「${agent.name}」不能当默认执行者——它的接入点里没有「派任务」` +
-            '（平台成员默认不接业务任务；要让它接，得改它的 entries）。',
+            `「${agent.name}」不能当默认执行者——它需要**同时**具备「任务」与「聊天」两个接入点` +
+            `（现在：${canBeDispatched(agent) ? '有任务' : '没有任务'}、${canChat(agent) ? '有聊天' : '没有聊天'}）。`,
           code: 'agent_not_dispatchable',
         })
         return
@@ -4140,7 +4148,7 @@ async function injectedSkillsOf(
           sendJson(res, 400, {
             error:
               `「${current.name}」是${describeBuiltinAgent(await slotOf(store, workspaceId, current))}：**只读**（平台内置，` +
-              `名字/指令/CLI/环境变量都不能改）。要恢复平台默认用「恢复成默认值」。`,
+              `名字/指令/CLI/环境变量都不能改）。想改它的话，用「复制」做一份你自己的副本。`,
             code: 'builtin_agent_readonly',
           })
           return
@@ -4463,8 +4471,8 @@ async function injectedSkillsOf(
           return
         }
         // ★ 平台内置的（沉淀的起草者）**不许删**（定稿第 ② 条）：沉淀这条路必须永远
-        //   有起草者，所以不留"删了之后怎么办"这种静默分支——想恢复原样有
-        //   「恢复成默认值」那个按钮。这里要**明确拒绝**，而不是删了再偷偷重建：
+        //   有起草者，所以不留"删了之后怎么办"这种静默分支（想改它就用「复制」做副本）。
+        //   这里要**明确拒绝**，而不是删了再偷偷重建：
         //   偷偷重建的表现是"删了它过一会儿又回来了"，比直接拒绝更难懂。
         //
         // ⚠️ ★ 分批第 192 批：**已下线的内置审核者例外——可以删**。
@@ -4477,7 +4485,9 @@ async function injectedSkillsOf(
         //   ⚠️ 不自动删：那是使用者的数据，删不删由他点。
         if (ownerOf(current) === 'platform') {
           sendJson(res, 400, {
-            error: `「${current.name}」是${describeBuiltinAgent(await slotOf(store, workspaceId, current))}，不能删——要恢复原样请用「恢复成默认值」。`,
+            error:
+              `「${current.name}」是${describeBuiltinAgent(await slotOf(store, workspaceId, current))}，不能删` +
+              '——平台成员缺了会对账重新建回来；要一份能改的，用「复制」做副本。',
             code: 'builtin_agent_not_deletable',
           })
           return
@@ -4930,7 +4940,7 @@ async function injectedSkillsOf(
        * ★ 2026-11（D145）：**派活的接口层守卫**。
        *
        * 改之前这里对 assignee 不做任何检查——界面下拉把平台成员过滤掉了，但手写 API
-       * 就能把任务派给「沉淀起草者（内置）」，它会按"你是 skill 作者"的指令去干业务活。
+       * 就能把任务派给「沉淀起草者」，它会按"你是 skill 作者"的指令去干业务活。
        * 判据与界面下拉、默认执行者、`POST /api/task` 用的是同一句：`canBeDispatched`。
        */
       const assigneeId = typeof body.assignee === 'string' ? body.assignee : null
@@ -7348,7 +7358,7 @@ async function injectedSkillsOf(
       /**
        * ★ 分批第 207 批：**平台替起草者挂的那条不算"使用者的引用"**。
        *
-       * 起草者（内置）现在真的挂着 `distilly`，而它是只读的 ⇒ 若把它也算进"还挂着就拒"，
+       * 起草者现在真的挂着 `distilly`，而它是只读的 ⇒ 若把它也算进"还挂着就拒"，
        * 使用者就**永远卸不掉** distilly（想卸 → 被拒 → 又改不了内置 agent）。
        * 所以这条技能的删除先做一次**平台侧摘挂**（`syncDrafterSkillMount` 在删除后会再对齐一次，
        * 这里只是提前让守卫看不到它），然后照常走下面那套危险检查。
@@ -9200,10 +9210,12 @@ async function injectedSkillsOf(
          * ⚠️ 2026-11（S4）：这里原来按 `role === 'executor'` 挑默认执行者。角色退场 ⇒
          *   判据换成"不是平台内置岗位"（用 `builtinKindOf(a) === null` 的等值写法）。
          */
+        // ★ 2026-11（D161）：与 `PUT /api/agents/default` 同一句话——**任务 + 聊天**都要有
+        const canBeDefault = (a: Agent): boolean => canBeDispatched(a) && canChat(a)
         const usable =
-          preferred !== null && canBeDispatched(preferred)
+          preferred !== null && canBeDefault(preferred)
             ? preferred
-            : (await store.listAgents(workspaceId)).filter(canBeDispatched)[0]
+            : (await store.listAgents(workspaceId)).filter(canBeDefault)[0]
         if (usable === undefined) {
           sendJson(res, 400, {
             error:
@@ -9826,34 +9838,13 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
    *   数据），它现在就是一条普通的 agent 记录。
    */
 
-  const agent: Agent = {
-    id: ulid() as Agent['id'],
-    workspaceId: workspace.id,
-    name: '助手',
-    instructions: '你是一个严谨的协作者。先理解任务，再动手；报告要写清楚结论与不确定的地方。',
-    /**
-     * ★ 分批第 259 批：**只有「助手」默认带记忆**（使用者的选择：它是天天用的那个，
-     *   "记住：「下次别用 npm」"这类话本来就该落在它身上）。其余新建/播种的智能体默认关，
-     *   要用再在自己的配置页打开。
-     */
-    memoryEnabled: true,
-    model: null,
-    runtimeKey: 'claude',
-    workDir: null,
-    // 执行者不需要审核 skill——它的 skill 是"干活时参考什么"，
-    // 而审核标准是审核者的事。两者混在一起会让执行者按审核标准去改自己的产出。
-    skillIds: [],
-    env: {},
-    reviewStandard: null,
-    createdAt: now,
-    updatedAt: now,
-  }
-  await store.insertAgent(agent)
-
-  // ★ 首启就把刚播下的执行者设为「新建任务的默认智能体」（D36）：使用者建完
-  //   第一件事就是"新建任务"，而那一步不该让他先想"交给谁"。这个默认随时可改
-  //   （智能体卡片上的按钮）。
-  await store.insertWorkspace({ ...workspace, defaultAgentId: agent.id, updatedAt: Date.now() })
+  /*
+   * ★ 2026-11（D161）：这里原来**播种一条普通 agent「助手」**并把它设为默认。
+   *   现在「助手」是一条**平台成员**（`ensureBuiltinAssistant`，启动对账里建），
+   *   所以引导流程不再造它——造两份只会让列表里出现两条助手，而"哪条是平台的"说不清。
+   *   默认智能体也改由对账决定（见 `startup-reconcile.ts` 的 `builtin-agents`：
+   *   只在**没有 / 悬空 / 不合格**时才设，不覆盖使用者的选择）。
+   */
 
   /*
    * ⚠️ 2026-11（S3）：这里原来播种一个**智能体组**（"默认组"，把执行者与审核者串起来
@@ -9863,9 +9854,9 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
    */
 
   // ★ 顺便说清"技能库是空的"：使用者打开 Skills 页看到空列表时，不该以为是坏了。
-  info(
-    `已初始化工作区与智能体「${agent.name}」。技能库是空的——要装 skill 请去「Skills」页。`,
-  )
+  //   ⚠️ 2026-11（D161）：这里不再提"智能体「助手」"——引导流程已经不造它了，
+  //   内置成员由启动对账创建（日志在那边逐项说）。
+  info('已初始化工作区。技能库是空的——要装 skill 请去「Skills」页。')
   return workspace.id
 }
 
