@@ -775,6 +775,40 @@ const CHECKS = [
   },
   {
     view: '智能体',
+    key: 'agents.renameOnSwitch',
+    /**
+     * ★★★ 2026-11（D158）：使用者报的真 bug——「点改名后，我选中其他智能体，
+     *   还保持在改名状态」。
+     *
+     * `renaming` 是组件自己的状态，`agent` 换了它不变 ⇒ 标题栏挂着**上一个人的
+     * 改名输入框**（里面是上一个人的名字），底下却是新的人。
+     *
+     * 判据量的是**界面**（不是"某个变量是 false"）：换人之后
+     *   ① 改名输入框没了；② 标题显示的是**新那条**的名字；③ 没有残留「（未保存）」。
+     * 另外先确认「改名态真的进去过」——不然一个"点了没反应"的入口也能让上面三条全绿。
+     */
+    label:
+      '★★★ 改名态**属于某一个人**：点「改名」再选中另一条智能体 ⇒ 输入框消失、标题是**新那条**的名字、' +
+      '没有残留「（未保存）」——使用者报的 bug（改上一个人的名字，改着改着底下换人了）',
+    ok: (v) =>
+      !!v &&
+      (v.skipped !== undefined ||
+        (v.entered === true &&
+          v.switched === true &&
+          v.renameGone === true &&
+          v.pendingGone === true &&
+          v.shownIsSecond === true)),
+    show: (v) =>
+      v === null
+        ? 'null'
+        : v.skipped !== undefined
+          ? `跳过：${String(v.skipped)}`
+          : `进过改名态 ${String(v.entered)}（${String(v.first)}）　换人 ${String(v.switched)}　` +
+            `输入框消失 ${String(v.renameGone)}　未保存提示消失 ${String(v.pendingGone)}　` +
+            `标题是新的 ${String(v.shownIsSecond)}（显示「${String(v.shown)}」／应为「${String(v.second)}」）`,
+  },
+  {
+    view: '智能体',
     key: 'agents.cardNoHoles',
     /**
      * ★ 分批第 254 批（使用者："加入记忆后，布局乱了"）：卡片两列网格**不许留洞**。

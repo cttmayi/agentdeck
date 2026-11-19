@@ -956,6 +956,72 @@
           }
         })()
 
+        /**
+         * ★★★ 2026-11（D158）：**换人时"这一屏的临时状态"必须一起作废**。
+         *
+         * 使用者报的：「点改名后，我选中其他智能体，还保持在改名状态」——`renaming` 是
+         * 组件自己的状态，`agent` 换了它不变 ⇒ 标题栏还挂着**上一个人的改名输入框**
+         * （里面是上一个人的名字），底下却是新的人。
+         *
+         * 量三件（"变量改了"不算数，要量**界面**）：
+         *   ① 改名态真的进去了（输入框在，且里面是那个人的名字）；
+         *   ② 选中另一个人之后，改名输入框**没了**、标题显示的是**新那条**的名字；
+         *   ③ 没有残留「（未保存）」提示（改名只落在草稿里，换人后草稿作废）。
+         * ⚠️ 最后要把选中项恢复到进来时那个人：后面还有判据要量它的详情。
+         */
+        facts['agents.renameOnSwitch'] = await (async () => {
+          const rows = () => [...d().querySelectorAll('.agent-list .agent-row')]
+          const nameOf = (row) => (text(row.querySelector('.agent-line strong')) ?? '').trim()
+          const headName = () =>
+            (text(d().querySelector('[data-agent-head-name]')) ?? '').trim()
+          const renameBtn = () => d().querySelector('[data-agent-rename]')
+          // 找两条**能改名**的（自建）行
+          const editable = rows().filter((r) => (text(r) ?? '').includes(''))
+          const prev = headName()
+          const ownRows = rows().filter((r) => !(text(r) ?? '').includes('（内置）'))
+          if (ownRows.length < 2) return { skipped: '自建的智能体不足两条' }
+          const first = ownRows[0]
+          click(first.querySelector('.list-row-main') ?? first)
+          await until(() => headName() === nameOf(first), 60)
+          const btn = renameBtn()
+          if (!btn) return { skipped: '这一条没有「改名」入口' }
+          click(btn)
+          /*
+           * ⚠️ `until()` 返回的是**布尔**（不是它等的那个元素）——第一版写成
+           * `const input = await until(...)` 再读 `input.value`，于是 `entered` 恒为 false，
+           * 判据红在一个"量法错"上，而不是界面上。
+           */
+          const enteredOk = await until(() => !!d().querySelector('.agent-rename-input'), 40)
+          const input = d().querySelector('.agent-rename-input')
+          const entered = enteredOk && !!input && (input.value ?? '') === nameOf(first)
+
+          // 换到另一条（**不提交改名**）
+          const second = ownRows[1]
+          click(second.querySelector('.list-row-main') ?? second)
+          const switched = await until(() => headName() === nameOf(second), 60)
+          const renameGone = !d().querySelector('.agent-rename-input')
+          const pendingGone = !d().querySelector('[data-agent-rename-pending]')
+          const shown = headName()
+
+          // 恢复到进来时那个人（后面的判据要量它的详情）
+          const back = rows().find((r) => nameOf(r) === prev)
+          if (back) {
+            click(back.querySelector('.list-row-main') ?? back)
+            await until(() => headName() === prev, 60)
+          }
+          void editable
+          return {
+            entered,
+            switched,
+            renameGone,
+            pendingGone,
+            shownIsSecond: shown === nameOf(second),
+            first: nameOf(first),
+            second: nameOf(second),
+            shown,
+          }
+        })()
+
         facts['agents.cardNoHoles'] = await (async () => {
           /**
            * ★ 第 272 批：**选一个挂着技能的智能体**再量。

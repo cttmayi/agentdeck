@@ -460,6 +460,34 @@
     draft = blankDraft()
     error = ''
     memRows = memoryRows(agent.memory)
+    /*
+     * ⚠️⚠️ 2026-11（D158）：**换人时还要把"这一屏的临时状态"一起作废**。
+     *
+     * 使用者报的：「点改名后，我选中其他智能体，还保持在改名状态」——`renaming` 是组件
+     * 自己的状态，`agent` 换了它不变 ⇒ 标题栏还挂着**上一个人的改名输入框**（里面是
+     * 上一个人的名字），底下却是新的人。同类的还有几处，一起按"属于某一个人"清掉：
+     *
+     *   · `renaming` / `renameValue`——改名态（报的那个）；
+     *   · `consolidateOpen`——「合并同类」对话框里装的是**上一个人的全部记忆**，
+     *     留着它再点确认会把那一份合并结果用到新的人身上；
+     *   · `editorOpen` / `editingSlug` / `editingBody`——独有技能的编辑器同理
+     *     （里面是上一个人的技能正文，保存会写进**新的人**的目录）；
+     *   · `memNewText` / `memPreview*` / `memError`——新的一条记忆的草稿与预览。
+     *
+     * 判据落在"换人之后标题栏显示的是**新那条**的名字"上（探针 `agents.renameOnSwitch`），
+     * 而不是"某个变量是 false"——变量改了但界面没跟上的情况一样要红。
+     */
+    renaming = false
+    renameValue = ''
+    consolidateOpen = false
+    editorOpen = false
+    editingSlug = ''
+    editingBody = ''
+    memNewText = ''
+    memPreview = null
+    memPreviewStats = null
+    memPreviewError = ''
+    memError = ''
     void loadMemory(agent.id)
   }
 
