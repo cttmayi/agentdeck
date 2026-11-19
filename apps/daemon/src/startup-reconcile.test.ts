@@ -4,6 +4,7 @@ import { FileStore } from '@agentdeck/store-file'
 import { wsId } from '@agentdeck/domain/testing'
 import { RECONCILE_PLAN, reconcileStartup } from './startup-reconcile.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
+import { ensureTestWorkspace } from './testing/test-workspace.ts'
 
 /**
  * **启动对账**（2026-11，D149）。
@@ -24,6 +25,8 @@ const WS = wsId('ws-reconcile')
 async function withStore<T>(fn: (store: FileStore) => Promise<T>): Promise<T> {
   const dir = await makeTempDir('startup-reconcile')
   const store = await FileStore.open({ dataDir: dir, fsync: false })
+  // ★ 2026-11（D154）：槽位表挂在工作区上（`Workspace.platformSlots`）⇒ 先有工作区
+  await ensureTestWorkspace(store, WS)
   try {
     return await fn(store)
   } finally {

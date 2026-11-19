@@ -105,6 +105,14 @@ import {
 } from './agent-maker-skills.ts'
 import { MEMORY_EXISTING_MEMORY_FILE, MEMORY_TRANSCRIPT_FILE } from './platform-actions.ts'
 import { builtinAccountingRows, reconcileStartup } from './startup-reconcile.ts'
+import {
+  SLOT_LABELS,
+  legacySlotOf,
+  loadSlotTable,
+  platformMemberOf,
+  slotOf,
+  slotOfAgent,
+} from './platform-slots.ts'
 import { canDetach, detachPlatformMember, detachReferences } from './member-detach.ts'
 import {
   canBeDispatched,
@@ -155,7 +163,6 @@ import {
 import { loadAgentInjectableSkills } from './agent-injectable-skills.ts'
 import {
   builtinDefaultsOf,
-  builtinKindOf,
   describeBuiltinAgent,
   DRAFTER_INSTRUCTIONS,
   DRAFTER_INSTRUCTIONS_BODY,
@@ -167,7 +174,6 @@ import {
   ensureBuiltinMemoryTidy,
   DRAFTER_SKILL_SLUG,
   syncDrafterSkillMount,
-  findBuiltinAgent,
 } from './builtin-drafter.ts'
 import {
   appendMaterial,
@@ -2009,7 +2015,7 @@ async function injectedSkillsOf(
     //   用的不是同一个身份——两版的风格会分叉，而使用者只看到"改完反而不像同一条"）。
     //   判据是 **`builtin` + `role: drafter`**（第 70 批）：只按标记挑会挑到审核者
     //   （列表顺序是写入顺序，不保证起草者在前），于是"改一版"用的是审核者的身份。
-    const reviseDrafter = findBuiltinAgent(await store.listAgents(workspaceId), 'drafter')
+    const reviseDrafter = await platformMemberOf(store, workspaceId, 'drafter')
     if (!reviseDrafter) {
       await ensureBuiltinDrafter(store, workspaceId)
     }
@@ -2277,7 +2283,7 @@ async function injectedSkillsOf(
     if (sourceRunId !== undefined) {
       sourceRun = await store.getRun(sourceRunId as RunId)
     }
-    const drafter = findBuiltinAgent(await store.listAgents(workspaceId), 'drafter')
+    const drafter = await platformMemberOf(store, workspaceId, 'drafter')
     if (!drafter) await ensureBuiltinDrafter(store, workspaceId)
     const drafterAgent = (drafter ?? {
       id: ulid() as Agent['id'],
@@ -3072,9 +3078,10 @@ async function injectedSkillsOf(
 
     // ── agents / issues（M0 看板需要的最小 CRUD）──
     if (req.method === 'GET' && path === '/api/agents') {
-      const [allAgents, settings] = await Promise.all([
+      const [allAgents, settings, slotTable] = await Promise.all([
         store.listAgents(workspaceId),
         readWorkspaceSettings(store, workspaceId),
+        loadSlotTable(store, workspaceId),
       ])
       /*
        * ⚠️ 2026-11（S3）：这里原来要滤掉**私有智能体**（`ownerGroupId` 有值 = 只属于
@@ -3110,6 +3117,11 @@ async function injectedSkillsOf(
         owner: ownerOf(a),
         entries: entriesOf(a),
         halfBuiltin: isHalfBuiltin(a),
+        /*
+         * ★ 2026-11（D154）：**它占哪个槽位**——界面拿它显示"这是哪一条出厂成员"
+         *   （列表徽标「沉淀起草」那种）。老工作区还没跑过对账时回退记录上的老字段。
+         */
+        slot: slotOfAgent(slotTable, a.id as string) ?? legacySlotOf(a),
       }))
       // ★ 默认智能体跟着列表一起给：界面要在卡片上标「默认」，新建任务页要用它
       //   当预选项——两处都拿同一份，不各自猜。
@@ -3924,8 +3936,34 @@ async function injectedSkillsOf(
         sendJson(res, 404, { error: `agent 不存在：${agentId}` })
         return
       }
-      if (current.builtin !== true) {
-        // 非内置的 agent 没有"默认值"可言（他的指令就是他写的）
+      /*
+       * ⚠️ 2026-11（D154）：**老记录的三种说法要排在归属判断之前**。
+       *
+       * 为什么顺序要紧：`ownerOf()` 把已下线的 `skill-reviewer` 归一成 `user`（D145：
+       * 它可改可删、没有默认身份），于是"能不能恢复默认"这一步会先撞上"它不是平台成员"，
+       * 把"它已经下线了"这句更有用的话盖掉。老记录里 `builtin` / `builtinKind` 还在，
+       * 所以这里按老字段把两种情况认出来，给它们各自该有的话。
+       */
+      if (current.builtinKind === 'skill-reviewer') {
+        sendJson(res, 409, {
+          error:
+            `「${current.name}」是已下线的内置审核者（沉淀线不再评审，§12.15）——` +
+            `它没有默认值可恢复。不需要它的话，可以在「智能体」页把它删掉（它已经不被任何链路使用）。`,
+          code: 'builtin_retired',
+        })
+        return
+      }
+      if (current.builtin === true && legacySlotOf(current) === null && ownerOf(current) !== 'platform') {
+        sendJson(res, 400, {
+          error:
+            `「${current.name}」挂着内置标记，但没有可识别的「出厂槽位」——` +
+            '不知道该恢复成哪一套默认值。如果是新版本加的内置条目，请升级后重启。',
+          code: 'builtin_kind_unknown',
+        })
+        return
+      }
+      if (ownerOf(current) !== 'platform') {
+        // 非平台成员的 agent 没有"默认值"可言（他的指令就是他写的）
         sendJson(res, 400, {
           error: `「${current.name}」不是平台内置的智能体，没有默认值可恢复。`,
           code: 'not_builtin_agent',
@@ -3938,7 +3976,11 @@ async function injectedSkillsOf(
       //   变起草者文本，角色却还是 `skill-reviewer`；而它自己的对账随后看到"非空且不在
       //   历史里"⇒ `left-alone`，永久静默损坏。按钮在界面上对**两条内置都出现**
       //   （`AgentDetail.svelte`：`{#if agent.builtin}`），所以这是一点就中的坑。
-      const kind = builtinKindOf(current)
+      /*
+       * ★ 2026-11（D154）：**从槽位表反查它是哪一条**（老数据回退记录上的老字段）。
+       *   `null` = 它是平台成员、但没占任何槽位——那是数据不一致，如实报，不猜。
+       */
+      const kind = await slotOf(store, workspaceId, current)
       if (kind === null) {
         /*
          * 挂着内置标记但**岗位值缺 / 认不出**（老记录 / 被手改过）：这时候
@@ -3956,18 +3998,7 @@ async function injectedSkillsOf(
         })
         return
       }
-      if (kind === 'skill-reviewer') {
-        // ★ 分批第 137 批：沉淀线的评审已下线 ⇒ 这条内置审核者**没有默认值可恢复**
-        //   （它自己的默认身份已删）。老工作区里它仍是使用者的数据，平台不悄悄删——
-        //   但"恢复默认"会把空指令写进去，那比不恢复更坏，所以这里如实拒绝并给出去处。
-        sendJson(res, 409, {
-          error:
-            `「${current.name}」是已下线的内置审核者（沉淀线不再评审，§12.15）——` +
-            `它没有默认值可恢复。不需要它的话，可以在「智能体」页把它删掉（它已经不被任何链路使用）。`,
-          code: 'builtin_retired',
-        })
-        return
-      }
+
       const defaults = builtinDefaultsOf(kind)
       const restored: Agent = {
         ...current,
@@ -4055,7 +4086,7 @@ async function injectedSkillsOf(
         }
         if (ownerOf(agent) === 'platform' && options.allowBuiltinEdits !== true) {
           sendJson(res, 400, {
-            error: `「${agent.name}」是${describeBuiltinAgent(agent)}：它的独有技能由平台播种，不可改。`,
+            error: `「${agent.name}」是${describeBuiltinAgent(await slotOf(store, workspaceId, agent))}：它的独有技能由平台播种，不可改。`,
             code: 'builtin_agent_readonly',
           })
           return
@@ -4100,7 +4131,7 @@ async function injectedSkillsOf(
         }
         if (ownerOf(agent) === 'platform' && options.allowBuiltinEdits !== true) {
           sendJson(res, 400, {
-            error: `「${agent.name}」是${describeBuiltinAgent(agent)}：它的独有技能由平台播种，不可删。`,
+            error: `「${agent.name}」是${describeBuiltinAgent(await slotOf(store, workspaceId, agent))}：它的独有技能由平台播种，不可删。`,
             code: 'builtin_agent_readonly',
           })
           return
@@ -4144,6 +4175,8 @@ async function injectedSkillsOf(
           instructions: effectiveInstructions(agent),
           owner: ownerOf(agent),
           entries: entriesOf(agent),
+          // ★ 2026-11（D154）：与列表同一口径（详情页要显示"这是哪一条"）
+          slot: slotOfAgent(await loadSlotTable(store, workspaceId), agent.id as string) ?? legacySlotOf(agent),
           memory,
         })
         return
@@ -4177,7 +4210,7 @@ async function injectedSkillsOf(
         if (ownerOf(current) === 'platform' && options.allowBuiltinEdits !== true) {
           sendJson(res, 400, {
             error:
-              `「${current.name}」是${describeBuiltinAgent(current)}：**只读**（平台内置，` +
+              `「${current.name}」是${describeBuiltinAgent(await slotOf(store, workspaceId, current))}：**只读**（平台内置，` +
               `名字/指令/CLI/环境变量都不能改）。要恢复平台默认用「恢复成默认值」。`,
             code: 'builtin_agent_readonly',
           })
@@ -4515,7 +4548,7 @@ async function injectedSkillsOf(
         //   ⚠️ 不自动删：那是使用者的数据，删不删由他点。
         if (ownerOf(current) === 'platform') {
           sendJson(res, 400, {
-            error: `「${current.name}」是${describeBuiltinAgent(current)}，不能删——要恢复原样请用「恢复成默认值」。`,
+            error: `「${current.name}」是${describeBuiltinAgent(await slotOf(store, workspaceId, current))}，不能删——要恢复原样请用「恢复成默认值」。`,
             code: 'builtin_agent_not_deletable',
           })
           return
@@ -4634,7 +4667,7 @@ async function injectedSkillsOf(
         return
       }
       await ensureBuiltinMemoryTidy(store, workspaceId)
-      const tidyAgent = findBuiltinAgent(await store.listAgents(workspaceId), 'memory-tidy')
+      const tidyAgent = await platformMemberOf(store, workspaceId, 'memory-tidy')
       if (!tidyAgent) {
         sendJson(res, 500, { error: '内置的「记忆整理者」不在——重启 daemon 再试。' })
         return
@@ -6511,10 +6544,10 @@ async function injectedSkillsOf(
       //   ——它是平台自己的东西，自愈比拦下使用者更对。
       //   判据是 **`builtin` + `role: drafter`**（第 70 批）：只按标记挑会挑到审核者，
       //   于是起草 run 拿到的身份是审核者的指令（"你只审 skill"），产出结构就跑了。
-      let drafter = findBuiltinAgent(await store.listAgents(workspaceId), 'drafter')
+      let drafter = await platformMemberOf(store, workspaceId, 'drafter')
       if (!drafter) {
         await ensureBuiltinDrafter(store, workspaceId)
-        drafter = findBuiltinAgent(await store.listAgents(workspaceId), 'drafter')
+        drafter = await platformMemberOf(store, workspaceId, 'drafter')
       }
       const drafterAgent = (drafter ?? {
         id: ulid() as Agent['id'],
@@ -7381,6 +7414,8 @@ async function injectedSkillsOf(
         return
       }
       const agents = await store.listAgents(workspaceId)
+      // ★ 2026-11（D154）：槽位表（下面"平台替你挂的那条"要按它认人）
+      const slotTable = await loadSlotTable(store, workspaceId)
       /**
        * ★ 分批第 207 批：**平台替起草者挂的那条不算"使用者的引用"**。
        *
@@ -7398,13 +7433,11 @@ async function injectedSkillsOf(
       if (platformMountSlugs.includes(skill.slug)) {
         /*
          * ⚠️ 2026-11（S4）：这里原来按 `a.role === 'drafter'` 认"平台替你挂的那条"。
-         *   角色退场 ⇒ 按**内置岗位**认（`builtin` + `builtinKind === 'drafter'`）。
+         * ★ 2026-11（D154）：再换成**查槽位表**——"我那条起草者"只在表里说。
          */
+        const drafterId = slotTable['drafter'] ?? null
         for (const a of agents) {
-          if (
-            builtinKindOf(a) === 'drafter' &&
-            a.skillIds.includes(skillId)
-          ) {
+          if (drafterId !== null && (a.id as string) === drafterId && a.skillIds.includes(skillId)) {
             await store.insertAgent({
               ...a,
               skillIds: a.skillIds.filter((id) => (id as string) !== (skillId as string)) as Agent['skillIds'],
@@ -8124,8 +8157,13 @@ async function injectedSkillsOf(
         sendJson(res, 404, { error: '对话不存在' })
         return
       }
-      const maker = await store.getAgent(conversation.agentId as Agent['id'])
-      if (!maker || builtinKindOf(maker) !== 'workflow-maker') {
+      /*
+       * ★ 2026-11（D154）：判据是**槽位表**——"我那条编排生成者"是哪个 id。
+       *   改之前读记录上的老字段（`builtinKind`），那条现在新记录里根本不存在。
+       */
+      const wfSlots = await loadSlotTable(store, workspaceId)
+      const makerId = wfSlots['workflow-maker'] ?? null
+      if (makerId === null || (conversation.agentId as string) !== makerId) {
         sendJson(res, 400, {
           error: '只有「编排生成者」的对话能采纳编排（这条对话的执行者不是它）',
           code: 'workflow_commit_not_maker',
@@ -8194,8 +8232,12 @@ async function injectedSkillsOf(
       // ★ 岗位卡只能从「智能体生成者」的对话产出：别的 agent 把 agent-draft.md 放进
       //   工作目录不是"生成智能体"，是别的玩法——这条接口不替它背书。
       //   ⚠️ 2026-11（S4）：判据从 `role === 'agent-maker'` 换成**内置岗位**。
-      const maker = await store.getAgent(conversation.agentId as Agent['id'])
-      if (!maker || builtinKindOf(maker) !== 'agent-maker') {
+      /*
+       * ★ 2026-11（D154）：判据是**槽位表**（理由同上一条）。
+       */
+      const makerSlots = await loadSlotTable(store, workspaceId)
+      const makerAgentId = makerSlots['agent-maker'] ?? null
+      if (makerAgentId === null || (conversation.agentId as string) !== makerAgentId) {
         sendJson(res, 400, {
           error: '只有「智能体生成者」的对话能确认生成智能体（这条对话的执行者不是它）',
           code: 'agent_commit_not_maker',
@@ -8507,7 +8549,7 @@ async function injectedSkillsOf(
        *   内部是幂等的（使用者自己改过的一字不动），所以每次跑一遍是安全的。
        */
       await ensureBuiltinMemoryTidy(store, workspaceId)
-      const tidyAgent = findBuiltinAgent(await store.listAgents(workspaceId), 'memory-tidy')
+      const tidyAgent = await platformMemberOf(store, workspaceId, 'memory-tidy')
       const agent = tidyAgent
       if (!agent) {
         sendJson(res, 500, {

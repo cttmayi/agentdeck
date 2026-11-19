@@ -1228,7 +1228,7 @@
                 {/each}
               </div>
             {/if}
-            {#if agent.builtinKind === 'drafter'}
+            {#if agent.slot === 'drafter'}
               {#if agent.skillIds.length === 0}
                 <!-- 只有起草者这一格能**动手**（装那条沉淀技能），而且这是平台给的动作，
                      不是"改它"。装完 daemon 自己挂上——所以按钮留着。 -->

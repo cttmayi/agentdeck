@@ -12,8 +12,8 @@ import {
 import { FileStore } from '@agentdeck/store-file'
 import { wsId } from '@agentdeck/domain/testing'
 import type { Agent, Skill } from '@agentdeck/protocol'
-import { builtinKindOf } from './builtin-drafter.ts'
 import { startDaemon, type DaemonHandle } from './server.ts'
+import { platformMemberOf } from './platform-slots.ts'
 import { parseAgentDraft, readAgentDraftArtifacts, type AgentDraftParsed } from './agent-maker.ts'
 import {
   AGENT_MAKER_SKILL_SLUGS,
@@ -22,6 +22,7 @@ import {
 } from './agent-maker-skills.ts'
 import { loadAgentInjectableSkills } from './agent-injectable-skills.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
+import { ensureTestWorkspace } from './testing/test-workspace.ts'
 
 /**
  * 智能体生成者（2026-11 设计定稿）：岗位卡解析 + 生成产物读取 + 确认生成整链。
@@ -161,11 +162,13 @@ describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）',
   test('★ 三份平台技能播种进生成者的独有目录（不进技能库、不挂 skillIds、幂等）', async () => {
     const dir = await makeTempDir('agent-maker-skills')
     const store = await FileStore.open({ dataDir: dir, fsync: false })
+    // ★ 2026-11（D154）：槽位表挂在工作区上 ⇒ 用 store 的用例必须先有工作区
+    await ensureTestWorkspace(store, WS)
     try {
       const first = await ensureBuiltinAgentMakerSkills(store, WS)
       assert.deepEqual([...first.seeded].sort(), [...AGENT_MAKER_SKILL_SLUGS].sort())
 
-      const maker = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'agent-maker')!
+      const maker = (await platformMemberOf(store, WS, 'agent-maker'))!
       const exclusive = await store.listExclusiveSkills(maker.id)
       assert.equal(exclusive.length, AGENT_MAKER_SKILL_SLUGS.length)
       for (const slug of AGENT_MAKER_SKILL_SLUGS) {
@@ -191,6 +194,8 @@ describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）',
   test('★ 老库里的三条平台技能迁进独有目录并清掉（一次性、幂等；正文原样搬）', async () => {
     const dir = await makeTempDir('agent-maker-migrate')
     const store = await FileStore.open({ dataDir: dir, fsync: false })
+    // ★ 2026-11（D154）：槽位表挂在工作区上 ⇒ 用 store 的用例必须先有工作区
+    await ensureTestWorkspace(store, WS)
     try {
       // 造一个"老工作区"：库里三条 platform:agent-maker + 生成者 skillIds 指向它们
       const now = Date.now()
@@ -267,6 +272,8 @@ describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）',
   test('★★ 注入：共享 ∪ 独有走同一条通道；同 slug 时独有**盖过**共享', async () => {
     const dir = await makeTempDir('agent-maker-inject')
     const store = await FileStore.open({ dataDir: dir, fsync: false })
+    // ★ 2026-11（D154）：槽位表挂在工作区上 ⇒ 用 store 的用例必须先有工作区
+    await ensureTestWorkspace(store, WS)
     try {
       await store.insertWorkspace({
         id: WS,
@@ -465,14 +472,11 @@ description: decisions/owners/deadlines 三段的会议纪要格式
   const agents = await json('/api/agents')
   const list = (
     agents.body as {
-      agents: Array<{
-        id: string
-        builtin?: boolean
-        builtinKind?: 'drafter' | 'skill-reviewer' | 'memory-tidy' | 'agent-maker'
-      }>
+      // ★ 2026-11（D154）：接口算好发下来的槽位（记录上不再有 builtinKind）
+      agents: Array<{ id: string; slot?: string | null }>
     }
   ).agents
-  makerId = list.find((a) => builtinKindOf(a) === 'agent-maker')!.id
+  makerId = list.find((a) => a.slot === 'agent-maker')!.id
 })
 
 after(async () => {
@@ -545,15 +549,13 @@ describe('生成智能体整链（2026-11 设计定稿 §3.5–§3.6）', () => 
   test('★ 非生成者对话不能确认生成（agent_commit_not_maker）', async () => {
     const agents = await json('/api/agents')
     // ⚠️ 2026-11（S4）：角色退场 ⇒ "随便挑一条不是生成者的"就够（判据是内置岗位）。
+    /*
+     * ★ 2026-11（D154）："不是生成者的那条"——判据从记录上的老字段换成**接口给的
+     *   `slot`**（服务端从槽位表算好发下来），与界面同一份口径。
+     */
     const executorId = (
-      agents.body as {
-        agents: Array<{
-          id: string
-          builtin?: boolean
-          builtinKind?: 'drafter' | 'skill-reviewer' | 'memory-tidy' | 'agent-maker'
-        }>
-      }
-    ).agents.find((a) => builtinKindOf(a) !== 'agent-maker')!.id
+      agents.body as { agents: Array<{ id: string; slot?: string | null }> }
+    ).agents.find((a) => a.slot !== 'agent-maker')!.id
     const created = await postJson('/api/conversations', { agentId: executorId, text: '你好' })
     assert.equal(created.status, 201)
     const conversationId = (created.body as { conversation: { id: string } }).conversation.id

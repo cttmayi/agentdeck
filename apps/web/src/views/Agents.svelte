@@ -105,15 +105,21 @@ import ListRow from '../components/ListRow.svelte'
    *    统一叫「智能体」；只有平台内置的那几种按岗位显示（起草 / 记忆整理 / 生成智能体 /
    *    沉淀审核）。徽标配色也不再分"审核中 / 进行中"——那是流程状态，不是身份。
    */
+  /**
+   * ★ 2026-11（D154）：读 **`slot`**（服务端按槽位表算好的）——记录上不再有 `builtinKind`。
+   *   这是**显示**用的（"这是哪一条出厂成员"），不参与任何能力判断。
+   *   `skill-reviewer` 那一支留着：老记录里还有它（已下线，归用户）。
+   */
   function roleLabelOf(a: Agent): string {
-    if (a.builtinKind === 'drafter') return $t('agents.roleDrafter')
+    if (a.slot === 'drafter') return $t('agents.roleDrafter')
+    if (a.slot === 'memory-tidy') return $t('agents.roleMemoryTidy')
+    if (a.slot === 'agent-maker') return $t('agents.roleAgentMaker')
     if (a.builtinKind === 'skill-reviewer') return $t('agents.roleSkillReviewer')
-    if (a.builtinKind === 'memory-tidy') return $t('agents.roleMemoryTidy')
-    if (a.builtinKind === 'agent-maker') return $t('agents.roleAgentMaker')
     return $t('agents.rolePlain')
   }
   function roleBadgeOf(a: Agent): string {
-    return a.builtinKind === undefined ? 'in_progress' : 'in_review'
+    // 平台成员（有槽位）用 in_review，用户自建的用 in_progress（纯配色，不是判据）
+    return a.slot === undefined || a.slot === null ? 'in_progress' : 'in_review'
   }
 
   $: visibleAgents = $agents.filter((a) => {

@@ -46,17 +46,22 @@ interface AgentRow {
   name: string
   instructions: string
   builtin?: boolean
+  /** ★ 2026-11（D154）：服务端按槽位表算好发下来的（记录上不再有岗位字段）。 */
+  slot?: string | null
   /**
    * ⚠️ 2026-11（S4，D127）：这里原来是 `role: string`。**角色退场** ⇒ 判据换成
    *   `builtin` + `builtinKind`（"是哪一条内置"）。
    */
   builtinKind?: 'drafter' | 'skill-reviewer' | 'memory-tidy' | 'agent-maker'
+  owner?: string
+  entries?: string[]
   skillIds: string[]
 }
 
 async function drafterOf(url: string): Promise<AgentRow> {
   const body = (await (await fetch(`${url}/api/agents`)).json()) as { agents: AgentRow[] }
-  const found = body.agents.find((a) => a.builtinKind === 'drafter')
+  /* ★ 2026-11（D154）：接口算好发下 `slot`，按它认人 */
+  const found = body.agents.find((a) => a.slot === 'drafter')
   assert.ok(found, '启动之后必须有一条内置起草者（每次启动对账）')
   return found
 }
@@ -65,7 +70,10 @@ describe('内置起草者：启动就有、不能删、不能改坏、能恢复�
   test('★ 启动之后它就在（岗位是起草者、指令是默认值、不挂技能）', async () => {
     await withDaemon(async (url) => {
       const drafter = await drafterOf(url)
-      assert.equal(drafter.builtinKind, 'drafter')
+      assert.equal(drafter.slot, 'drafter', '★ 2026-11（D154）：认人看槽位（记录上不再有岗位字段）')
+      assert.equal(drafter.builtin, undefined, '新记录不写 builtin 标记')
+      assert.equal(drafter.owner, 'platform')
+      assert.deepEqual(drafter.entries, ['action:skill-draft'])
       assert.equal(drafter.name, DRAFTER_NAME)
       assert.equal(drafter.instructions, DRAFTER_INSTRUCTIONS)
       assert.deepEqual(drafter.skillIds, [])
@@ -108,7 +116,7 @@ describe('内置起草者：启动就有、不能删、不能改坏、能恢复�
         assert.equal(((await res.json()) as { code?: string }).code, 'builtin_agent_readonly')
       }
       const after = await drafterOf(url)
-      assert.equal(after.builtinKind, 'drafter')
+      assert.equal(after.slot, 'drafter', '★ 2026-11（D154）：认人看槽位')
       assert.deepEqual(after.skillIds, [])
       assert.equal(after.name, DRAFTER_NAME)
       assert.equal(after.instructions, DRAFTER_INSTRUCTIONS)

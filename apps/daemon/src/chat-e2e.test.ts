@@ -261,9 +261,9 @@ describe('D49 端到端：聊天投递的就是那句话', () => {
      */
     const list = await json('/api/agents')
     const agents = (list.body as {
-      agents: Array<{ id: string; builtin?: boolean; builtinKind?: string; owner?: string; entries?: string[] }>
+      agents: Array<{ id: string; builtin?: boolean; builtinKind?: string; owner?: string; entries?: string[]; slot?: string | null }>
     }).agents
-    const maker = agents.find((a) => a.builtinKind === 'agent-maker')
+    const maker = agents.find((a) => a.slot === 'agent-maker')
     assert.ok(maker !== undefined, '启动对账要建出智能体生成者（内置）')
     const made = await postJson('/api/conversations', {
       agentId: maker!.id,

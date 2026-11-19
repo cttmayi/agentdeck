@@ -21,6 +21,7 @@ import {
   workflowReferenceableNames,
 } from './platform-member.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
+import { ensureTestWorkspace } from './testing/test-workspace.ts'
 
 const WS = wsId('ws-platform-member')
 
@@ -112,19 +113,34 @@ describe('迁移：把推导结果写进数据（幂等、不删老字段、半�
   test('★★★ 迁移一次就位；再跑一遍什么都不写；半内置被点名', async () => {
     const dir = await makeTempDir('platform-member-migrate')
     const store = await FileStore.open({ dataDir: dir, fsync: false })
+    // ★ 2026-11（D154）：槽位表挂在工作区上 ⇒ 用 store 的用例必须先有工作区
+    await ensureTestWorkspace(store, WS)
     try {
       await ensureBuiltinAgents(store, WS)
-      // 造一条半内置（builtin 在、岗位缺）
+      /*
+       * ⚠️ 2026-11（D154）：出厂成员是**新建的**，它们一出生就有 `owner` + `entries`
+       *   （不再写老字段）⇒ 迁移对它们是空转。所以这里要造**老形态**的记录来测迁移：
+       *   一条 `builtin + builtinKind` 且没有 owner（老工作区里的样子），
+       *   一条半内置（`builtin: true` 但岗位缺）。
+       */
+      await store.insertAgent(
+        member({ name: '老起草者', builtin: true, builtinKind: 'drafter', instructions: '旧身份' }),
+      )
       await store.insertAgent(member({ name: '坏掉的', builtin: true }))
 
       const first = await migratePlatformMemberFields(store, WS)
-      assert.ok(first.migrated.length >= 5, `至少要迁移 4 条出厂成员 + 那条坏的（实际 ${first.migrated.length}）`)
+      assert.deepEqual(
+        first.migrated.slice().sort(),
+        ['坏掉的', '老起草者'],
+        `只有"还没有 owner 的记录"需要迁移（实际 ${JSON.stringify(first.migrated)}）`,
+      )
       assert.deepEqual(first.halfBuiltin, ['坏掉的'], '半内置要**点名**')
 
-      const drafter = (await store.listAgents(WS)).find((a) => a.name === '沉淀起草者（内置）')!
-      assert.equal(drafter.owner, 'platform')
-      assert.deepEqual(drafter.entries, ['action:skill-draft'])
-      assert.equal(drafter.builtin, true, '⚠️ 老字段保留（回滚只需发旧版代码）')
+      const legacy = (await store.listAgents(WS)).find((a) => a.name === '老起草者')!
+      assert.equal(legacy.owner, 'platform', '老形态按老字段推出归属')
+      assert.deepEqual(legacy.entries, ['action:skill-draft'], '并按老字段推出接入点')
+      assert.equal(legacy.builtin, true, '⚠️ 老字段保留（回滚只需发旧版代码）')
+      assert.equal(legacy.builtinKind, 'drafter', '同上——迁移只补新字段，不删旧的')
 
       const half = (await store.listAgents(WS)).find((a) => a.name === '坏掉的')!
       assert.equal(half.owner, 'user', '半内置按用户记录处理（可修可删）')
@@ -133,6 +149,15 @@ describe('迁移：把推导结果写进数据（幂等、不删老字段、半�
       const again = await migratePlatformMemberFields(store, WS)
       assert.deepEqual(again.migrated, [], '第二遍不再写')
       assert.deepEqual(again.halfBuiltin, [], '也不该再点名（它已经有 owner 了）')
+
+      // ★ 出厂成员本身不带老字段（新记录只写 owner + entries）
+      const fresh = (await store.listAgents(WS)).find((a) => a.name === '沉淀起草者（内置）')!
+      assert.equal(fresh.owner, 'platform')
+      assert.equal(
+        (fresh as { builtin?: boolean }).builtin,
+        undefined,
+        'D154：新建的成员不写 builtin / builtinKind',
+      )
     } finally {
       await store.close()
       await cleanup(dir)
@@ -144,6 +169,8 @@ describe('上线前的体检：现有编排里引用平台成员的，启动时�
   test('★★ 只报"名字存在但不能被编排引用"的那些；拼出来的引用不算', async () => {
     const dir = await makeTempDir('platform-member-scan')
     const store = await FileStore.open({ dataDir: dir, fsync: false })
+    // ★ 2026-11（D154）：槽位表挂在工作区上 ⇒ 用 store 的用例必须先有工作区
+    await ensureTestWorkspace(store, WS)
     try {
       await ensureBuiltinAgents(store, WS)
       await store.insertAgent(member({ name: '撰稿员' }))

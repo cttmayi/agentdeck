@@ -51,6 +51,7 @@ import {
   platformMemberRefsInWorkflows,
 } from './platform-member.ts'
 import { DRAFTER_SKILL_SLUG } from './builtin-drafter.ts'
+import { loadSlotTable, saveSlotTable, type SlotTable } from './platform-slots.ts'
 
 /* ══════════════════════════════════════════════════════════════════
  * 内置成员对账结果的"日志行"（D144：逐项都要说得出来）
@@ -173,6 +174,8 @@ export async function reconcileStartup(deps: ReconcileDeps): Promise<ReconcileRe
   const { store, workspaceId, workflows, info, warn } = deps
   const done = new Set<ReconcileStepId>()
   let builtin: ReconcileResult['builtin'] | null = null
+  /** 对账认领过的槽位表（后面的步骤要用它认人，见 `drafter-skill-mount`）。 */
+  let slots: SlotTable = {}
 
   const steps: Record<ReconcileStepId, () => Promise<void>> = {
     'memory-defaults': async () => {
@@ -196,8 +199,16 @@ export async function reconcileStartup(deps: ReconcileDeps): Promise<ReconcileRe
        *    下次启动要回来）与"自愈"（内置标记丢了、指令被清空了要补回默认）。幂等由
        *    `ensureBuiltinDrafter` 内部保证：**使用者改过的指令一字不动**。
        */
-      builtin = await ensureBuiltinAgents(store, workspaceId)
-      for (const [label, r, why] of builtinAccountingRows(builtin)) {
+      /*
+       * ★ 2026-11（D154）：`ensureBuiltinAgents` 会返回**对账之后的槽位表**
+       *   （新建出来的成员要认领槽位），这里负责**持久化一次**——它自己不动工作区。
+       */
+      const table = await loadSlotTable(store, workspaceId)
+      const ensured = await ensureBuiltinAgents(store, workspaceId, table)
+      await saveSlotTable(store, workspaceId, table)
+      slots = table
+      builtin = ensured
+      for (const [label, r, why] of builtinAccountingRows(ensured)) {
         if (r.action === 'created') {
           info(`已建立${label}（${why}，可在「智能体」页查看与编辑）`)
         } else if (r.action === 'healed') {
@@ -213,7 +224,7 @@ export async function reconcileStartup(deps: ReconcileDeps): Promise<ReconcileRe
        *   完全由**挂载**决定 ⇒ 挂载必须始终对着技能库的现状。装/卸技能之后也有一次
        *   （见那两条路由），启动这一次是兜底（比如使用者手改了数据目录）。
        */
-      const mount = await syncDrafterSkillMount(store, workspaceId)
+      const mount = await syncDrafterSkillMount(store, workspaceId, slots)
       if (mount.skillIds.length === 0) {
         info(
           `起草者还没挂上「沉淀用技能」（${DRAFTER_SKILL_SLUG}）：装好之后自动挂上，` +

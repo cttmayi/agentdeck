@@ -44,6 +44,7 @@
 import type { Agent, WorkspaceId } from '@agentdeck/protocol'
 import type { Store } from '@agentdeck/domain'
 import { ensureBuiltinAgents } from './builtin-drafter.ts'
+import { loadSlotTable, releaseSlot, saveSlotTable } from './platform-slots.ts'
 import { USER_ENTRIES, ownerOf } from './platform-member.ts'
 
 /** 第 ① 步的清单：这条成员**现在**被谁用着（给人看，也给判据用）。 */
@@ -129,12 +130,22 @@ export async function detachPlatformMember(deps: {
   }
   await store.insertAgent(detached)
 
-  // ③ 对账补位：平台立刻把出厂成员建回来（复用启动对账那一个来源，不另写一套）
+  /**
+   * ③ 对账补位：平台立刻把出厂成员建回来（复用启动对账那一个来源，不另写一套）。
+   *
+   * ⚠️ 2026-11（D154）：第 ② 步摘掉的不仅是记录上的老字段——**槽位表里那个 id 也得摘**，
+   *   否则表还指着这条已经变成"你的"的记录，对账会认为"那条还在"而不补位
+   *   （界面上表现为"起草者没了，但平台没建回来"）。
+   */
+  const table = await loadSlotTable(store, workspaceId)
+  releaseSlot(table, agent.id as string)
+  await saveSlotTable(store, workspaceId, table)
+
   const before = new Set((await store.listAgents(workspaceId)).map((a) => a.id as string))
-  const ensured = await ensureBuiltinAgents(store, workspaceId)
+  const ensured = await ensureBuiltinAgents(store, workspaceId, table)
   const after = await store.listAgents(workspaceId)
   const recreated: string[] = []
-  for (const row of Object.values(ensured)) {
+  for (const row of [ensured.drafter, ensured.memoryTidy, ensured.agentMaker, ensured.workflowMaker]) {
     if (row.action === 'created') {
       const found = after.find((a) => (a.id as string) === row.agentId)
       if (found && !before.has(found.id as string)) recreated.push(found.name as string)

@@ -6465,7 +6465,7 @@ try {
       const workspaceId = (await store.listWorkspaceIds())[0]
       const agents = await store.listAgents(workspaceId)
       // ⚠️ 2026-11（D127）：判据从 `role === 'executor'` 换成"不是平台内置岗位"。
-      const executor = agents.find((a) => a.builtinKind === undefined) ?? agents[0]
+      const executor = agents.find((a) => a.slot === undefined || a.slot === null) ?? agents[0]
       if (!workspaceId || !executor) {
         log(yellow('⚠ 找不到播种的 workspace / 执行者——沉淀那几条会空过'))
       } else {
@@ -6911,7 +6911,7 @@ try {
   try {
     const agentsPage = await (await fetch(`${base}/api/agents`)).json()
     const tidyAgent = (agentsPage.items ?? agentsPage.agents ?? []).find(
-      (a) => a.builtinKind === 'memory-tidy',
+      (a) => a.slot === 'memory-tidy',
     )
     if (!tidyAgent) {
       log(yellow('⚠ 没找到内置「记忆整理者」——「整理成记忆」那一节会量不到'))
@@ -6929,7 +6929,7 @@ try {
 
   try {
     const agentsPage = await (await fetch(`${base}/api/agents`)).json()
-    const drafter = (agentsPage.items ?? agentsPage.agents ?? []).find((a) => a.builtinKind === 'drafter')
+    const drafter = (agentsPage.items ?? agentsPage.agents ?? []).find((a) => a.slot === 'drafter')
     if (!drafter) {
       log(yellow('⚠ 没找到内置起草者——"起草中"那一屏会量不到'))
     } else {

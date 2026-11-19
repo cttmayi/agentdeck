@@ -86,10 +86,14 @@ describe('★★ 派生：成员入口与 action id 都从表里出来，不是�
   })
 
   test('★ 判据函数与表一致：canBeCalledByAction 认的正是表里写的成员', async () => {
-    const agents = await ensureBuiltinAgentsForTest()
+    /*
+     * ⚠️ 2026-11（D154）：谁是"哪一条成员"不再看记录上的老字段（那字段已经没有了），
+     *   改看**槽位表**——判据的意图没变（"表说这条动作归谁，就只有谁能被它叫"）。
+     */
+    const { agents, slots } = await ensureBuiltinAgentsForTest()
     for (const action of PLATFORM_ACTIONS) {
       for (const agent of agents) {
-        const expected = agent.builtinKind === action.member
+        const expected = slots[action.member as keyof typeof slots] === (agent.id as string)
         assert.equal(
           canBeCalledByAction(agent, action.id),
           expected,
@@ -156,11 +160,15 @@ async function ensureBuiltinAgentsForTest() {
   const { FileStore } = await import('@agentdeck/store-file')
   const { wsId } = await import('@agentdeck/domain/testing')
   const { makeTempDir, cleanup } = await import('./testing/tmp.ts')
+  const { ensureTestWorkspace } = await import('./testing/test-workspace.ts')
   const dir = await makeTempDir('platform-actions')
   const store = await FileStore.open({ dataDir: dir, fsync: false })
+  const ws = wsId('ws-platform-actions')
+  // ★ 2026-11（D154）：槽位表挂在工作区上
+  await ensureTestWorkspace(store, ws)
   try {
-    await ensureBuiltinAgents(store, wsId('ws-platform-actions'))
-    return await store.listAgents(wsId('ws-platform-actions'))
+    const { slots } = await ensureBuiltinAgents(store, ws)
+    return { agents: await store.listAgents(ws), slots }
   } finally {
     await store.close()
     await cleanup(dir)

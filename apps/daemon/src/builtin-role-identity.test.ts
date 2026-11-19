@@ -57,6 +57,8 @@ const LEGACY_REVIEWER_INSTRUCTIONS = '你是平台内置的审核者：只指出
 import { startDaemon } from './server.ts'
 import { builtinAccountingRows } from './startup-reconcile.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
+import { platformMemberOf } from './platform-slots.ts'
+import { ensureTestWorkspace } from './testing/test-workspace.ts'
 
 const WS = wsId('ws-builtin-role')
 
@@ -90,6 +92,8 @@ function mkAgent(
 async function withStore<T>(fn: (store: FileStore, dir: string) => Promise<T>): Promise<T> {
   const dir = await makeTempDir('builtin-role')
   const store = await FileStore.open({ dataDir: dir, fsync: false })
+  // ★ 2026-11（D154）：槽位表挂在工作区上 ⇒ 每个用例自带一个工作区
+  await ensureTestWorkspace(store, WS)
   try {
     return await fn(store, dir)
   } finally {
@@ -148,10 +152,10 @@ describe('智能体生成者（agent-maker）的对账（2026-11 设计定稿 §
       const first = await ensureBuiltinAgentMaker(store, WS)
       assert.equal(first.action, 'created')
       const after = await store.listAgents(WS)
-      const maker = after.find((a) => builtinKindOf(a) === 'agent-maker')!
+      const maker = (await platformMemberOf(store, WS, 'agent-maker'))!
       assert.equal(maker.name, AGENT_MAKER_NAME)
       assert.equal(maker.instructions, AGENT_MAKER_INSTRUCTIONS_BODY)
-      assert.equal(maker.builtin, true)
+      assert.equal(maker.owner, 'platform', '新记录只写 owner')
       assert.deepEqual(maker.skillIds, [], '挂载由 syncAgentMakerSkillMount 管，对账不挂')
 
       // 幂等：再跑一遍不动任何东西
@@ -171,11 +175,11 @@ describe('智能体生成者（agent-maker）的对账（2026-11 设计定稿 §
     await withStore(async (store) => {
       await ensureBuiltinAgentMaker(store, WS)
       const all = await store.listAgents(WS)
-      await store.insertAgent({ ...all.find((a) => builtinKindOf(a) === 'agent-maker')!, instructions: '   ' })
+      await store.insertAgent({ ...(await platformMemberOf(store, WS, 'agent-maker'))!, instructions: '   ' })
       const result = await ensureBuiltinAgentMaker(store, WS)
       assert.equal(result.action, 'healed')
       const after = await store.listAgents(WS)
-      assert.equal(after.find((a) => builtinKindOf(a) === 'agent-maker')!.instructions, AGENT_MAKER_INSTRUCTIONS_BODY)
+      assert.equal((await platformMemberOf(store, WS, 'agent-maker'))!.instructions, AGENT_MAKER_INSTRUCTIONS_BODY)
     })
   })
 
@@ -184,11 +188,11 @@ describe('智能体生成者（agent-maker）的对账（2026-11 设计定稿 §
       await ensureBuiltinAgentMaker(store, WS)
       const all = await store.listAgents(WS)
       const edited = '你是我的私人生成者。'
-      await store.insertAgent({ ...all.find((a) => builtinKindOf(a) === 'agent-maker')!, instructions: edited })
+      await store.insertAgent({ ...(await platformMemberOf(store, WS, 'agent-maker'))!, instructions: edited })
       const result = await ensureBuiltinAgentMaker(store, WS)
       assert.equal(result.action, 'left-alone')
       const after = await store.listAgents(WS)
-      assert.equal(after.find((a) => builtinKindOf(a) === 'agent-maker')!.instructions, edited)
+      assert.equal((await platformMemberOf(store, WS, 'agent-maker'))!.instructions, edited)
     })
   })
 
@@ -202,14 +206,19 @@ describe('智能体生成者（agent-maker）的对账（2026-11 设计定稿 §
       //   于是"新内置有没有被建出来"这件事没人守。
       assert.equal(result.workflowMaker.action, 'created')
       const all = await store.listAgents(WS)
-      for (const [kind, label] of [
+      /*
+       * ★ 2026-11（D154）：认人走槽位表（记录上不再有岗位字段）。`all` 仍拿来看
+       *   "平台上到底有几条"。
+       */
+      for (const [slot, label] of [
         ['drafter', '起草者'],
         ['memory-tidy', '记忆整理者'],
         ['agent-maker', '智能体生成者'],
         ['workflow-maker', '编排生成者'],
       ] as const) {
-        assert.ok(all.some((a) => builtinKindOf(a) === kind), `${label}要在`)
+        assert.ok(await platformMemberOf(store, WS, slot), `${label}要在`)
       }
+      assert.equal(all.filter((a) => a.owner === 'platform').length, 4, '平台上正好四条')
     })
   })
 
@@ -224,10 +233,20 @@ describe('智能体生成者（agent-maker）的对账（2026-11 设计定稿 §
       const result = await ensureBuiltinAgents(store, WS)
       const rows = builtinAccountingRows(result)
       const logged = new Set(rows.map((r) => r[1]))
-      for (const [key, value] of Object.entries(result)) {
+      /*
+       * ⚠️ 2026-11（D154）：返回值多了一个 `slots`（对账之后的槽位表），它不是一条
+       *   "内置岗位对账结果"——所以这里只遍历**四条结果**，不遍历整个返回值。
+       */
+      const perMember = {
+        drafter: result.drafter,
+        memoryTidy: result.memoryTidy,
+        agentMaker: result.agentMaker,
+        workflowMaker: result.workflowMaker,
+      }
+      for (const [key, value] of Object.entries(perMember)) {
         assert.ok(logged.has(value), `日志清单里缺了 ${key}（新增内置岗位要加一行）`)
       }
-      assert.equal(rows.length, Object.keys(result).length, '清单条数要等于内置岗位数')
+      assert.equal(rows.length, Object.keys(perMember).length, '清单条数要等于内置岗位数')
     })
   })
 })
@@ -291,7 +310,7 @@ describe('起草者的自愈：撞上另一个内置时必须**认岗位**，不
         DRAFTER_INSTRUCTIONS_BODY,
         '审核者拿到起草者指令 = 它以后按"你是 skill 作者"去审，而看起来一切正常',
       )
-      const drafter = afterCreate.find((a) => builtinKindOf(a) === 'drafter')
+      const drafter = await platformMemberOf(store, WS, 'drafter')
       assert.ok(drafter, '起草者必须被建出来')
       assert.equal(drafter.instructions, DRAFTER_INSTRUCTIONS_BODY)
 
@@ -300,11 +319,14 @@ describe('起草者的自愈：撞上另一个内置时必须**认岗位**，不
       await ensureBuiltinAgents(store, WS)
       const final = await store.listAgents(WS)
       assert.equal(
-        final.find((a) => builtinKindOf(a) === 'skill-reviewer')!.instructions,
+        final.find((a) => a.id === reviewer.id)!.instructions,
         '   ',
         '已下线的审核者不该被内置对账重新填指令（它没有默认指令了）',
       )
-      assert.equal(final.find((a) => builtinKindOf(a) === 'drafter')!.instructions, DRAFTER_INSTRUCTIONS_BODY)
+      assert.equal(
+        (await platformMemberOf(store, WS, 'drafter'))!.instructions,
+        DRAFTER_INSTRUCTIONS_BODY,
+      )
     })
   })
 })
@@ -347,6 +369,8 @@ interface AgentRow {
   instructions: string
   builtin?: boolean
   builtinKind?: 'drafter' | 'skill-reviewer' | 'memory-tidy' | 'agent-maker'
+  /** ★ 2026-11（D154）：服务端按槽位表算好发下来的（记录上不再有岗位字段）。 */
+  slot?: string | null
 }
 
 async function agentsOf(url: string): Promise<AgentRow[]> {
@@ -409,7 +433,8 @@ describe('接口层：内置条目各按各的岗位回答（审核者已下线�
     //   这一条钉住新的口径：按 `builtinKindOf` 分开——retired 放行，起草者照旧。
     const seeded = await seedLegacyReviewer()
     await withDaemon(seeded.dir, async (url) => {
-      const drafter = (await agentsOf(url)).find((a) => builtinKindOf(a) === 'drafter')!
+      // ★ 2026-11（D154）：接口算好发下 `slot`，按它认人（记录上不再有 builtinKind）
+      const drafter = (await agentsOf(url)).find((a) => a.slot === 'drafter')!
       const refused = await fetch(`${url}/api/agents/${drafter.id}`, { method: 'DELETE' })
       const refusedText = await refused.text()
       assert.equal(refused.status, 400, refusedText)
@@ -427,7 +452,7 @@ describe('接口层：内置条目各按各的岗位回答（审核者已下线�
         '删掉之后列表里不该再有它',
       )
       // 起草者还在（删一条不能顺手影响另一条内置）
-      assert.ok((await agentsOf(url)).some((a) => builtinKindOf(a) === 'drafter'))
+      assert.ok((await agentsOf(url)).some((a) => a.slot === 'drafter'))
     })
   })
 
@@ -472,7 +497,11 @@ test('★★ 挂着内置标记但角色是业务角色 ⇒ 「恢复成默认�
       assert.equal(res.status, 400, text)
       const body = JSON.parse(text) as { code?: string; error: string }
       assert.equal(body.code, 'builtin_kind_unknown')
-      assert.match(body.error, /内置岗位/, '文案要说清缺的是"哪个岗位"，否则使用者不知道去改哪条')
+      /*
+       * ★ 2026-11（D154）：文案从"缺哪个岗位"改成"缺哪个**出厂槽位**"——记录上已经没有
+       *   岗位字段了，认不出它指的是槽位表里没有它（老记录 / 手改过数据）。
+       */
+      assert.match(body.error, /出厂槽位/, '文案要说清缺的是"哪一条出厂成员"，否则使用者不知道去改哪条')
       // 一条字都不许写进去（猜错的后果比"没恢复"严重得多）。
       // ★ 2026-11（D111）：列表返回组装后指令 ⇒ 断言正文原样（startsWith），
       //   追加的守则是运行时拼的，不是写入。

@@ -128,6 +128,24 @@ export const Workspace = z.object({
   defaultAgentId: AgentId.nullable().default(null),
 
   /**
+   * ★ 2026-11（D154）：**平台槽位表**——`槽位 → agentId`（四个出厂成员）。
+   *
+   * 为什么放在**工作区**上，而不放在 agent 记录上：
+   *   · "平台那四条记录是哪四条"是**平台的知识**，不是记录的属性；
+   *   · 写在记录上（老字段 `builtin` + `builtinKind`）会多出一个"写坏一半"的形态
+   *     ——就是"半内置"：改不了、删不掉、岗位逻辑又认不出它是谁；
+   *   · 放在这里之后，记录上只剩 `owner`（只读/可删）与 `entries`（谁能叫它），
+   *     半内置在数据形态上**不可能出现**。
+   *
+   * 值域：`drafter` / `memory-tidy` / `agent-maker` / `workflow-maker`（退役的
+   * `skill-reviewer` 不在里面——它归用户、可删，没有槽位）。
+   *
+   * ⚠️ 可选且可为空：老工作区没有这个键，启动对账会**从老字段把它补出来**
+   *   （幂等）；缺一个槽位 = 那一条还没被认领，对账会建一条新的并把 id 写回。
+   */
+  platformSlots: z.record(z.string(), z.string()).default({}).optional(),
+
+  /**
    * ★ 分批第 187 批（使用者：把 GitHub 加速器做成设置项，改完即时生效，不用重启 daemon）：
    * 装技能时走哪个加速器。**空 = 直连**（默认）。
    *
@@ -591,6 +609,18 @@ export const Agent = z.object({
   builtinKind: z
     .enum(['drafter', 'skill-reviewer', 'memory-tidy', 'agent-maker', 'workflow-maker'])
     .optional(),
+  /*
+   * ⚠️⚠️ 2026-11（D154）：**这个字段已经不再是"归属"或"身份"的权威**，新记录**不写**它。
+   *
+   * 为什么挪走：`builtinKind` 原来有两份职责——"这条是不是平台的"（与 `builtin` 一起）
+   * 和"它是哪一条"（平台流程按它找人）。前者已经归 `owner`；后者是一张**平台侧的引用表**
+   * （`Workspace.platformSlots`：槽位 → agentId），不该写在记录身上：
+   *   · 写在记录上就多出一个"写坏一半"的形态（就是"半内置"）；
+   *   · 而"平台那四条是哪四条"本来就是**平台的**知识，不是记录自己的属性。
+   *
+   * 所以现在：**新记录只有 `owner` + `entries`**，槽位表在工作区上；老记录里的
+   * `builtin` / `builtinKind` **原样保留、读时兜底**（回滚只需发旧版代码），
+   * 由启动对账把它们的 id 填进槽位表。
 
   /**
    * **归属**（2026-11，D145）：这条记录是平台的，还是用户自己的。

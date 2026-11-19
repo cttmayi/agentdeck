@@ -26,7 +26,8 @@ import { fileURLToPath } from 'node:url'
 import { resolvePayloadEntry } from '@agentdeck/skill-source'
 import type { WorkspaceId } from '@agentdeck/protocol'
 import type { Store } from '@agentdeck/domain'
-import { findBuiltinAgent, ensureBuiltinAgentMaker } from './builtin-drafter.ts'
+import { platformMemberOf } from './platform-slots.ts'
+import { ensureBuiltinAgentMaker } from './builtin-drafter.ts'
 
 /** 智能体生成者的平台技能（这三份是"生成者的手则"）。 */
 export const AGENT_MAKER_SKILL_SLUGS = [
@@ -65,7 +66,7 @@ export async function ensureBuiltinAgentMakerSkills(
 ): Promise<{ agentId: string | null; seeded: string[]; skipped: string[] }> {
   await ensureBuiltinAgentMaker(store, workspaceId)
   const all = await store.listAgents(workspaceId)
-  const maker = findBuiltinAgent(all, 'agent-maker')
+  const maker = await platformMemberOf(store, workspaceId, 'agent-maker')
   if (!maker) return { agentId: null, seeded: [], skipped: [] }
 
   const existing = new Set(
@@ -103,7 +104,7 @@ export async function migratePlatformSkillsToExclusive(
   workspaceId: WorkspaceId,
 ): Promise<{ moved: string[] }> {
   const all = await store.listAgents(workspaceId)
-  const maker = findBuiltinAgent(all, 'agent-maker')
+  const maker = await platformMemberOf(store, workspaceId, 'agent-maker')
   if (!maker) return { moved: [] }
 
   const platform = (await store.listSkills(workspaceId)).filter(

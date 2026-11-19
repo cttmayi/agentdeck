@@ -22,7 +22,8 @@
  *   · 正文里每一段 ```js 示例都能被 `validateWorkflowCode` 编译通过——
  *     "写进规范里的例子跑不起来"是最坏的一种失真（模型会照着抄）。
  */
-import { findBuiltinAgent, ensureBuiltinWorkflowMaker } from './builtin-drafter.ts'
+import { platformMemberOf } from './platform-slots.ts'
+import { ensureBuiltinWorkflowMaker } from './builtin-drafter.ts'
 import { WORKFLOW_PRIMITIVES, validateWorkflowCode } from './workflow-maker.ts'
 import type { WorkspaceId } from '@agentdeck/protocol'
 import type { Store } from '@agentdeck/domain'
@@ -60,7 +61,7 @@ export async function ensureBuiltinWorkflowMakerSkills(
 ): Promise<{ agentId: string | null; seeded: string[]; skipped: string[] }> {
   await ensureBuiltinWorkflowMaker(store, workspaceId)
   const all = await store.listAgents(workspaceId)
-  const maker = findBuiltinAgent(all, 'workflow-maker')
+  const maker = await platformMemberOf(store, workspaceId, 'workflow-maker')
   if (!maker) return { agentId: null, seeded: [], skipped: [] }
 
   const existing = new Set((await store.listExclusiveSkills(maker.id)).map((s) => s.slug))

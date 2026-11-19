@@ -466,7 +466,8 @@
     const intentAgent =
       intent === null
         ? null
-        : ($agents.find((a) => a.builtinKind === intent) ?? null)
+        : /* ★ 2026-11（D154）：按**槽位**找（服务端算好的 `slot`），不再读记录上的老字段 */
+          ($agents.find((a) => a.slot === intent) ?? null)
     const first = intentAgent?.id ?? $effectiveDefaultAgentId ?? executors[0]?.id ?? ''
     draftChoice = first === '' ? '' : `agent:${first}`
     draftPick = { agentId: first, skillId: '' }

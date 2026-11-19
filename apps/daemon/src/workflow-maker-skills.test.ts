@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import { FileStore } from '@agentdeck/store-file'
 import { wsId } from '@agentdeck/domain/testing'
-import { ensureBuiltinAgents, builtinKindOf } from './builtin-drafter.ts'
+import { ensureBuiltinAgents } from './builtin-drafter.ts'
+import { platformMemberOf } from './platform-slots.ts'
 import { loadAgentInjectableSkills } from './agent-injectable-skills.ts'
 import {
   WORKFLOW_MAKER_SKILL_SLUGS,
@@ -13,6 +14,7 @@ import {
 } from './workflow-maker-skills.ts'
 import { WORKFLOW_PRIMITIVES } from './workflow-maker.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
+import { ensureTestWorkspace } from './testing/test-workspace.ts'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
@@ -44,12 +46,14 @@ describe('编排生成者的平台技能：播种', () => {
   test('★ 播种一次就位；再跑一遍什么都不写（幂等）；**不进技能库**', async () => {
     const dir = await makeTempDir('wf-maker-skills')
     const store = await FileStore.open({ dataDir: dir, fsync: false })
+    // ★ 2026-11（D154）：槽位表挂在工作区上 ⇒ 用 store 的用例必须先有工作区
+    await ensureTestWorkspace(store, WS)
     try {
       await ensureBuiltinAgents(store, WS)
       const first = await ensureBuiltinWorkflowMakerSkills(store, WS)
       assert.deepEqual([...first.seeded].sort(), [...WORKFLOW_MAKER_SKILL_SLUGS].sort())
 
-      const maker = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'workflow-maker')!
+      const maker = (await platformMemberOf(store, WS, 'workflow-maker'))!
       assert.ok(maker, '启动对账里要有编排生成者')
       const exclusive = await store.listExclusiveSkills(maker.id)
       assert.equal(exclusive.length, WORKFLOW_MAKER_SKILL_SLUGS.length)
@@ -71,10 +75,12 @@ describe('编排生成者的平台技能：播种', () => {
   test('★★ 走同一条注入通道：编排生成者的一轮 run 里带着它（source: agent）', async () => {
     const dir = await makeTempDir('wf-maker-inject')
     const store = await FileStore.open({ dataDir: dir, fsync: false })
+    // ★ 2026-11（D154）：槽位表挂在工作区上 ⇒ 用 store 的用例必须先有工作区
+    await ensureTestWorkspace(store, WS)
     try {
       await ensureBuiltinAgents(store, WS)
       await ensureBuiltinWorkflowMakerSkills(store, WS)
-      const maker = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'workflow-maker')!
+      const maker = (await platformMemberOf(store, WS, 'workflow-maker'))!
       const payloads = await loadAgentInjectableSkills(store, maker)
       const refs = payloads.map((p) => ({ slug: p.ref.slug, source: p.ref.source, id: p.ref.id }))
       assert.deepEqual(refs, [{ slug: 'orchestration-authoring', source: 'agent', id: null }])
@@ -138,9 +144,11 @@ describe('编排生成者的平台技能：与引擎一致（这份技能不能�
   test('★ 指令里指向这份技能（"动笔之前照它写"）——两份各管一段，不许重复写 API', async () => {
     const dir = await makeTempDir('wf-maker-instructions')
     const store = await FileStore.open({ dataDir: dir, fsync: false })
+    // ★ 2026-11（D154）：槽位表挂在工作区上 ⇒ 用 store 的用例必须先有工作区
+    await ensureTestWorkspace(store, WS)
     try {
       await ensureBuiltinAgents(store, WS)
-      const maker = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'workflow-maker')!
+      const maker = (await platformMemberOf(store, WS, 'workflow-maker'))!
       assert.match(maker.instructions, /orchestration-authoring/)
       assert.match(maker.instructions, /动笔之前先照它写/)
       // 签名细节留在技能里：指令中不写 "Reply 数组" 这种 API 术语（避免两份各说一半）

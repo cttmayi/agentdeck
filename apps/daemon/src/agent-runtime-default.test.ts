@@ -66,14 +66,14 @@ describe('全局 runtime 默认值：入口缺省是 default、设定可改、�
   test('★ 内置起草者也记 `default`（它应当最跟随平台设置）', async () => {
     await withDaemon(async (url) => {
       const body = (await (await fetch(`${url}/api/agents`)).json()) as {
-        agents: { runtimeKey: string; builtin?: boolean; builtinKind?: string }[]
+        agents: { runtimeKey: string; builtin?: boolean; builtinKind?: string; slot?: string | null }[]
       }
       /*
        * ⚠️ 判据是**哪一条内置**（不是 `builtin` 标记）：内置有好几个，按标记挑会挑到
        *   列表里先出现的那条，于是这条用例可能在测另一个岗位的 runtimeKey。
        *   2026-11（S4）：判据从 `role === 'drafter'` 换成 `builtinKind === 'drafter'`。
        */
-      const drafter = body.agents.find((a) => a.builtinKind === 'drafter')
+      const drafter = body.agents.find((a) => a.slot === 'drafter')
       assert.ok(drafter)
       assert.equal(drafter.runtimeKey, 'default')
     })

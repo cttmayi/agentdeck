@@ -139,10 +139,13 @@ before(async () => {
     onWarn: () => {},
     onInfo: () => {},
   })
+  /*
+   * ★ 2026-11（D154）：认人改成读接口算好发下来的 `slot`（记录上不再有 `builtinKind`）。
+   */
   const agents = (await json('/api/agents')).body as {
-    agents: Array<{ id: string; name: string; builtinKind?: string }>
+    agents: Array<{ id: string; name: string; slot?: string | null }>
   }
-  const maker = agents.agents.find((a) => a.builtinKind === 'workflow-maker')
+  const maker = agents.agents.find((a) => a.slot === 'workflow-maker')
   assert.ok(maker, '启动之后必须有一条内置「编排生成者」')
   makerId = maker!.id
   // 编排代码里 `agent('记账员')` 要能找到一个真人（节点名校验就是查这个名字）

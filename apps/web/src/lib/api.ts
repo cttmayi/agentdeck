@@ -301,6 +301,14 @@ export interface Agent {
   /** **平台内置岗位**（只有内置的有；用户建的 agent 没有）。见上面那条说明。 */
   builtinKind?: 'drafter' | 'skill-reviewer' | 'memory-tidy' | 'agent-maker' | 'workflow-maker'
   /**
+   * ★ 2026-11（D154）：**它占哪个出厂槽位**（服务端按工作区的槽位表算好发下来）。
+   *
+   * ⚠️ 新记录里**已经没有** `builtin` / `builtinKind` 了——那两件事分成了
+   *   "是不是平台的"= `owner`、"是哪一条"= 这张 `slot`。界面上凡是"显示这是哪一条
+   *   出厂成员"的地方读 `slot`；**能力判断仍然只读 `owner` / `entries`**。
+   */
+  slot?: 'drafter' | 'memory-tidy' | 'agent-maker' | 'workflow-maker' | null
+  /**
    * 2026-11（D145）：**归属**——`platform` 只读/不可删，`user` 自由。
    * 界面判断"能不能改/删"只读它，不再看 `builtin`。
    */

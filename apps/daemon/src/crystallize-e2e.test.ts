@@ -1949,9 +1949,9 @@ describe('§10.17 起草门禁：没装「沉淀用技能」不许沉淀（分�
     // 删掉之后：起草者的**挂载**也空了（平台侧摘挂，否则它会一直挂着一条不存在的技能）
     const drafterAfterDelete = (
       (await (await fetch(`${daemon.url}/api/agents`)).json()) as {
-        agents: Array<{ builtinKind?: string; skillIds: string[] }>
+        agents: Array<{ builtinKind?: string; slot?: string | null; skillIds: string[] }>
       }
-    ).agents.find((a) => a.builtinKind === 'drafter')
+    ).agents.find((a) => a.slot === 'drafter')
     assert.deepEqual(drafterAfterDelete?.skillIds ?? ['?'], [], '起草者不该还挂着已删的技能')
 
     const blocked = await draftPost({ runId, target: { kind: 'new', purpose: '门禁' } })
@@ -1977,9 +1977,9 @@ describe('§10.17 起草门禁：没装「沉淀用技能」不许沉淀（分�
     // 装回来之后：挂载**自动对齐**（这就是"挂在 Agent 上"的全部机制）
     const drafterAfterInstall = (
       (await (await fetch(`${daemon.url}/api/agents`)).json()) as {
-        agents: Array<{ builtinKind?: string; skillIds: string[] }>
+        agents: Array<{ builtinKind?: string; slot?: string | null; skillIds: string[] }>
       }
-    ).agents.find((a) => a.builtinKind === 'drafter')
+    ).agents.find((a) => a.slot === 'drafter')
     assert.equal(drafterAfterInstall?.skillIds.length, 1, '装回来之后起草者要自动挂上它')
   })
 })

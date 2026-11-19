@@ -7,6 +7,18 @@
  * 改动抹掉一次，而表现是"我改的指令过一会儿就变回去了"——很像是界面没保存。
  *
  * ⚠️ 用真 FileStore + 临时目录（仓库内 `.cache/test-tmp`），不碰任何 CLI（NFR-T-01）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * ★ 2026-11（D154）：认人**只走槽位表**
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 这些用例原来靠记录上的 `builtin` / `builtinKind` 找"我那条起草者"。现在那两件事
+ * 分开了："是不是平台的"= `owner`，"是哪一条"= 工作区的槽位表（`platformSlots`）。
+ * 所以找人都改成 `platformMemberOf(store, WS, 'drafter')`——判据的**意图没变**
+ * （"找到的是那一条起草者"），变的只是"到哪里找"。
+ *
+ * ⚠️ 槽位表挂在工作区上 ⇒ 每个用到的 WS 都得先存在（`ensureTestWorkspace`）；
+ *    否则 `saveSlotTable` 会抛（那是刻意的：静默丢掉槽位 = 下次启动多建一条）。
  */
 
 import { after, before, describe, test } from 'node:test'
@@ -14,12 +26,8 @@ import assert from 'node:assert/strict'
 import { FileStore } from '@agentdeck/store-file'
 import { wsId } from '@agentdeck/domain/testing'
 import { ulid } from '@agentdeck/protocol'
-import type { Agent } from '@agentdeck/protocol'
+import type { Agent, WorkspaceId } from '@agentdeck/protocol'
 import {
-  // ⚠️ 这里用 `builtinKindOf`（`builtin` + 角色）而不是 `builtin === true`：
-  //    第 70 批量出来"按标记一把抓"会抓到**先出现的那条内置**（起草者/审核者都有标记），
-  //    于是用例在"审核者排在前面"时测的根本不是起草者——而它照样是绿的。
-  builtinKindOf,
   DRAFTER_INSTRUCTIONS_BODY,
   DRAFTER_INSTRUCTIONS_V1,
   DRAFTER_NAME,
@@ -27,10 +35,13 @@ import {
   ensureBuiltinAgents,
   ensureBuiltinDrafter,
   ensureBuiltinMemoryTidy,
+  syncDrafterSkillMount,
   MEMORY_TIDY_INSTRUCTIONS_BODY,
   MEMORY_TIDY_INSTRUCTIONS_V1,
   MEMORY_TIDY_NAME,
 } from './builtin-drafter.ts'
+import { loadSlotTable, platformMemberOf, saveSlotTable } from './platform-slots.ts'
+import { ensureTestWorkspace } from './testing/test-workspace.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 let dir: string
@@ -40,60 +51,65 @@ const WS = wsId('ws-drafter')
 before(async () => {
   dir = await makeTempDir('builtin-drafter')
   store = await FileStore.open({ dataDir: dir, fsync: false })
+  await ensureTestWorkspace(store, WS)
 })
 
 after(async () => {
   await cleanup(dir)
 })
 
+/** 这个工作区里"我那条起草者"（找不到就是 null）。 */
+async function drafterOf(workspaceId: WorkspaceId = WS): Promise<Agent | null> {
+  return await platformMemberOf(store, workspaceId, 'drafter')
+}
+
 describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
-  test('没有 ⇒ 建一条：角色是起草者、带内置标记、名字与指令是默认值、**不挂技能**', async () => {
+  test('没有 ⇒ 建一条：平台成员、名字与指令是默认值、**不挂技能**', async () => {
     const result = await ensureBuiltinDrafter(store, WS)
     assert.equal(result.action, 'created')
-    const agents = await store.listAgents(WS)
-    const drafter = agents.find((a) => builtinKindOf(a) === 'drafter')
-    assert.ok(drafter, '建完必须能在列表里按内置标记找到它')
-    assert.equal(drafter.builtinKind, 'drafter')
+    const drafter = await drafterOf()
+    assert.ok(drafter, '建完必须能在槽位表里认回去')
+    assert.equal(drafter.owner, 'platform', '新记录只写 owner')
+    assert.equal(
+      (drafter as { builtin?: boolean }).builtin,
+      undefined,
+      'D154：记录上不再有 builtin / builtinKind（那是"写坏一半"的来源）',
+    )
+    assert.deepEqual(drafter.entries, ['action:skill-draft'], '它的接入点是注册表派生的')
     assert.equal(drafter.name, DRAFTER_NAME)
     // ★ 2026-11（D111）：存储的是**组装前**正文（平台守则运行时拼）
     assert.equal(drafter.instructions, DRAFTER_INSTRUCTIONS_BODY)
-    // 第 ③ 条：它不挂技能——挂了会让人以为那些技能影响起草（它们不影响，
-    // 起草 run 的技能集合是写死的）
+    // 第 ③ 条：它不挂技能
     assert.deepEqual(drafter.skillIds, [])
   })
 
   test('★ 再跑一次 ⇒ 一字不动（幂等；否则每次启动都是"新建一条"）', async () => {
-    const before = (await store.listAgents(WS)).filter((a) => builtinKindOf(a) === 'drafter')
+    const before = (await store.listAgents(WS)).length
     const result = await ensureBuiltinDrafter(store, WS)
     assert.equal(result.action, 'left-alone')
-    const after = (await store.listAgents(WS)).filter((a) => builtinKindOf(a) === 'drafter')
-    assert.equal(after.length, before.length, '不许越跑越多')
+    const after = (await store.listAgents(WS)).length
+    assert.equal(after, before, '不许越跑越多')
   })
 
   /**
    * ★★★ 分批第 31 批：使用者问「当前是不是没有使用 智能体『起草者（内置）』」。
    *
-   * 量下来不是"没用它"，是**它带的规则还停在旧版**：代码默认 462 字、盘上 288 字，
-   * 逐字等于"当前默认去掉 3b 那条"——第 26 批加的「使用者的要求是默认约定」从没进过
-   * 起草者的身份块。而起草者的升级只处理"指令被清空"，没有"还停在旧默认"这一支，
-   * 所以它看起来一切正常（没坏、不报错、连自愈都不触发）。
-   *
-   * 审核者那一侧早在第 21 批就有这套（`REVIEWER_INSTRUCTIONS_HISTORY`），起草者漏了。
+   * 量下来不是"没用它"，是**它带的规则还停在旧版**。而升级只处理"指令被清空"，
+   * 没有"还停在旧默认"这一支 ⇒ 它看起来一切正常（没坏、不报错、连自愈都不触发）。
    */
   test('★★★ 盘上还是**旧默认**指令 ⇒ 升级成当前默认（否则新规则永远进不了起草者）', async () => {
-    const mine = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
-    // ★ 2026-11（D111）：老工作区里存的是**组装后**全文（老记录/迁移），
-    //   所以要带 `instructionsAssembled: true`——否则对账会把它当"组装前"
-    //   再拼一遍守则（拼两遍 = 守则出现两次），旧默认就认不出来了。
-    await store.insertAgent({ ...mine, instructions: DRAFTER_INSTRUCTIONS_V1, instructionsAssembled: true })
+    const mine = (await drafterOf())!
+    // 老工作区里存的是**组装后**全文（老记录/迁移）⇒ 带 `instructionsAssembled: true`
+    await store.insertAgent({
+      ...mine,
+      instructions: DRAFTER_INSTRUCTIONS_V1,
+      instructionsAssembled: true,
+    })
 
     const result = await ensureBuiltinDrafter(store, WS)
     assert.equal(result.action, 'healed', '旧默认必须被认出来并升级')
-    const after = (await store.listAgents(WS)).filter((a) => builtinKindOf(a) === 'drafter')[0]!
-    assert.equal(after.instructions, DRAFTER_INSTRUCTIONS_BODY, '升级后必须等于当前默认（组装前正文）')
-    // ★ 分批第 190 批（使用者："身份把规则都去掉，让它遵照 skill 来进行即可"）：
-    //   当前默认已经**没有守则清单**了，所以这条改成钉"它认得出技能"——
-    //   那才是它现在唯一需要的语义。
+    const after = (await drafterOf())!
+    assert.equal(after.instructions, DRAFTER_INSTRUCTIONS_BODY, '升级后必须等于当前默认')
     assert.ok(
       after.instructions.includes('照着你被注入的那份技能'),
       '当前默认必须点出"按注入的技能干"（规则已经交给技能）',
@@ -101,96 +117,87 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
   })
 
   test('★★★ 使用者改过的指令**必须活过**下一次对账（第 ⑥ 条：升级不许覆盖他的改动）', async () => {
-    const mine = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
-    const edited: Agent = { ...mine, instructions: '我们团队的规范：每条 skill 都要带一个检查清单。' }
-    await store.insertAgent(edited)
+    const mine = (await drafterOf())!
+    await store.insertAgent({
+      ...mine,
+      instructions: '我们团队的规范：每条 skill 都要带一个检查清单。',
+    })
 
     const result = await ensureBuiltinDrafter(store, WS)
     // ⚠️ 这一条就是这个设计的核心：判据是**损坏**，不是"与默认不同"。
-    //    写成"与默认不同 ⇒ 恢复默认"的话，这里会量到 healed，而使用者看到的是
-    //    "我改的指令过一会儿自己变回去了"（像界面没保存）。
     assert.equal(result.action, 'left-alone')
-    const after = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
+    const after = (await drafterOf())!
     assert.equal(after.instructions, '我们团队的规范：每条 skill 都要带一个检查清单。')
   })
 
-  test('★★★ 2026-11（改名）：名字还是旧默认「起草者（内置）」⇒ 同步成「沉淀起草者（内置）」', async () => {
-    const mine = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
+  test('★★★ 名字还是旧默认「起草者（内置）」⇒ 同步成「沉淀起草者（内置）」', async () => {
+    const mine = (await drafterOf())!
     await store.insertAgent({ ...mine, name: DRAFTER_NAME_LEGACY })
 
     const result = await ensureBuiltinDrafter(store, WS)
     assert.equal(result.action, 'healed', '旧默认名字必须被认出来并同步')
-    const after = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
-    assert.equal(after.name, DRAFTER_NAME, '同步后必须等于新默认名')
+    const after = (await drafterOf())!
+    assert.equal(after.name, DRAFTER_NAME)
   })
 
-  test('★★★ 2026-11（改名）：使用者改过的名字必须活过对账（判据是"旧默认"，不是"与默认不同"）', async () => {
-    const mine = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
+  test('★★★ 使用者改过的名字必须活过对账（判据是"旧默认"，不是"与默认不同"）', async () => {
+    const mine = (await drafterOf())!
     await store.insertAgent({ ...mine, name: '我改的起草者' })
 
     const result = await ensureBuiltinDrafter(store, WS)
     assert.equal(result.action, 'left-alone')
-    const after = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
+    const after = (await drafterOf())!
     assert.equal(after.name, '我改的起草者', '使用者改过的名字不许被覆盖')
   })
 
   test('指令被清空 ⇒ 自愈回默认（那是"损坏"，起草 run 否则会拿到空身份）', async () => {
-    const mine = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
+    const mine = (await drafterOf())!
     await store.insertAgent({ ...mine, instructions: '   ' })
     const result = await ensureBuiltinDrafter(store, WS)
     assert.equal(result.action, 'healed')
-    const after = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
+    const after = (await drafterOf())!
     assert.equal(after.instructions, DRAFTER_INSTRUCTIONS_BODY)
   })
 
-  test('内置标记丢了（只剩岗位值）⇒ 认不出 ⇒ 另建一条，旧记录原样留着', async () => {
-    /*
-     * ⚠️ 2026-11（S4，D127）：这条用例原来守的是"标记丢了但 `role` 还在 ⇒ 补标记"。
-     *   **角色退场**之后没有旧证据可认（按名字认正是这个文件反复在防的事），所以
-     *   现在守的是：**认不出就另建，绝不悄悄改使用者那条记录**。
-     */
-    const mine = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
-    const { builtin: _dropped, ...withoutFlag } = mine
-    await store.insertAgent(withoutFlag as Agent)
+  /**
+   * ★ 2026-11（D154）改写：原来这条守的是"标记丢了但角色还在 ⇒ 补标记"。
+   *
+   * 现在"是哪一条"只在槽位表里说，所以等价的坏法是**表丢了那一行**（手改文件 /
+   * 从备份恢复）。这时候平台认不出原来那条 ⇒ 建一条新的，**旧记录原样留着**
+   * （那是使用者的数据，不悄悄删）。
+   */
+  test('★★ 槽位表丢了那一行 ⇒ 认不出 ⇒ 另建一条，旧记录原样留着', async () => {
+    const old = (await drafterOf())!
+    await saveSlotTable(store, WS, {})
+    assert.equal(await drafterOf(), null, '表里没有了 ⇒ 认不出来')
 
     const result = await ensureBuiltinDrafter(store, WS)
     assert.equal(result.action, 'created', '认不出旧的那条 ⇒ 建一条新的')
-    const drafters = (await store.listAgents(WS)).filter((a) => builtinKindOf(a) === 'drafter')
-    assert.equal(drafters.length, 1, '只该有一条可用的起草者')
-    assert.equal(drafters[0]!.id, (result as { agentId: string }).agentId)
-    assert.equal(drafters[0]!.builtin, true)
+    const fresh = (await drafterOf())!
+    assert.notEqual(fresh.id, old.id)
+    const stillThere = (await store.listAgents(WS)).find((a) => a.id === old.id)
+    assert.ok(stillThere, '使用者的旧记录不许被平台悄悄删掉')
+    assert.equal(stillThere.name, old.name)
   })
 
-  test('★★ `ensureBuiltinAgents` 建起草者（分批第 137 批起只剩这一条内置）', async () => {
-    const out = await ensureBuiltinAgents(store, WS)
-    assert.equal(out.drafter.action, 'left-alone')
-    // ★ 分批第 137 批：内置审核者随沉淀线的评审一起删除 ⇒ 这里不再断言它被建出来。
-    const builtins = (await store.listAgents(WS)).filter((a) => a.builtin === true)
-    assert.equal(builtins.filter((a) => builtinKindOf(a) === 'drafter').length, 1)
-  })
-
-  test('别的 agent（普通执行者/审核者）不受影响，也不会被当成起草者', async () => {
-    // 普通执行者：以起草者为底、**摘掉内置标记**（`exactOptionalPropertyTypes`
-    // ⇒ 不能写 `builtin: undefined`，字段在不在本身就是判据）。
-    const mine = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
-    const { builtin: _none, ...rest } = mine
+  test('别的 agent（普通执行者）不受影响，也不会被当成起草者', async () => {
+    const mine = (await drafterOf())!
     const plain: Agent = {
-      ...(rest as Agent),
+      ...mine,
       id: ulid() as Agent['id'],
       name: '普通执行者',
+      owner: 'user',
+      entries: ['chat', 'task', 'workflow'],
       reviewStandard: null,
     }
     await store.insertAgent(plain)
     const result = await ensureBuiltinDrafter(store, WS)
     assert.equal(result.action, 'left-alone')
     const after = (await store.listAgents(WS)).find((a) => a.id === plain.id)!
-    assert.equal(after.builtin, undefined, '普通 agent 不该被塞内置标记')
+    assert.equal(after.owner, 'user', '普通 agent 的归属不许被改')
+    assert.equal((after as { builtin?: boolean }).builtin, undefined)
   })
 })
-
-// ★ 分批第 137 批（§12.42 第 ③ 步）：`ensureBuiltinReviewer` 与审核者的默认指令一起删除
-//   （沉淀线不再评审）。这一整组"审核者自愈 / 历史默认升级"用例随之删掉——被删的代码路径
-//   留着测试只会变成"测一个不会发生的函数"。
 
 /**
  * 内置「记忆整理者」（分批第 244 批）。
@@ -202,14 +209,22 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
 describe('ensureBuiltinMemoryTidy：建 / 幂等 / 自愈', () => {
   const WS2 = wsId('ws-memory-tidy')
 
-  test('没有 ⇒ 建一条：角色 memory-tidy、内置标记、指令里就是那套挑记忆的规矩', async () => {
+  before(async () => {
+    await ensureTestWorkspace(store, WS2)
+  })
+
+  async function tidyOf(workspaceId: WorkspaceId = WS2): Promise<Agent | null> {
+    return await platformMemberOf(store, workspaceId, 'memory-tidy')
+  }
+
+  test('没有 ⇒ 建一条：平台成员、指令里就是那套挑记忆的规矩', async () => {
     const result = await ensureBuiltinMemoryTidy(store, WS2)
     assert.equal(result.action, 'created')
-    const found = (await store.listAgents(WS2)).find((a) => builtinKindOf(a) === 'memory-tidy')
-    assert.ok(found, '建完必须能在列表里按内置标记找到它')
-    assert.equal(builtinKindOf(found), 'memory-tidy')
+    const found = await tidyOf()
+    assert.ok(found, '建完必须能在槽位表里认回去')
+    assert.equal(found.owner, 'platform')
+    assert.deepEqual(found.entries, ['action:memory-tidy'])
     assert.equal(found.name, MEMORY_TIDY_NAME)
-    // ★ 2026-11（D111）：存储的是**组装前**正文
     assert.equal(found.instructions, MEMORY_TIDY_INSTRUCTIONS_BODY)
     assert.deepEqual(found.skillIds, [], '它不挂技能（规矩在身份里）')
     // ★ 使用者要看的正是这段：规矩必须写在这条智能体的指令里，而不是藏在代码里
@@ -218,60 +233,52 @@ describe('ensureBuiltinMemoryTidy：建 / 幂等 / 自愈', () => {
   })
 
   test('★ 再跑一次 ⇒ 一字不动（幂等）', async () => {
-    const before = (await store.listAgents(WS2)).filter((a) => builtinKindOf(a) === 'memory-tidy')
+    const before = await tidyOf()
+    const countBefore = (await store.listAgents(WS2)).length
     await ensureBuiltinMemoryTidy(store, WS2)
-    const after = (await store.listAgents(WS2)).filter((a) => builtinKindOf(a) === 'memory-tidy')
-    assert.equal(after.length, before.length, '不许越跑越多')
-    assert.deepEqual(after[0]?.instructions, before[0]?.instructions)
+    const after = await tidyOf()
+    assert.equal((await store.listAgents(WS2)).length, countBefore, '不许越跑越多')
+    assert.equal(after?.id, before?.id, '认的还是那一条')
+    assert.deepEqual(after?.instructions, before?.instructions)
   })
 
   test('★★ 使用者改过指令 ⇒ **不覆盖**（那是他的资产，要恢复靠那个按钮）', async () => {
-    const found = (await store.listAgents(WS2)).find((a) => builtinKindOf(a) === 'memory-tidy')
-    assert.ok(found)
+    const found = (await tidyOf())!
     await store.insertAgent({ ...found, instructions: '我自己写的规矩', updatedAt: Date.now() })
     const result = await ensureBuiltinMemoryTidy(store, WS2)
     assert.equal(result.action, 'left-alone')
-    const after = (await store.listAgents(WS2)).find((a) => builtinKindOf(a) === 'memory-tidy')
+    const after = await tidyOf()
     assert.equal(after?.instructions, '我自己写的规矩')
   })
 
   test('★★ 指令被清空 ⇒ 补回默认（空指令会让它开始记"这次做了什么"）', async () => {
-    const found = (await store.listAgents(WS2)).find((a) => builtinKindOf(a) === 'memory-tidy')
-    assert.ok(found)
+    const found = (await tidyOf())!
     await store.insertAgent({ ...found, instructions: '   ', updatedAt: Date.now() })
     const result = await ensureBuiltinMemoryTidy(store, WS2)
     assert.equal(result.action, 'healed')
-    const after = (await store.listAgents(WS2)).find((a) => builtinKindOf(a) === 'memory-tidy')
+    const after = await tidyOf()
     assert.equal(after?.instructions, MEMORY_TIDY_INSTRUCTIONS_BODY)
   })
 
-  test('★ 内置标记丢了（只剩岗位值）⇒ 认不出 ⇒ 另建一条', async () => {
-    /*
-     * ⚠️ 2026-11（S4，D127）：同上——原来靠 `role` 认出"损坏的那条"，角色退场之后
-     *   判据只剩"`builtin` 标记 + 岗位值两个都在"，缺一个就当作没有。
-     */
-    const found = (await store.listAgents(WS2)).find((a) => builtinKindOf(a) === 'memory-tidy')
-    assert.ok(found)
-    const { builtin: _drop, ...rest } = found
-    await store.insertAgent({ ...(rest as Agent), updatedAt: Date.now() })
+  test('★ 槽位表丢了那一行 ⇒ 认不出 ⇒ 另建一条', async () => {
+    const before = (await tidyOf())!
+    await saveSlotTable(store, WS2, {})
     const result = await ensureBuiltinMemoryTidy(store, WS2)
     assert.equal(result.action, 'created')
-    const after = (await store.listAgents(WS2)).filter((a) => builtinKindOf(a) === 'memory-tidy')
-    assert.equal(after.length, 1)
-    assert.equal(after[0]?.builtin, true)
+    const after = (await tidyOf())!
+    assert.notEqual(after.id, before.id)
   })
 
   test('★★★ 老工作区里是**旧版**默认指令 ⇒ 升级成当前默认（第 248 批补的自愈）', async () => {
     /**
      * 这条对应一次真实事故：第 248 批我改了规矩（"要泛化"），代码/测试/文档全改了，
      * 但使用者那边的整理结果**一点没变**——因为规矩是 agent 的身份、身份在 store 里，
-     * 而自愈只处理"标记丢了"与"指令空了"。没有这条路，新规矩永远到不了老工作区。
+     * 而自愈只处理"标记丢了"与"指令空了"。
      */
     const WS_OLD = wsId('ws-memory-tidy-old')
+    await ensureTestWorkspace(store, WS_OLD)
     await ensureBuiltinMemoryTidy(store, WS_OLD)
-    const found = (await store.listAgents(WS_OLD)).find((a) => builtinKindOf(a) === 'memory-tidy')
-    assert.ok(found)
-    // 摆回旧版默认（逐字；老工作区里是**组装后**全文 ⇒ 带 `instructionsAssembled: true`）
+    const found = (await tidyOf(WS_OLD))!
     await store.insertAgent({
       ...found,
       instructions: MEMORY_TIDY_INSTRUCTIONS_V1,
@@ -280,16 +287,16 @@ describe('ensureBuiltinMemoryTidy：建 / 幂等 / 自愈', () => {
     })
     const result = await ensureBuiltinMemoryTidy(store, WS_OLD)
     assert.equal(result.action, 'healed')
-    const after = (await store.listAgents(WS_OLD)).find((a) => builtinKindOf(a) === 'memory-tidy')
-    assert.equal(after?.instructions, MEMORY_TIDY_INSTRUCTIONS_BODY, '升级成当前默认（组装前正文）')
-    assert.match(after?.instructions ?? '', /要泛化/)
+    const after = (await tidyOf(WS_OLD))!
+    assert.equal(after.instructions, MEMORY_TIDY_INSTRUCTIONS_BODY, '升级成当前默认')
+    assert.match(after.instructions, /要泛化/)
   })
 
   test('★★ 但**使用者自己写的**指令绝不升级（判据是"逐字等于历史默认"）', async () => {
     const WS_MINE = wsId('ws-memory-tidy-mine')
+    await ensureTestWorkspace(store, WS_MINE)
     await ensureBuiltinMemoryTidy(store, WS_MINE)
-    const found = (await store.listAgents(WS_MINE)).find((a) => builtinKindOf(a) === 'memory-tidy')
-    assert.ok(found)
+    const found = (await tidyOf(WS_MINE))!
     await store.insertAgent({
       ...found,
       instructions: `${MEMORY_TIDY_INSTRUCTIONS_V1}\n\n（我自己加的一条：报告要短）`,
@@ -298,17 +305,81 @@ describe('ensureBuiltinMemoryTidy：建 / 幂等 / 自愈', () => {
     })
     const result = await ensureBuiltinMemoryTidy(store, WS_MINE)
     assert.equal(result.action, 'left-alone')
-    const after = (await store.listAgents(WS_MINE)).find((a) => builtinKindOf(a) === 'memory-tidy')
-    assert.match(after?.instructions ?? '', /我自己加的一条/)
+    const after = (await tidyOf(WS_MINE))!
+    assert.match(after.instructions, /我自己加的一条/)
   })
 
-  test('★★ `ensureBuiltinAgents` 两条一起对账（启动那条路）', async () => {
+  test('★★ `ensureBuiltinAgents` 四条一起对账，并把槽位表写回去', async () => {
     const WS3 = wsId('ws-both')
-    const out = await ensureBuiltinAgents(store, WS3)
+    await ensureTestWorkspace(store, WS3)
+    const table = await loadSlotTable(store, WS3)
+    const out = await ensureBuiltinAgents(store, WS3, table)
+    await saveSlotTable(store, WS3, table)
     assert.equal(out.drafter.action, 'created')
     assert.equal(out.memoryTidy.action, 'created')
-    const agents = await store.listAgents(WS3)
-    assert.equal(agents.filter((a) => builtinKindOf(a) === 'drafter').length, 1)
-    assert.equal(agents.filter((a) => builtinKindOf(a) === 'memory-tidy').length, 1)
+    assert.equal(out.agentMaker.action, 'created')
+    assert.equal(out.workflowMaker.action, 'created')
+    // 四个槽位都认领上了
+    assert.equal(Object.keys(table).length, 4)
+    assert.equal((await platformMemberOf(store, WS3, 'drafter'))?.name, DRAFTER_NAME)
+    assert.equal((await platformMemberOf(store, WS3, 'memory-tidy'))?.name, MEMORY_TIDY_NAME)
+    // 平台上正好四条（没有多出来的）
+    const platform = (await store.listAgents(WS3)).filter((a) => a.owner === 'platform')
+    assert.equal(platform.length, 4)
+  })
+})
+
+/**
+ * ★★★ 2026-11（D154）：**反复调用 `ensure*` / `syncDrafterSkillMount` 不会越建越多**。
+ *
+ * 这条判据来自一次**真机上量到的事故**：改成槽位表之后，`syncDrafterSkillMount(store, ws)`
+ * 的第三个参数被写成了默认值 `= {}`（空表）。于是每次"起草前对齐挂载"都拿着**空表**
+ * 去认人 ⇒ `resolveSlot` 回退老字段 ⇒ 新记录根本没有老字段 ⇒ **认不出 ⇒ 建一条新的**。
+ * crystallize-e2e 当场红了一条 `还有 48 个智能体挂着「distilly」：沉淀起草者（内置）…`
+ * ——48 个同名起草者并存的画面，比任何断言都清楚。
+ *
+ * 判据落在**库里的条数**上（不是"函数返回了什么"）：跑五遍，平台上永远只有那四条。
+ */
+describe('★★★ 幂等：反复对齐挂载 / 反复对账，平台上永远只有四条', () => {
+  test('syncDrafterSkillMount 跑五遍 ⇒ 起草者仍然只有一条', async () => {
+    const WS_MOUNT = wsId('ws-mount-idempotent')
+    await ensureTestWorkspace(store, WS_MOUNT)
+    for (let i = 0; i < 5; i += 1) {
+      await syncDrafterSkillMount(store, WS_MOUNT)
+    }
+    const drafters = (await store.listAgents(WS_MOUNT)).filter((a) => a.name === DRAFTER_NAME)
+    assert.equal(drafters.length, 1, `起草者只该有一条，实际 ${drafters.length} 条`)
+  })
+
+  test('ensureBuiltinAgents 跑五遍 ⇒ 四个槽位指向同四条记录，且没有多出来的', async () => {
+    const WS_MANY = wsId('ws-many-idempotent')
+    await ensureTestWorkspace(store, WS_MANY)
+    const first = await ensureBuiltinAgents(store, WS_MANY)
+    const firstIds = Object.values(first.slots).sort()
+    for (let i = 0; i < 4; i += 1) {
+      const again = await ensureBuiltinAgents(store, WS_MANY)
+      assert.equal(again.drafter.action, 'left-alone')
+      assert.deepEqual(Object.values(again.slots).sort(), firstIds, '槽位指向的 id 不许变')
+    }
+    const platform = (await store.listAgents(WS_MANY)).filter((a) => a.owner === 'platform')
+    assert.equal(platform.length, 4, `平台上正好四条，实际 ${platform.length} 条`)
+  })
+
+  test('★ 槽位表被清空再跑一次 ⇒ 只补**缺的那四条**（旧记录原样留着，不重复建）', async () => {
+    const WS_RESET = wsId('ws-reset-idempotent')
+    await ensureTestWorkspace(store, WS_RESET)
+    await ensureBuiltinAgents(store, WS_RESET)
+    await saveSlotTable(store, WS_RESET, {})
+    await ensureBuiltinAgents(store, WS_RESET)
+    const platform = (await store.listAgents(WS_RESET)).filter((a) => a.owner === 'platform')
+    // 表清空 = 认不出 ⇒ 每条各建一条新的（4 旧 + 4 新）。旧的不删（使用者的数据）。
+    assert.equal(platform.length, 8, '新补四条；旧的四条原样留着')
+    // 再跑一遍就不再增长（表已经认领好了）
+    await ensureBuiltinAgents(store, WS_RESET)
+    assert.equal(
+      (await store.listAgents(WS_RESET)).filter((a) => a.owner === 'platform').length,
+      8,
+      '认领之后就稳住，不再增长',
+    )
   })
 })

@@ -710,8 +710,8 @@
           {
             const win = f.contentWindow
             const list = await win.fetch('/api/agents').then((r) => r.json())
-            // ⚠️ 2026-11（S4，D127）：`role` 没了，内置岗位看 `builtinKind`。
-            const me = (list.agents ?? []).find((a) => a.builtinKind === 'drafter')
+            // ★ 2026-11（D154）：内置成员看**槽位**（服务端算好发下 `slot`）
+            const me = (list.agents ?? []).find((a) => a.slot === 'drafter')
             if (me) {
               await win.fetch(`/api/agents/${me.id}`, {
                 method: 'PATCH',
@@ -3948,7 +3948,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             return null
           }
           const agents = (await f.contentWindow.fetch('/api/agents').then((r) => r.json())).agents ?? []
-          const maker = agents.find((a) => a.builtinKind === 'workflow-maker')
+          const maker = agents.find((a) => a.slot === 'workflow-maker')
           if (!maker) {
             errors.push('启动对账没建出编排生成者（workflow-maker）')
             return null
@@ -7967,10 +7967,10 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             const skills = (await f.contentWindow.fetch('/api/skills').then((r) => r.json())).skills ?? []
             const owned = skills.find((s) => s.slug === 'chat-probe-skill')
             const orphan = skills.find((s) => s.slug === 'chat-orphan-skill')
-            // ⚠️ 2026-11（S4，D127）：判据从 `role === 'executor'` 换成"**不是**平台内置
-            //    岗位"（`builtinKind === undefined`）。用**相等**不用"不等于某几个名字"：
-            //    后者会在明天多一个内置岗位时静默把内置的也算成执行者。
-            const isExecutor = (a) => a.builtinKind === undefined
+            // ★ 2026-11（D154）：执行者 = **没有占到任何出厂槽位**（`slot` 为空）。
+            //   用"有没有槽位"而不是"名字不等于某几个"，后者会在明天多一个成员时静默把
+            //   内置的也算成执行者。
+            const isExecutor = (a) => a.slot === undefined || a.slot === null
             const owner = agents.find(
               (a) => isExecutor(a) && (a.skillIds ?? []).includes(owned?.id),
             )
@@ -8023,7 +8023,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         facts['chat.agentMakerChoice'] = await (async () => {
           const agents = (await f.contentWindow.fetch('/api/agents').then((r) => r.json())).agents ?? []
           // ⚠️ 2026-11（S4，D127）：判据从 `role === 'agent-maker'` 换成 `builtinKind`。
-          const maker = agents.find((a) => a.builtinKind === 'agent-maker')
+          const maker = agents.find((a) => a.slot === 'agent-maker')
           if (!maker) {
             errors.push('启动对账没建出智能体生成者（agent-maker）')
             return false
@@ -10164,7 +10164,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           //   run.mjs 3513 行那段注释就是那次事故的教训。）
           const agents = (await f.contentWindow.fetch('/api/agents').then((r) => r.json())).agents ?? []
           // ⚠️ 2026-11（S4，D127）：判据从 `role === 'agent-maker'` 换成 `builtinKind`。
-          const maker = agents.find((a) => a.builtinKind === 'agent-maker')
+          const maker = agents.find((a) => a.slot === 'agent-maker')
           if (!maker) {
             errors.push('找不到内置智能体生成者（agent-maker）')
             return false
@@ -10294,7 +10294,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
 
         facts['chat.workflowMakerButtonShows'] = await (async () => {
           const agents = (await f.contentWindow.fetch('/api/agents').then((r) => r.json())).agents ?? []
-          const maker = agents.find((a) => a.builtinKind === 'workflow-maker')
+          const maker = agents.find((a) => a.slot === 'workflow-maker')
           if (!maker) {
             errors.push('找不到内置编排生成者（workflow-maker）')
             return false

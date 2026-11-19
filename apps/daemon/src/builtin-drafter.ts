@@ -29,6 +29,9 @@ import { withConduct } from './agent-conduct.ts'
 import { ulid } from '@agentdeck/protocol'
 import type { Agent, WorkspaceId } from '@agentdeck/protocol'
 import type { Store } from '@agentdeck/domain'
+import type { PlatformSlot, SlotTable } from './platform-slots.ts'
+import { claimSlot, loadSlotTable, resolveSlot, saveSlotTable } from './platform-slots.ts'
+import { PLATFORM_MEMBER_ENTRIES } from './platform-member.ts'
 
 /**
  * **最终指令**（组装后）——模型真正会读到的就是这一份。
@@ -46,7 +49,13 @@ import type { Store } from '@agentdeck/domain'
  */
 export function effectiveInstructions(agent: Agent): string {
   if (agent.instructionsAssembled === true) return agent.instructions
-  if (agent.builtin === true) return withConduct(agent.instructions)
+  /*
+   * ★ 2026-11（D154）：判据从 `builtin === true` 换成**归属**（`owner`，老数据回退
+   *   `builtin`）。新记录不写 `builtin` 了——照旧读它的话，平台成员的指令会**少拼一段
+   *   平台守则**，而"库里存正文、运行时拼守则"这条分工看起来一切正常（只是守则悄悄没了）。
+   */
+  const platformOwned = agent.owner === 'platform' || (agent.owner === undefined && agent.builtin === true)
+  if (platformOwned) return withConduct(agent.instructions)
   return agent.instructions
 }
 
@@ -106,13 +115,14 @@ export function builtinKindOf(
   return kind
 }
 
-/** 从列表里挑出指定的那一条内置（找不到返回 undefined，由调用方决定建还是报错）。 */
-export function findBuiltinAgent(
-  agents: readonly Agent[],
-  kind: BuiltinKind,
-): Agent | undefined {
-  return agents.find((a) => builtinKindOf(a) === kind)
-}
+/*
+ * ⚠️ 2026-11（D154）：这里原来有一个 `findBuiltinAgent(agents, kind)` ——按记录上的
+ *   老字段在列表里找人。**它删掉了**：认人现在只走槽位表（`platform-slots.ts` 的
+ *   `resolveSlot` / `platformMemberOf`）。
+ *
+ *   为什么留不得：留一个"还能按老字段找人"的函数，就等于给"表说 A、老字段说 B"这种
+ *   双认领留了后门——而这正是把槽位挪到平台侧要消灭的东西。
+ */
 
 /**
  * 内置起草者的默认名字（使用者可改，改名不影响它是不是内置——认的是 `builtin` + `role`）。
@@ -942,10 +952,16 @@ export function builtinDefaultsOf(kind: BuiltinKind): {
  *    加进审核者之后那句话对它是**事实错误**——使用者看到"起草者"三个字会去改错的
  *    那条，而真正被拦下的那条他没意识到。
  */
-export function describeBuiltinAgent(agent: Pick<Agent, 'builtin' | 'builtinKind'>): string {
-  const kind = builtinKindOf(agent)
-  if (kind === null) return '平台内置的智能体'
-  return builtinDefaultsOf(kind).label
+export function describeBuiltinAgent(slot: PlatformSlot | null): string {
+  if (slot === null) {
+    /*
+     * ⚠️ 2026-11（D154）：认不出槽位**不再是"岗位值缺"**（记录上已经没有那个字段了），
+     *   而是"它是平台成员、但没占任何槽位"——数据不一致。文案仍然给一个能读的说法，
+     *   因为这几处都是错误信息里的主谓（"「X」是平台内置的智能体，不能删"）。
+     */
+    return '平台内置的智能体'
+  }
+  return builtinDefaultsOf(slot).label
 }
 
 /**
@@ -973,10 +989,32 @@ export const DRAFTER_SKILL_SLUG = 'distilly'
 export async function syncDrafterSkillMount(
   store: Store,
   workspaceId: WorkspaceId,
+  /**
+   * ★ 2026-11（D154）：槽位表。
+   *
+   * ⚠️⚠️ 这个参数**没有默认值**，而且不传时必须"自己读**并**自己写回"——
+   *   第一版写成了 `slots = {}`（一张空表）：空表 = "这个工作区一条都没认领" ⇒
+   *   `resolveSlot` 回退老字段 ⇒ 新记录没有老字段 ⇒ 认不出 ⇒ **每对齐一次建一条**。
+   *   crystallize-e2e 当场量到 **48 个同名起草者**并存（还都挂着 distilly）。
+   *   现在：不传 ⇒ 读表 → 用 → 写回（`saveSlotTable`），与 `withSlots` 同一口径。
+   */
+  slots?: SlotTable,
 ): Promise<{ agentId: string | null; skillIds: string[]; skillSlugs: string[] }> {
-  await ensureBuiltinDrafter(store, workspaceId)
-  const all = await store.listAgents(workspaceId)
-  const drafter = findBuiltinAgent(all, 'drafter')
+  if (slots !== undefined) return await syncDrafterSkillMountInner(store, workspaceId, slots)
+  const table = await loadSlotTable(store, workspaceId)
+  const out = await syncDrafterSkillMountInner(store, workspaceId, table)
+  await saveSlotTable(store, workspaceId, table)
+  return out
+}
+
+async function syncDrafterSkillMountInner(
+  store: Store,
+  workspaceId: WorkspaceId,
+  table: SlotTable,
+): Promise<{ agentId: string | null; skillIds: string[]; skillSlugs: string[] }> {
+  await ensureBuiltinDrafter(store, workspaceId, table)
+  // 认人只走表（`ensureBuiltinDrafter` 刚把槽位认领好）
+  const drafter = await resolveSlot(store, workspaceId, table, 'drafter')
   if (!drafter) return { agentId: null, skillIds: [], skillSlugs: [] }
 
   const skills = await store.listSkills(workspaceId)
@@ -1124,20 +1162,103 @@ export type EnsureDrafterResult =
  * 起草者一条。名字没改（`ensureBuiltinAgents`）是为了让启动路径与日志不动——它本来就该是
  * "平台内置的那几条"的入口，将来若再加内置智能体也从这里进。
  */
+/**
+ * ★ 2026-11（D154）：**槽位表的读—用—写**这一层的唯一入口。
+ *
+ * 为什么要有它：四个 `ensure*` 都要"看表 → 可能认领一条 → 表变了"。
+ *   · 调用方**已经拿着表**（启动对账那一串）⇒ 传进来，它负责统一持久化一次；
+ *   · 调用方**只有 store**（测试、单条自愈、装技能后对齐挂载）⇒ 不传，这里读一次
+ *     写回一次——那些路径本来就要落库，多一次工作区写是可接受的代价。
+ *
+ * ⚠️ 缺了这个"自己读自己写"的分支，`ensureBuiltinDrafter(store, ws)` 这种老式调用
+ *    就会每次拿到空表 ⇒ 每次新建一条起草者（"每次启动多一条"那类故障的原样复现）。
+ */
+async function withSlots<T>(
+  store: Store,
+  workspaceId: WorkspaceId,
+  slots: SlotTable | undefined,
+  fn: (table: SlotTable) => Promise<T>,
+): Promise<T> {
+  if (slots !== undefined) return await fn(slots)
+  const table = await loadSlotTable(store, workspaceId)
+  const out = await fn(table)
+  await saveSlotTable(store, workspaceId, table)
+  return out
+}
+
+/** 确保内置起草者在（表由 `withSlots` 管，见那里）。 */
+export async function ensureBuiltinDrafter(
+  store: Store,
+  workspaceId: WorkspaceId,
+  slots?: SlotTable,
+): Promise<EnsureDrafterResult> {
+  return await withSlots(store, workspaceId, slots, (t) =>
+    ensureBuiltinDrafterInner(store, workspaceId, t),
+  )
+}
+
+export async function ensureBuiltinMemoryTidy(
+  store: Store,
+  workspaceId: WorkspaceId,
+  slots?: SlotTable,
+): Promise<EnsureDrafterResult> {
+  return await withSlots(store, workspaceId, slots, (t) =>
+    ensureBuiltinMemoryTidyInner(store, workspaceId, t),
+  )
+}
+
+export async function ensureBuiltinAgentMaker(
+  store: Store,
+  workspaceId: WorkspaceId,
+  slots?: SlotTable,
+): Promise<EnsureDrafterResult> {
+  return await withSlots(store, workspaceId, slots, (t) =>
+    ensureBuiltinAgentMakerInner(store, workspaceId, t),
+  )
+}
+
+export async function ensureBuiltinWorkflowMaker(
+  store: Store,
+  workspaceId: WorkspaceId,
+  slots?: SlotTable,
+): Promise<EnsureDrafterResult> {
+  return await withSlots(store, workspaceId, slots, (t) =>
+    ensureBuiltinWorkflowMakerInner(store, workspaceId, t),
+  )
+}
+
 export async function ensureBuiltinAgents(
   store: Store,
   workspaceId: WorkspaceId,
+  /**
+   * ★ 2026-11（D154）：**平台槽位表**（`Workspace.platformSlots`）。
+   *
+   * 对账之后它可能多了几条（新建出来的成员），由调用方写回工作区——见
+   * `startup-reconcile.ts` 的 `ensureMembers`。传进来就地填，是为了让四条 ensure
+   * 共用同一份视图：每条建完立刻认领，后一条就不会重复建。
+   */
+  slots?: SlotTable,
 ): Promise<{
   drafter: EnsureDrafterResult
   memoryTidy: EnsureDrafterResult
   agentMaker: EnsureDrafterResult
   workflowMaker: EnsureDrafterResult
+  /** 对账之后的槽位表（传了 `slots` ⇒ **调用方负责持久化**；没传 ⇒ 这里已经写回）。 */
+  slots: SlotTable
 }> {
-  const drafter = await ensureBuiltinDrafter(store, workspaceId)
-  const memoryTidy = await ensureBuiltinMemoryTidy(store, workspaceId)
-  const agentMaker = await ensureBuiltinAgentMaker(store, workspaceId)
-  const workflowMaker = await ensureBuiltinWorkflowMaker(store, workspaceId)
-  return { drafter, memoryTidy, agentMaker, workflowMaker }
+  /*
+   * ⚠️ 与四个 `ensure*` 的 `withSlots` 同一口径：**没传表就自己读、自己写**。
+   *   不这样的话，`ensureBuiltinAgents(store, ws)` 这种两参调用会把认领结果丢掉
+   *   ⇒ 下次再跑又"认不出" ⇒ 每次多建一条（测试里当场就红了）。
+   */
+  const own = slots === undefined
+  const table = slots ?? (await loadSlotTable(store, workspaceId))
+  const drafter = await ensureBuiltinDrafter(store, workspaceId, table)
+  const memoryTidy = await ensureBuiltinMemoryTidy(store, workspaceId, table)
+  const agentMaker = await ensureBuiltinAgentMaker(store, workspaceId, table)
+  const workflowMaker = await ensureBuiltinWorkflowMaker(store, workspaceId, table)
+  if (own) await saveSlotTable(store, workspaceId, table)
+  return { drafter, memoryTidy, agentMaker, workflowMaker, slots: table }
 }
 
 /**
@@ -1151,12 +1272,17 @@ export async function ensureBuiltinAgents(
  * ⚠️ 它挂载的平台技能由 `agent-maker-skills.ts` 的 `syncAgentMakerSkillMount` 管，
  *    这里创建时不挂（挂载对齐在启动时做，与起草者挂 distilly 同一分工）。
  */
-export async function ensureBuiltinAgentMaker(
+async function ensureBuiltinAgentMakerInner(
   store: Store,
   workspaceId: WorkspaceId,
+  slots: SlotTable,
 ): Promise<EnsureDrafterResult> {
-  const all = await store.listAgents(workspaceId)
-  const found = findBuiltinAgent(all, 'agent-maker')
+  /*
+   * ★ 2026-11（D154）：**从槽位表读**，不再靠记录上的老字段认人。
+   *   `resolveSlot` 会在表里没有这个槽位时回退老字段（升级当天的唯一线索），
+   *   找到之后由下面建/修的分支 `claimSlot()` 把 id 写进表。
+   */
+  const found = await resolveSlot(store, workspaceId, slots, 'agent-maker')
   if (!found) {
     /*
      * ⚠️ 2026-11（S4）：这里原来按 `role === 'agent-maker'` 认出"标记丢了的那条"。
@@ -1180,13 +1306,20 @@ export async function ensureBuiltinAgentMaker(
       //   （`agents/<id>/SKILL/` 文件，由 `ensureBuiltinAgentMakerSkills` 播种）。
       skillIds: [],
       env: {},
-      builtin: true,
-      builtinKind: 'agent-maker',
+      /*
+       * ★ 2026-11（D154）：**不再写 `builtin` / `builtinKind`**。
+       *   "这条是平台的"由 `owner` 说，"它是哪一条"由槽位表说（下面 `claimSlot`）。
+       *   记录上只留 `owner` + `entries`——半内置那种"写坏一半"的形态就从数据里消失了。
+       */
+      owner: 'platform',
+      entries: [...PLATFORM_MEMBER_ENTRIES['agent-maker']],
       reviewStandard: null,
       createdAt: now,
       updatedAt: now,
     }
     await store.insertAgent(agent)
+    // ★ 2026-11（D154）：建出来的这条**认领槽位**（表由 `withSlots` 管持久化）
+    claimSlot(slots, 'agent-maker', agent.id as string)
     return { action: 'created', agentId: agent.id as string }
   }
   if (found.instructions.trim() === '') {
@@ -1217,12 +1350,17 @@ export async function ensureBuiltinAgentMaker(
  * 与智能体生成者**同一套三条纪律**（幂等 / 清空自愈 / 旧默认跟上）。
  * ⚠️ 它**不挂技能**：编排代码的写法全在身份里，没有"编排用技能"这种东西。
  */
-export async function ensureBuiltinWorkflowMaker(
+async function ensureBuiltinWorkflowMakerInner(
   store: Store,
   workspaceId: WorkspaceId,
+  slots: SlotTable,
 ): Promise<EnsureDrafterResult> {
-  const all = await store.listAgents(workspaceId)
-  const found = findBuiltinAgent(all, 'workflow-maker')
+  /*
+   * ★ 2026-11（D154）：**从槽位表读**，不再靠记录上的老字段认人。
+   *   `resolveSlot` 会在表里没有这个槽位时回退老字段（升级当天的唯一线索），
+   *   找到之后由下面建/修的分支 `claimSlot()` 把 id 写进表。
+   */
+  const found = await resolveSlot(store, workspaceId, slots, 'workflow-maker')
   if (!found) {
     const now = Date.now()
     const agent: Agent = {
@@ -1236,13 +1374,20 @@ export async function ensureBuiltinWorkflowMaker(
       workDir: null,
       skillIds: [],
       env: {},
-      builtin: true,
-      builtinKind: 'workflow-maker',
+      /*
+       * ★ 2026-11（D154）：**不再写 `builtin` / `builtinKind`**。
+       *   "这条是平台的"由 `owner` 说，"它是哪一条"由槽位表说（下面 `claimSlot`）。
+       *   记录上只留 `owner` + `entries`——半内置那种"写坏一半"的形态就从数据里消失了。
+       */
+      owner: 'platform',
+      entries: [...PLATFORM_MEMBER_ENTRIES['workflow-maker']],
       reviewStandard: null,
       createdAt: now,
       updatedAt: now,
     }
     await store.insertAgent(agent)
+    // ★ 2026-11（D154）：建出来的这条**认领槽位**（表由 `withSlots` 管持久化）
+    claimSlot(slots, 'workflow-maker', agent.id as string)
     return { action: 'created', agentId: agent.id as string }
   }
   if (found.instructions.trim() === '') {
@@ -1275,12 +1420,17 @@ export async function ensureBuiltinWorkflowMaker(
  *
  * ⚠️ 它**不挂技能**：整理记忆靠的是身份里那套规矩，没有"整理用技能"这种东西。
  */
-export async function ensureBuiltinMemoryTidy(
+async function ensureBuiltinMemoryTidyInner(
   store: Store,
   workspaceId: WorkspaceId,
+  slots: SlotTable,
 ): Promise<EnsureDrafterResult> {
-  const all = await store.listAgents(workspaceId)
-  const found = findBuiltinAgent(all, 'memory-tidy')
+  /*
+   * ★ 2026-11（D154）：**从槽位表读**，不再靠记录上的老字段认人。
+   *   `resolveSlot` 会在表里没有这个槽位时回退老字段（升级当天的唯一线索），
+   *   找到之后由下面建/修的分支 `claimSlot()` 把 id 写进表。
+   */
+  const found = await resolveSlot(store, workspaceId, slots, 'memory-tidy')
   if (!found) {
     /*
      * ⚠️ 2026-11（S4，D127）：这里原来有一条"标记丢了但 `role` 还在 ⇒ 补标记"的
@@ -1305,13 +1455,20 @@ export async function ensureBuiltinMemoryTidy(
       workDir: null,
       skillIds: [],
       env: {},
-      builtin: true,
-      builtinKind: 'memory-tidy',
+      /*
+       * ★ 2026-11（D154）：**不再写 `builtin` / `builtinKind`**。
+       *   "这条是平台的"由 `owner` 说，"它是哪一条"由槽位表说（下面 `claimSlot`）。
+       *   记录上只留 `owner` + `entries`——半内置那种"写坏一半"的形态就从数据里消失了。
+       */
+      owner: 'platform',
+      entries: [...PLATFORM_MEMBER_ENTRIES['memory-tidy']],
       reviewStandard: null,
       createdAt: now,
       updatedAt: now,
     }
     await store.insertAgent(agent)
+    // ★ 2026-11（D154）：建出来的这条**认领槽位**（表由 `withSlots` 管持久化）
+    claimSlot(slots, 'memory-tidy', agent.id as string)
     return { action: 'created', agentId: agent.id as string }
   }
   if (found.instructions.trim() === '') {
@@ -1335,15 +1492,20 @@ export async function ensureBuiltinMemoryTidy(
   return { action: 'left-alone', agentId: found.id as string }
 }
 
-export async function ensureBuiltinDrafter(
+async function ensureBuiltinDrafterInner(
   store: Store,
   workspaceId: WorkspaceId,
+  slots: SlotTable,
 ): Promise<EnsureDrafterResult> {
-  const all = await store.listAgents(workspaceId)
-  // 认 `builtin` + **这个角色**（第 70 批）：`builtin` 只说明"是平台的"，审核者也是。
-  // 只按标记找的话，起草者标记丢了时撞上的是审核者，于是返回"left-alone"、起草者的
-  // 标记**永远修不回来**（下面那条按角色认的自愈分支成了死代码）。
-  const found = findBuiltinAgent(all, 'drafter')
+  /*
+   * ★ 2026-11（D154）：**从槽位表读**（`resolveSlot` 在表里没有该槽位时回退老字段，
+   *   那是升级当天的唯一线索；找到之后由下面的建/修分支 `claimSlot()` 写进表）。
+   *
+   * ⚠️ 老注释里那句"认 `builtin` + 这个角色"是分批第 70 批的：那时靠两个字段一起认，
+   *    因为只按 `builtin` 会撞上同样是内置的审核者。现在"是哪一条"只在表里说，
+   *    这类"标记撞车"就不可能发生了。
+   */
+  const found = await resolveSlot(store, workspaceId, slots, 'drafter')
   if (!found) {
     /*
      * ⚠️ 2026-11（S4，D127）：这里原来有一条"标记丢了但 `role` 还在 ⇒ 补标记"的
@@ -1371,8 +1533,13 @@ export async function ensureBuiltinDrafter(
       //   给它挂业务技能只会让人以为那些技能会影响起草（它们不会）。
       skillIds: [],
       env: {},
-      builtin: true,
-      builtinKind: 'drafter',
+      /*
+       * ★ 2026-11（D154）：**不再写 `builtin` / `builtinKind`**。
+       *   "这条是平台的"由 `owner` 说，"它是哪一条"由槽位表说（下面 `claimSlot`）。
+       *   记录上只留 `owner` + `entries`——半内置那种"写坏一半"的形态就从数据里消失了。
+       */
+      owner: 'platform',
+      entries: [...PLATFORM_MEMBER_ENTRIES['drafter']],
       // 审核标准（D37）：起草者不审任何东西 ⇒ 没有标准（也正因为没有，平台不会把产出
       // 交给它审——这正是这一步要的：**起草者绝不参与业务选择**）。
       reviewStandard: null,
@@ -1380,6 +1547,8 @@ export async function ensureBuiltinDrafter(
       updatedAt: now,
     }
     await store.insertAgent(agent)
+    // ★ 2026-11（D154）：建出来的这条**认领槽位**（表由 `withSlots` 管持久化）
+    claimSlot(slots, 'drafter', agent.id as string)
     return { action: 'created', agentId: agent.id as string }
   }
   if (found.instructions.trim() === '') {

@@ -461,9 +461,9 @@ describe('★ 默认智能体：设 / 取消 / 只认执行者', () => {
        *   **平台内置岗位**（起草者 / 记忆整理 / 生成者 / 沉淀审核者）。
        */
       const list = (await (await fetch(`${url}/api/agents`)).json()) as {
-        agents: Array<{ id: string; builtinKind?: string }>
+        agents: Array<{ id: string; builtinKind?: string; slot?: string | null }>
       }
-      const drawer = list.agents.find((a) => a.builtinKind === 'drafter')
+      const drawer = list.agents.find((a) => a.slot === 'drafter')
       assert.ok(drawer, '启动对账要建出内置起草者')
 
       const res = await fetch(`${url}/api/agents/default`, {
