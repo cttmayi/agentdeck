@@ -3636,42 +3636,17 @@ const CHECKS = [
   },
   {
     view: '默认智能体',
-    key: 'defaultAgent.setButtonCount',
-    label: '★ 其余每个执行者卡片上都有「设为默认」',
-    ok: (v) => typeof v === 'number' && v >= 1,
-    show: (v) => `${v} 个`,
-  },
-  {
-    view: '默认智能体',
-    key: 'defaultAgent.noButtonOnReviewer',
-    label: '审核者的卡片上没有这个开关（任务不会交给它）',
+    /*
+     * ★ 2026-11（D159）：使用者选了"严格按范例"的收法——**行内不再有「设为默认」**，
+     *   它搬进右栏栏头。这一条量的是"列表行里真的没有了"（范例：行 = 标题 + 副行 +
+     *   可选的一颗 × 危险动作）。
+     */
+    key: 'defaultAgent.rowHasNoToggle',
+    label:
+      '★★ 列表行里**没有**「设为默认」（严格按范例的收法：行 = 标题 + 副行 + 可选 ×；' +
+      '这颗要读文字的动作搬进了右栏栏头）',
     ok: (v) => v === true,
-  },
-  {
-    view: '默认智能体',
-    key: 'defaultAgent.rowFitsPane',
-    label: '★ 带开关那一行不超出左栏（第一版溢出 54px）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '默认智能体',
-    key: 'defaultAgent.switchInsideRow',
-    label: '★ 开关在卡片的边框**里面**（不是挂在边框外）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '默认智能体',
-    key: 'defaultAgent.rowOverflowX',
-    label: '卡片内部没有横向溢出',
-    ok: (v) => v === 0,
-    show: (v) => `${v}px`,
-  },
-  {
-    view: '默认智能体',
-    key: 'defaultAgent.paneBodyOverflowX',
-    label: '★ 左栏正文没有横向溢出（第一版这里是 54px）',
-    ok: (v) => v === 0,
-    show: (v) => `${v}px`,
+    show: (v) => `行内按钮 ${String(v)} 个`,
   },
   {
     view: '默认智能体',
@@ -3681,8 +3656,16 @@ const CHECKS = [
   },
   {
     view: '默认智能体',
+    key: 'defaultAgent.setButtonNotPrimary',
+    label:
+      '★ 栏头里那颗「设为默认」是**普通动作**（主操作只有「保存」一颗）——' +
+      '动作权重按"主 → 次 → 普通 → 危险"排，它不是这条主线',
+    ok: (v) => v === true,
+  },
+  {
+    view: '默认智能体',
     key: 'defaultAgent.badgeMovesToTarget',
-    label: '★★ 点完之后「默认」徽章**移到刚点的那张卡**上（原来那个自动让位）',
+    label: '★★ 在栏头点完之后「默认」徽章**移到刚操作的那条**上（原来那个自动让位）',
     ok: (v) => v === true,
   },
   {
@@ -3700,7 +3683,7 @@ const CHECKS = [
   {
     view: '默认智能体',
     key: 'defaultAgent.targetHasNoToggle',
-    label: '已经是默认的那个不再显示开关（徽章已经说明了）',
+    label: '已经是默认的那条，**栏头里不再给这颗按钮**（徽章已经说明了）',
     ok: (v) => v === true,
   },
   {

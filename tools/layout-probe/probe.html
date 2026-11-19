@@ -4930,8 +4930,13 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         const badge = () => d().querySelector('.agent-list .default-badge')
         // ★ 第 268 批：这一节也靠 `.agent-row` 找人 ⇒ 先把分组展开（内置那组默认收拢）
         await expandAllGroups()
-        const toggleBtns = () =>
-          [...d().querySelectorAll('.default-toggle')].filter(Boolean)
+        /*
+         * ★ 2026-11（D159）：**「设为默认」从行内搬进了详情栏头**（使用者选了"严格按范例"）。
+         *   于是"找按钮"这件事变了：先**选中**那一行，再去右栏栏头点。
+         *   原来那几条"按钮在行的边框里 / 行不溢出"的量法随行内按钮一起删除——那个位置
+         *   已经不存在这类缺陷了；换成量"栏头里那颗按钮"（存在 + 是普通动作、不是主操作）。
+         */
+        const headerSetDefault = () => d().querySelector('[data-agent-set-default]')
         const cancelBtns = () =>
           [...d().querySelectorAll('.agent-row button')].filter((b) =>
             (b.textContent ?? '').includes('取消默认'),
@@ -4953,54 +4958,62 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
 
         facts['defaultAgent.badgeCount'] = d().querySelectorAll('.agent-list .default-badge').length
         facts['defaultAgent.noCancelButton'] = cancelBtns().length === 0
-        facts['defaultAgent.setButtonCount'] = toggleBtns().length
-        facts['defaultAgent.noButtonOnReviewer'] = !(
-          d()
-            .querySelector('.agent-row .badge.in_review')
-            ?.closest('.agent-row')
-            ?.querySelector('button.default-toggle')
-        )
+        // ★ 2026-11（D159）：**行内不再有**这颗按钮（严格按范例：行 = 标题 + 副行 + 可选 ×）
+        facts['defaultAgent.rowHasNoToggle'] = d().querySelectorAll('.agent-row .default-toggle').length === 0
 
-        // ★ 布局：开关必须在卡片的边框**里面**，整行不许溢出栏宽
-        const paneW = rowBox(paneEl2)
-        const rowWithToggle = toggleBtns()[0]?.closest('.agent-row')
-        facts['defaultAgent.rowFitsPane'] = !!(
-          rowWithToggle &&
-          paneW &&
-          rowBox(rowWithToggle).right <= paneW.right + 1
-        )
-        facts['defaultAgent.switchInsideRow'] = !!(
-          rowWithToggle &&
-          toggleBtns()[0] &&
-          rowBox(toggleBtns()[0]).right <= rowBox(rowWithToggle).right + 1
-        )
-        facts['defaultAgent.rowOverflowX'] = rowWithToggle
-          ? rowWithToggle.scrollWidth - rowWithToggle.clientWidth
-          : null
-        facts['defaultAgent.paneBodyOverflowX'] = paneBodyEl
-          ? paneBodyEl.scrollWidth - paneBodyEl.clientWidth
-          : null
-
-        const target = toggleBtns()[0]
-        facts['defaultAgent.setButtonFound'] = !!target
-        if (target) {
-          const targetRow = target.closest('.agent-row')
-          facts['defaultAgent.targetName'] = text(targetRow.querySelector('.list-row-main strong'))
-          const previous = need('点之前谁是默认', () => text(badge().closest('.agent-row').querySelector('.list-row-main strong')))
-          facts['defaultAgent.previousName'] = previous
-
-          click(target)
-          const marked = await until(
-            () =>
-              text(badge()?.closest('.agent-row')?.querySelector('.list-row-main strong')) ===
-              facts['defaultAgent.targetName'],
+        /*
+         * 找一个"不是默认的执行者"：按接口说的（有 `task` 且不是 defaultAgentId），
+         * 再去列表里点它那一行。
+         */
+        const defaultInfo = await (async () => {
+          const res = await f.contentWindow.fetch('/api/agents').then((r) => r.json())
+          const list = res.agents ?? []
+          const executors = list.filter((a) => (a.entries ?? []).includes('task'))
+          const notDefault = executors.find((a) => a.id !== res.defaultAgentId)
+          const isDefault = executors.find((a) => a.id === res.defaultAgentId)
+          return { notDefault, isDefault }
+        })()
+        const rowByName = (name) =>
+          [...d().querySelectorAll('.agent-list .agent-row')].find((r) =>
+            (text(r.querySelector('.agent-line strong')) ?? '').includes(name),
           )
-          facts['defaultAgent.badgeMovesToTarget'] = marked
-          // ★ 单选：设完之后「默认」徽章**只有一个**，而且没有"取消默认"这种东西
-          facts['defaultAgent.badgeStillExactlyOne'] =
-            d().querySelectorAll('.agent-list .default-badge').length === 1
-          facts['defaultAgent.noCancelAfterSet'] = cancelBtns().length === 0
-          facts['defaultAgent.targetHasNoToggle'] = !targetRow.querySelector('.default-toggle')
+
+        facts['defaultAgent.setButtonFound'] = false
+        if (defaultInfo.notDefault) {
+          const targetRow = rowByName(defaultInfo.notDefault.name)
+          if (targetRow) {
+            click(targetRow.querySelector('.list-row-main') ?? targetRow)
+            await until(
+              () =>
+                (text(d().querySelector('[data-agent-head-name]')) ?? '').trim() ===
+                String(defaultInfo.notDefault.name),
+              60,
+            )
+            const btn = headerSetDefault()
+            facts['defaultAgent.setButtonFound'] = !!btn
+            // 它是**普通动作**，不是主操作（主操作只有「保存」一颗）
+            facts['defaultAgent.setButtonNotPrimary'] = !!btn && !btn.className.includes('primary')
+            if (btn) {
+              const previous = defaultInfo.isDefault?.name ?? null
+              facts['defaultAgent.targetName'] = String(defaultInfo.notDefault.name)
+              facts['defaultAgent.previousName'] = previous
+
+              click(btn)
+              const marked = await until(
+                () =>
+                  (text(badge()?.closest('.agent-row')?.querySelector('.agent-line strong')) ?? '') ===
+                  facts['defaultAgent.targetName'],
+              )
+              facts['defaultAgent.badgeMovesToTarget'] = marked
+              // ★ 单选：设完之后「默认」徽章**只有一个**，而且没有"取消默认"这种东西
+              facts['defaultAgent.badgeStillExactlyOne'] =
+                d().querySelectorAll('.agent-list .default-badge').length === 1
+              facts['defaultAgent.noCancelAfterSet'] = cancelBtns().length === 0
+              // 已经是默认的那条，栏头里不再给这颗按钮（徽章已经说明了）
+              facts['defaultAgent.targetHasNoToggle'] = headerSetDefault() === null
+            }
+          }
+        }
 
           // ★ 端到端：建任务那一栏里预选的就是它
           // ⚠️ 2026-10（D58 第二步）：表单住进「任务」页右栏之后，等的东西也变了——
@@ -5031,7 +5044,6 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             const chosen = sel.options[sel.selectedIndex]
             return chosen ? (chosen.textContent ?? '').replace('（默认）', '').trim() : null
           })
-        }
 
         // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
         publish(false)

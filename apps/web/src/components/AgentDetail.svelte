@@ -2,6 +2,7 @@
   import type { Agent, AgentExclusiveSkill, MemoryEntryView } from '../lib/api.ts'
   import {
     agents,
+    effectiveDefaultAgentId,
     identity,
     loadError,
     loading,
@@ -12,6 +13,7 @@
     loadAgents,
     loadSkills,
     saveExclusiveSkill,
+    setDefaultAgent,
     updateAgent,
   } from '../lib/stores.ts'
   import { askConfirm } from '../lib/confirm.ts'
@@ -29,6 +31,7 @@
     actionEntriesOf,
     agentEntries,
     hasAnyEntry,
+    hasEntry,
     isPlatformMember,
   } from '../lib/members.ts'
 
@@ -780,6 +783,25 @@
    * 为什么必须有这个按钮：平台升级**不覆盖**使用者改过的指令（那是他的资产），
    * 所以"改坏了想回原样"必须有一条路——没有它的话，唯一的办法是删了重建，而它**删不掉**。
    */
+  /**
+   * ★ 2026-11（D159）：把这条设成**默认执行者**（新建任务页的预选）。
+   *
+   * 从列表行搬过来的：失败必须有可见反馈——"设为默认"失败的样子与成功**一模一样**
+   * （徽章不动），不报出来使用者会以为设上了（行内那颗当初就是为这个补的 try/catch）。
+   */
+  async function makeDefault(): Promise<void> {
+    error = ''
+    busy = true
+    try {
+      await setDefaultAgent(agent.id)
+      showToast($t('agents.setDefaultDone', { name: agent.name }))
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
+    } finally {
+      busy = false
+    }
+  }
+
   async function restoreDefault(): Promise<void> {
     const ok = await askConfirm({
       title: tx('agents.restoreDefaultTitle'),
@@ -1129,6 +1151,23 @@
         {/if}
         <button type="button" data-agent-cancel onclick={cancelEdit}>{$t('common.close')}</button>
       {:else}
+        <!--
+          ★ 2026-11（D159）：**「设为默认」从行内搬到了这里**（使用者选了严格按范例的收法：
+            行 = 标题 + 副行 + 可选的一颗危险动作）。条件与行内那颗一模一样：
+            不是平台成员（只读）、接入点里有 `task`（能派活才配当默认）、且它还不是默认。
+          位置：本颗（普通动作）→ `保存`（主操作）→ `取消` → `删除`（危险、最后）。
+          ⚠️ 写动作成功后界面必须跟着数据走：`setDefaultAgent()` 内部会重拉列表，
+            列表上那枚「默认」徽章随之移动（不在这里手动改任何状态）。
+        -->
+        {#if !readOnly && hasEntry(agent, 'task') && agent.id !== $effectiveDefaultAgentId}
+          <button
+            type="button"
+            data-agent-set-default
+            disabled={busy}
+            title={$t('agents.setDefaultTitle')}
+            onclick={() => void makeDefault()}
+          >{$t('agents.setDefault')}</button>
+        {/if}
         <!--
           ★ 2026-11（D146）：入口一个都不留也**不给保存**——服务端同样会拒（
              `parseUserEntries`），这里只是让它在点下去之前就说清楚。

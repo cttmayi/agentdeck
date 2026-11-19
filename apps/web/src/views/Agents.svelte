@@ -8,7 +8,6 @@
     loadIdentity,
     loading,
     loadError,
-    setDefaultAgent,
   } from '../lib/stores.ts'
   import MainArea from '../components/MainArea.svelte'
   import NewAgentForm from '../components/NewAgentForm.svelte'
@@ -59,14 +58,11 @@ import ListRow from '../components/ListRow.svelte'
    */
   /** 当前点开查看的 agent。null = 还没有选（右栏显示占位）。 */
   let selectedId: string | null = null
-  /**
-   * 页面级动作失败（现在只有「设为默认」）。
-   *
-   * ★ 必须写出来：原来那里是裸 `void setDefaultAgent(a.id)`，失败时客户端拿到的
-   *   是一个 **unhandled rejection**、界面上毫无反应——而"设为默认"失败的样子
-   *   与成功**一模一样**（徽标不动），使用者会以为已经设上了。
+  /*
+   * ⚠️ 2026-11（D159）：这里原来有一个 `actionError`（「设为默认」失败的提示）。
+   *   那颗按钮搬进右栏栏头（`AgentDetail`）之后，错误提示也归那边——它有自己的
+   *   `.notice bad` 区域，不需要列表上方再开一条通道。
    */
-  let actionError = ''
   $: selected = $agents.find((a) => a.id === selectedId) ?? null
 
   /**
@@ -325,10 +321,8 @@ import ListRow from '../components/ListRow.svelte'
       <div class="skeleton" style="width:60%"></div>
     {/snippet}
     {#snippet readyTop()}
-      <!-- ★ 「设为默认」失败要看得见：列表就在下面，错误在它上面一行 -->
-      {#if actionError}
-        <div class="notice bad">{actionError}</div>
-      {/if}
+      <!-- ⚠️ 2026-11（D159）：这里原来显示「设为默认」的失败信息——那颗按钮搬进右栏栏头了，
+           错误也跟着搬过去（`AgentDetail` 的 `.notice bad`）。 -->
     {/snippet}
     <!--
       ★ 分批第 268 批：**按「内置 / 自建」分组**（使用者定：内置在上、默认收拢；自建在下、
@@ -394,39 +388,15 @@ import ListRow from '../components/ListRow.svelte'
               </span>
             </span>
           {/snippet}
-          {#snippet action()}
-            <!--
-              ★ 「默认」是**单选**：每个 agent 一个「设为默认」，点谁就是谁。
-                **没有「取消默认」**：必须有一个默认（使用者的要求）。
-                只对执行者给出这个动作——审核者不接任务（服务端也会拒）。
-            -->
-            <!--
-              ⚠️ 2026-11（S4）：判据从 `role === 'executor'` 换成"不是内置岗位"。
-              ★ 2026-11（D147）：再换成 **`entries` 里有 `task`**（D145 定的唯一判据）——
-                "能不能派活"和"能不能当默认"必须是同一句话，否则会出现"能设成默认、
-                却派不动活"的组合。服务端 `PUT /api/agents/default` 用的也是它。
-            -->
-            {#if hasEntry(a, 'task') && a.id !== $effectiveDefaultAgentId}
-              <button
-                type="button"
-                class="btn btn--ghost btn--sm default-toggle"
-                title={$t('agents.setDefaultTitle')}
-                onclick={(e) => {
-                  e.stopPropagation()
-                  void (async () => {
-                    actionError = ''
-                    try {
-                      await setDefaultAgent(a.id)
-                    } catch (err) {
-                      actionError = err instanceof Error ? err.message : String(err)
-                    }
-                  })()
-                }}
-              >
-                {$t('agents.setDefault')}
-              </button>
-            {/if}
-          {/snippet}
+          <!--
+            ★ 2026-11（D159）：这里原来有一颗行内「设为默认」按钮。使用者定了两种收法，
+              选了第二种：**挪进详情栏头**——严格按 `ui-style.md` §2.6 / 范例页：
+              **行 = 标题 + 副行 + （可选的一颗 × 危险动作）**，而"设为默认"是一颗要读文字
+              的动作，放在行里既开了一个"文字按钮也能进行"的口子，也让每一行都多出一个
+              常驻按钮（别的页行内只有一个 1.75rem 方块）。
+              它现在在右栏栏头（`AgentDetail` 的 `.detail-actions`），条件与这里原来那句
+              判据一模一样：`!readOnly && hasEntry(a,'task') && a.id !== 默认`。
+          -->
         </ListRow>
       {/snippet}
       <ul class="list-stack agent-list">

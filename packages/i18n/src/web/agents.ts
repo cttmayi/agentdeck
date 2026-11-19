@@ -258,6 +258,8 @@ export const agentsText = {
     zh: '换个关键词，或清空搜索框。',
     en: 'Try another keyword, or clear the search box.',
   },
+  /** ★ 2026-11（D159）：「设为默认」成功之后的反馈（它从行内搬进栏头，反馈跟着来这儿）。 */
+  'agents.setDefaultDone': { zh: '新建任务默认交给「{name}」', en: 'New tasks now default to “{name}”' },
   /** ★ 2026-11（D156）：窄屏详情栏头那颗「← 返回列表」（`.back-to-list`，宽屏自动隐藏）。 */
   'agents.backToList': { zh: '← 返回列表', en: '← Back to list' },
   'agents.pickOneTitle': { zh: '从左边选一个智能体', en: 'Pick an agent on the left' },
