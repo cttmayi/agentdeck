@@ -22,8 +22,9 @@ import { mkdir, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   execCheckHasFailure,
-  renderExecCheckMarkdown,
+  execCheckFailures,
   runSkillExecCheck,
+  runSkillExecCheckOnFiles,
   summarizeExecCheck,
 } from './skill-exec-check.ts'
 import type { ExecCheckItem, ExecCheckReport } from './skill-exec-check.ts'
@@ -179,9 +180,10 @@ describe('脚本语法（只解析，不执行）', () => {
     const item = first(find(report, 'script_syntax'), '脚本语法项')
     assert.equal(item.status, 'skipped')
     assert.match(item.detail, /没有结论/)
-    const md = renderExecCheckMarkdown(report)
-    assert.match(md, /没查/)
-    assert.match(md, /不要把"没查"当成"通过"/)
+    // ⚠️ 2026-11（D151）：原来这里还断言过 `renderExecCheckMarkdown` 里写着
+    //    "不要把『没查』当成『通过』"——那个渲染函数是给已退场的审核 run 读的
+    //    （它写给模型的 prompt），入库闸用的是纯文本错误信息，所以函数连同这条断言
+    //    一起删了。"没查 ≠ 通过"这件事仍由上一行 `status === 'skipped'` 钉着。
   })
 
   test('没有 scripts/ ⇒ 说清"没有脚本可查"，而不是静默无此项', async () => {
@@ -275,11 +277,76 @@ describe('报告本身', () => {
     assert.equal(execCheckHasFailure(good), false)
   })
 
-  test('Markdown 里带出被检目录与时间（判决要能指回现场）', async () => {
-    const dir = await makeSkill('md', { 'SKILL.md': GOOD_SKILL })
-    const report = await runSkillExecCheck(dir)
-    const md = renderExecCheckMarkdown(report)
-    assert.match(md, /平台定检/)
-    assert.match(md, /被检目录 `skill\/`/)
+  test('★ 只拦 fail：skipped / note / ok 都不许拦住入库（D151）', async () => {
+    const dir = await makeSkill('blocking-set', {
+      'SKILL.md': GOOD_SKILL,
+      'scripts/a.py': 'print(1)\n',
+    })
+    // "没装解析器" ⇒ skipped：不许算拦
+    const skipped = await runSkillExecCheck(dir, {
+      run: async () => ({ code: null, out: 'spawn python3 ENOENT' }),
+    })
+    assert.deepEqual(execCheckFailures(skipped), [], 'skipped 不是不通过')
+    // 真语法错 ⇒ fail：拦
+    const bad = await runSkillExecCheck(dir, {
+      run: async () => ({ code: 1, out: 'SyntaxError' }),
+    })
+    assert.equal(execCheckFailures(bad).length, 1)
+  })
+})
+/**
+ * ★ 2026-11（D151）：在**内存里的文件集合**上跑定检（「确认入库」那道闸用的入口）。
+ *
+ * 为什么不查磁盘上的草稿目录：入库认的是**请求里提交的 `files`**（人可能在编辑器里
+ * 改过），两者不一定一致。查错版本比不查更坏——它会让人以为"我改好了却还是不过"。
+ */
+describe('★ 在提交内容上跑（落临时目录 → 查 → 删）', () => {
+  test('干净的一份：没有 fail，且**临时目录用完就删**', async () => {
+    const scratch = await makeTempDir('exec-check-scratch')
+    try {
+      const report = await runSkillExecCheckOnFiles(
+        { 'SKILL.md': GOOD_SKILL, 'references/fields.md': '# 字段表\n' },
+        { scratchDir: scratch },
+      )
+      assert.deepEqual(execCheckFailures(report), [])
+      assert.deepEqual(await readdir(scratch), [], '临时目录必须清干净')
+    } finally {
+      await cleanup(scratch)
+    }
+  })
+
+  test('★★ 脚本语法错 ⇒ fail（这就是要拦的那一类）', async () => {
+    const scratch = await makeTempDir('exec-check-bad')
+    try {
+      const report = await runSkillExecCheckOnFiles(
+        { 'SKILL.md': GOOD_SKILL, 'scripts/broken.py': 'def (:\n' },
+        { scratchDir: scratch },
+      )
+      const fails = execCheckFailures(report)
+      assert.equal(fails.length, 1)
+      assert.match(fails[0]!.target, /broken\.py/)
+      assert.deepEqual(await readdir(scratch), [])
+    } finally {
+      await cleanup(scratch)
+    }
+  })
+
+  test('★ 挡掉 `..` 与绝对路径：一次请求写不到临时目录外面', async () => {
+    const scratch = await makeTempDir('exec-check-escape')
+    try {
+      const report = await runSkillExecCheckOnFiles(
+        {
+          'SKILL.md': GOOD_SKILL,
+          '../../escaped.txt': '不该被写出来',
+          '/tmp/absolute.txt': '也不该',
+        },
+        { scratchDir: scratch },
+      )
+      // 越界的两个文件被跳过 ⇒ 定检看到的目录里只有 SKILL.md
+      assert.deepEqual(execCheckFailures(report), [])
+      assert.deepEqual(await readdir(scratch), [], '临时目录清干净（越界文件压根没写）')
+    } finally {
+      await cleanup(scratch)
+    }
   })
 })

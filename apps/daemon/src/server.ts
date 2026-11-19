@@ -220,8 +220,9 @@ import { writeWorkDirUpload } from './workdir-upload.ts'
 import { checkTermCoverage, requirementTerms } from './user-requirements.ts'
 // ★ 分批第 20 批：可执行性定检（平台侧、不花 LLM 额度，见 `skill-exec-check.ts` 头注）
 import {
-  renderExecCheckMarkdown,
-  runSkillExecCheck,
+  execCheckFailures,
+  execCheckHasFailure,
+  runSkillExecCheckOnFiles,
   summarizeExecCheck,
 } from './skill-exec-check.ts'
 import { RunExecutor } from './executor.ts'
@@ -6802,6 +6803,65 @@ async function injectedSkillsOf(
         })
         return
       }
+
+      /**
+       * ★ 2026-11（D151）：**「确认入库」之前那道机械闸**（设计稿 §4 表 2 的
+       *   "「确认入库」→ 机械定检 → 技能库 + git"）。
+       *
+       * 为什么必须是闸而不是"事后报告"：定检查的全是**确定性**的东西——脚本连语法
+       * 都过不了、SKILL.md 引用的文件根本不在、占位符没解释过。这类毛病人眼看不出，
+       * 而入库之后它会跟着技能被注入到每一次执行里。
+       *
+       * 三条边界（每一条都对应一次踩过的坑）：
+       *   · **只拦 `fail`**：`skipped`（这台机器没装 python3）是"没查"，不许算不通过；
+       *     `note` 只陈述现场，也不拦（`execCheckFailures` 一处收口）。
+       *   · **查的是"要入库的那一份"**：用请求里的 `files` 落临时目录再查，不读磁盘上
+       *     的草稿目录——人可能在编辑器里改过，两者不一定一致（"两个出处"这件事
+       *     本仓库已经栽过好几次）。
+       *   · **临时目录用完就删**（`runSkillExecCheckOnFiles` 的 `finally`），落在数据
+       *     目录之内，不碰系统 tmp。
+       */
+      /**
+       * ⚠️ 查的必须是**这个技能自己的目录**，不是"提交上来的那棵树"。
+       *
+       * 起草者可能把 SKILL.md 写在子目录里（`skill/<dir>/SKILL.md`，第 217 批：认位
+       * 置、不搬家），而入库把支持文件按**原样相对路径**保留。于是：
+       *   · 直接把整棵树交给定检 ⇒ 根上没有 `SKILL.md` ⇒ `skeleton` 判 fail
+       *     ⇒ 一份**完全正常**的技能被拦下来（`crystallize-e2e` 那条"子目录里的
+       *     SKILL.md"当场就红了）；
+       *   · 所以先按 `spot.path` 的父目录把文件**重挂到技能根**，再查——这与"装出来
+       *     之后它长什么样"是同一个形状。
+       */
+      const skillRootPrefix = spot.path.includes('/')
+        ? `${spot.path.slice(0, spot.path.lastIndexOf('/'))}/`
+        : ''
+      const filesForCheck =
+        skillRootPrefix === ''
+          ? normalizedFiles
+          : Object.fromEntries(
+              Object.entries(normalizedFiles)
+                .filter(([rel]) => rel.startsWith(skillRootPrefix))
+                .map(([rel, text]) => [rel.slice(skillRootPrefix.length), text]),
+            )
+      const execCheck = await runSkillExecCheckOnFiles(filesForCheck, {
+        scratchDir: join(options.dataDir, 'tmp'),
+      })
+      const blocking = execCheckFailures(execCheck)
+      if (blocking.length > 0) {
+        sendJson(res, 400, {
+          error:
+            `机械定检没过（${blocking.length} 项），这些都是确定性问题，改好再入库：` +
+            blocking.map((it) => `${it.target}：${it.detail}`).join('；'),
+          code: 'exec_check_failed',
+          items: blocking,
+        })
+        return
+      }
+      if (execCheckHasFailure(execCheck)) {
+        // 理论上走不到（上面已经 return）——留着是为了让"两处判据"这件事在代码里显式
+        throw new Error('机械定检：有 fail 项却没被拦住（判据分叉了）')
+      }
+      info(summarizeExecCheck(execCheck))
 
       // ── 文本兜底草稿：不做"整目录替换"（2026-10-19）──
       //

@@ -602,6 +602,54 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     assert.equal(t2.activeDraft?.runId, draftRunId, '入库后仍然接得上这一版（还能接着改）')
   })
 
+  /**
+   * ★ 2026-11（D151）：「确认入库」之前那道**机械闸**。
+   *
+   * 设计稿 §4 表 2 写的是"「确认入库」→ 机械定检 → 技能库 + git"，而这段定检
+   * （`skill-exec-check.ts`）在审核 run 退场（D125）之后一直**没人调用**——它是
+   * `server.ts` 里三个只有 import 没有调用的函数之一。现在接在这里：**fail 就拦**。
+   *
+   * 这条判据要钉的是"拦得住"和"只拦该拦的"：
+   *   · 脚本连语法都过不了 ⇒ 400，且**一条 skill 都不入库**；
+   *   · 干净的一份 ⇒ 照旧 201（不许因为加了闸就把正常入库拦下来）。
+   */
+  test('★★ 机械定检拦得住：脚本语法错 ⇒ 400，那一条技能不入库', async () => {
+    const runId = await runReviewed('定检拦入库')
+    const draftRunId = await draftAndWait({ runId, target: { kind: 'new', purpose: '定检' } })
+    const bad = await commit({
+      draftRunId,
+      target: { kind: 'new' },
+      slug: 'exec-check-bad',
+      files: {
+        'SKILL.md':
+          '---\nname: exec-check-bad\ndescription: 定检拦\n---\n\n# 定检\n\n## When to Use\nX。\n\n## Procedure\n1. 看 `scripts/broken.py`。\n',
+        'scripts/broken.py': 'def broken(:\n',
+      },
+    })
+    assert.equal(bad.status, 400, JSON.stringify(bad.body))
+    assert.equal(bad.body['code'], 'exec_check_failed')
+    assert.match(String(bad.body['error']), /机械定检没过/)
+    assert.match(String(bad.body['error']), /broken\.py/, '要点名是哪个文件')
+
+    // 一条都没入库（拦在写库之前）
+    const list = (await (await fetch(`${daemon.url}/api/skills`)).json()) as {
+      skills: Array<{ slug: string }>
+    }
+    assert.equal(list.skills.some((x) => x.slug === 'exec-check-bad'), false)
+
+    // 同一份内容去掉坏脚本 ⇒ 正常入库（不许因为加了闸就把好的也拦）
+    const good = await commit({
+      draftRunId,
+      target: { kind: 'new' },
+      slug: 'exec-check-good',
+      files: {
+        'SKILL.md':
+          '---\nname: exec-check-good\ndescription: 干净的\n---\n\n# 干净\n\n## When to Use\nX。\n\n## Procedure\n1. 照做。\n',
+      },
+    })
+    assert.equal(good.status, 201, JSON.stringify(good.body))
+  })
+
   test('★★★ 入库要标记**整条链**：多版任务的旧版不许在"重新沉淀"时被拉回来', async () => {
     /**
      * 使用者报的：「在沉淀页面中沉淀任务没有了（比如删除或者提交了），但没有被完全删除。

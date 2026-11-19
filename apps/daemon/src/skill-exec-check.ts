@@ -38,8 +38,8 @@
  *    python3"看起来像"脚本语法没问题"——那正是本仓库最恨的"看起来生效了"。
  */
 
-import { readFile, readdir, stat } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { dirname, join, relative } from 'node:path'
 
 /** 一项定检结果的性质。`note` = 只陈述事实、不判好坏（判定留给审核者）。 */
 export type ExecCheckStatus = 'ok' | 'fail' | 'skipped' | 'note'
@@ -408,25 +408,53 @@ export async function runSkillExecCheck(skillDir: string, io?: ExecCheckIo): Pro
   return { at: Date.now(), skillDir, items }
 }
 
-/** 定检报告 ⇒ 给审核者读的 Markdown（**事实在前、结论不许越界**）。 */
-export function renderExecCheckMarkdown(report: ExecCheckReport): string {
-  const mark = (s: ExecCheckStatus): string =>
-    s === 'ok' ? '通过' : s === 'fail' ? '**不通过**' : s === 'skipped' ? '**没查**' : '事实'
-  const lines = [
-    '# 平台定检（可执行性里能机械判定的那部分）',
-    '',
-    '这一份由**平台**在起审核之前跑出来，是**事实**，不是判断：',
-    '语法解析、引用的文件在不在、占位符有没有解释过、骨架齐不齐、有没有吞掉错误的写法。',
-    '',
-    '⚠️ 标「**没查**」的项**没有结论**——不要把"没查"当成"通过"。',
-    '⚠️ 标「事实」的项只列出**现场**（例如吞掉错误的写法），判不判由你定。',
-    '',
-    ...report.items.map((it) => `- [${mark(it.status)}] \`${it.target}\` — ${it.detail}`),
-    '',
-    `（定检时间 ${new Date(report.at).toISOString()}；被检目录 \`skill/\`）`,
-    '',
-  ]
-  return lines.join('\n')
+/**
+ * 在一份**内存里的文件集合**上跑定检（2026-11，D151）。
+ *
+ * 为什么要这个入口：定检原本给"审核者读草稿目录"用（那个 run 已在 D125 退场），
+ * 现在它的位置是**「确认入库」之前的一道机械闸**——而入库认的是**请求里提交的
+ * `files`**（人可能在编辑器里改过，磁盘上的草稿目录不一定与它一致）。
+ * 拿磁盘目录去查"我将要入库的这一版"，正是本仓库反复防的"两个出处"。
+ *
+ * 所以：把**要入库的那一份**落到一个临时目录里查，查完删掉。判据与落库是同一份内容。
+ *
+ * ⚠️ 只写相对路径，并且挡掉 `..`（否则一次请求就能往临时目录外面写文件）。
+ */
+export async function runSkillExecCheckOnFiles(
+  files: Readonly<Record<string, string>>,
+  opts: { scratchDir: string },
+): Promise<ExecCheckReport> {
+  const parent = opts.scratchDir
+  await mkdir(parent, { recursive: true })
+  const root = await mkdtemp(join(parent, 'exec-check-'))
+  try {
+    for (const [rel, text] of Object.entries(files)) {
+      if (!isSafeRelativePath(rel)) continue
+      const abs = join(root, rel)
+      await mkdir(dirname(abs), { recursive: true })
+      await writeFile(abs, text, 'utf8')
+    }
+    return await runSkillExecCheck(root)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}
+
+/** 相对路径、且不含 `..`（临时目录里只许往下写）。 */
+function isSafeRelativePath(rel: string): boolean {
+  if (rel === '' || rel.startsWith('/') || rel.includes('\\')) return false
+  return !rel.split('/').includes('..')
+}
+
+/**
+ * 定检里**足以拦住入库**的那些项（`fail`）。
+ *
+ * ⚠️ 只拦 `fail`：`skipped`（工具没装）是"没查"、`note`（事实）是"陈述现场"、
+ *    `ok` 是通过——后三种都不许拦住人。把"没查"当成"不通过"是本仓库最恨的那类失真
+ *    （它会让"这台机器没装 python3"表现为"你的技能有问题"）。
+ */
+export function execCheckFailures(report: ExecCheckReport): ExecCheckItem[] {
+  return report.items.filter((i) => i.status === 'fail')
 }
 
 /** 给日志用的一句话摘要（"这轮定检查出了什么"，不打整份报告）。 */
