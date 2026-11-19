@@ -825,7 +825,11 @@
             found: true,
             headLabels: labels,
             hasSave: labels.some((l) => l.includes('保存')),
-            hasRestore: labels.some((l) => l.includes('恢复成默认值')),
+            /*
+             * ★ 2026-11（D160）：平台成员身上现在是「复制」与「关闭」两颗
+             *   （「恢复成默认值」与「改为普通智能体」都删了——复制替掉了它们）。
+             */
+            hasRestore: labels.some((l) => l.includes('复制')),
             // 三槽位纪律（274 批）：主=写（这里是"恢复成默认值"）、次=离开、危险=删
             hasLeave: labels.some((l) => l.includes('取消') || l.includes('关闭')),
             hasDelete: labels.some((l) => l.includes('删除')),
@@ -4450,46 +4454,33 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
            * ⚠️ 确认框必须取消掉：真 detach 会把这条成员换成普通智能体，
            *    后面几条判据（内置徽标 / 技能锁定）量的现场就没了。
            */
-          const detachBtn = d().querySelector('[data-agent-detach]')
-          facts['agents.detachButton'] = detachBtn ? (text(detachBtn) ?? '').trim() : null
-          if (detachBtn) {
-            click(detachBtn)
-            await until(() => !!d().querySelector('.modal, [role=dialog]'), 60)
-            const dialog = d().querySelector('.modal, [role=dialog]')
-            facts['agents.detachDialog'] = (() => {
-              if (!dialog) return null
-              const body = text(dialog) ?? ''
-              return {
-                text: body.slice(0, 600),
-                // 说清了"会变成你的"（结果）与"平台会重新出厂"（后果）
-                saysOwn: body.includes('你自己的智能体'),
-                saysSeeded: body.includes('重新出厂'),
-                cancel: [...dialog.querySelectorAll('button')].map((b) => (text(b) ?? '').trim()),
-              }
-            })()
-            const cancelBtn = dialog
-              ? [...dialog.querySelectorAll('button')].find(
-                  (b) => (text(b) ?? '').trim() === '取消',
-                )
-              : null
-            if (cancelBtn) click(cancelBtn)
-            facts['agents.detachCanceled'] = await until(
-              () => !d().querySelector('.modal, [role=dialog]'),
-              40,
+          /*
+           * ⚠️ 2026-11（D160）：这里原来量「改为普通智能体」（`[data-agent-detach]`）那颗按钮
+           *   与它弹出的确认框。**detach 整条删掉了**（复制替掉了它）⇒ 这一段连同
+           *   `agents.detach` 判据一起删除。现在量的是"复制"那颗（下面 `agents.copy`）。
+           */
+          /**
+           * ★★ 2026-11（D160）：**「复制」在栏头动作里**（平台成员与自建都有）。
+           *
+           * 它是替掉「恢复成默认值」/「改为普通智能体」的那条正路：想改内置的口吻
+           * 就复制一条自建的去改，平台那条原样不动。
+           * ⚠️ 这里**不点它**：复制会往列表里加一条，后面所有"条数/顺序"的判据都会受
+           *    影响（e2e 由 `agent-copy.test.ts` 在接口层跑真的复制）。
+           */
+          facts['agents.copy'] = (() => {
+            const btn = d().querySelector('.detail-actions [data-agent-copy]')
+            const labels = [...d().querySelectorAll('.detail-actions button')].map((b) =>
+              (text(b) ?? '').trim(),
             )
-            // 取消之后**还是平台成员**（徽标在）
-            facts['agents.detachStillPlatform'] = !!d().querySelector(
-              '[data-agent-builtin-badge]',
-            )
-          }
-          // 合成一条给判据读（`run.mjs` 的 `agents.detach`）——判据一个 key 读一件事，
-          // 而这条要的是"按钮 / 框里的话 / 取消之后的状态"三件事一起成立。
-          facts['agents.detach'] = {
-            button: facts['agents.detachButton'] ?? null,
-            dialog: facts['agents.detachDialog'] ?? null,
-            canceled: facts['agents.detachCanceled'] ?? null,
-            stillPlatform: facts['agents.detachStillPlatform'] ?? null,
-          }
+            return {
+              present: btn !== null,
+              label: btn ? (text(btn) ?? '').trim() : null,
+              // 它旁边不该再有那两颗（这一条同时守着"没有复活"）
+              hasRestore: labels.some((l) => l.includes('恢复成默认值')),
+              hasDetach: labels.some((l) => l.includes('改为普通智能体')),
+            }
+          })()
+
           const skillsCell = d().querySelector('.skills-cell')
           facts['agents.builtinSkillsLocked'] = !!(skillsCell && skillsCell.className.includes('locked'))
           facts['agents.builtinSkillsText'] = skillsCell ? text(skillsCell) : null

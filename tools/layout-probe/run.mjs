@@ -426,6 +426,24 @@ const CHECKS = [
   },
   {
     view: '智能体',
+    key: 'agents.copy',
+    /**
+     * ★★ 2026-11（D160）：平台成员的栏头里**有「复制」**，而「恢复成默认值」与
+     *   「改为普通智能体」**不再出现**（使用者定：复制替掉了那两颗）。
+     *   "复制"的行为由 `agent-copy.test.ts` 在接口层钉着（这里只守"入口在、旧的不复活"）。
+     */
+    label:
+      '★★ 平台成员栏头里有「复制」；**没有**「恢复成默认值」也没有「改为普通智能体」' +
+      '（那两颗被复制取代：想改口吻就改副本，平台那条原样不动）',
+    ok: (v) =>
+      !!v && v.present === true && String(v.label ?? '') === '复制' && v.hasRestore === false && v.hasDetach === false,
+    show: (v) =>
+      v === null
+        ? 'null'
+        : `按钮「${String(v.label)}」　恢复默认 ${String(v.hasRestore)}　改为普通智能体 ${String(v.hasDetach)}`,
+  },
+  {
+    view: '智能体',
     key: 'agents.detailHeadScroll',
     /**
      * ★★ 2026-11（D156）：**详情栏头不跟正文滚**（§2.6 表的"正文自己滚，栏头不跟着滚"）。
@@ -2897,50 +2915,27 @@ const CHECKS = [
      *   ③ 有「改为普通智能体」（D150 的正规出口，见下一条判据）。
      */
     label:
-      '★★ 平台成员详情那一排：有「恢复成默认值」、**没有「删除」**（点了必然 400 的按钮' +
-      '比没有按钮更坏）、并且有「改为普通智能体」这条正规出口',
+      '★★ 平台成员详情那一排：**就两颗**——「复制」+「关闭」；**没有「删除」**（点了必然 400）' +
+      '、也没有「恢复成默认值」/「改为普通智能体」（D160 用复制替掉了那两颗）',
     ok: (v) => {
       if (!Array.isArray(v)) return false
       const has = (needle) => v.some((t) => String(t ?? '').includes(needle))
-      return has('恢复成默认值') && !has('删除') && has('改为普通智能体')
+      return (
+        v.length === 2 &&
+        has('复制') &&
+        has('关闭') &&
+        !has('删除') &&
+        !has('恢复成默认值') &&
+        !has('改为普通智能体')
+      )
     },
     show: (v) => JSON.stringify(v),
   },
-  {
-    view: '智能体',
-    key: 'agents.detach',
-    /**
-     * ★★ 2026-11（D150）：把平台成员**改成普通智能体**（`detach`）。
-     *
-     * 量四件事，缺一不可：
-     *   ① 按钮在，且点得动；
-     *   ② 弹出的是**平台居中确认框**，里面把**结果**说清（"变成你自己的智能体" +
-     *      "平台会重新出厂一条"）——这正是不做"确定吗？"空话的地方：
-     *      一条只读成员可能正被对话与编排用着，人得知道改完会发生什么；
-     *   ③ 点「取消」**真的什么都没变**（框关掉）；
-     *   ④ 取消之后这条**还是平台成员**（内置徽标还在）。
-     */
-    label:
-      '★★ 「改为普通智能体」：确认框里说清**结果**（变成你的 + 平台重新出厂一条），' +
-      '点取消之后框关掉、这条**还是平台成员**（徽标还在）',
-    ok: (v) => {
-      if (!v || typeof v !== 'object') return false
-      return (
-        v.dialog !== null &&
-        typeof v.dialog === 'object' &&
-        v.dialog.saysOwn === true &&
-        v.dialog.saysSeeded === true &&
-        v.canceled === true &&
-        v.stillPlatform === true
-      )
-    },
-    show: (v) =>
-      v === null || typeof v !== 'object'
-        ? 'null'
-        : `按钮 ${JSON.stringify(v.button)}　说清结果 ${String(v.dialog?.saysOwn)}/${String(
-            v.dialog?.saysSeeded,
-          )}　取消关掉 ${String(v.canceled)}　仍是平台成员 ${String(v.stillPlatform)}`,
-  },
+  /*
+   * ⚠️ 2026-11（D160）：这里原来是 `agents.detach`（「改为普通智能体」那颗按钮与它
+   *   弹出的确认框）。**detach 整条删掉了**——复制严格覆盖它的场景，而且不带它的
+   *   两个副作用（平台重新出厂一条、历史 run 留在旧记录上）。判据随界面一起删。
+   */
   {
     view: '智能体',
     key: 'agents.builtinBadgeTitle',

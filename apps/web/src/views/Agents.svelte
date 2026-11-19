@@ -481,6 +481,11 @@ import ListRow from '../components/ListRow.svelte'
           agent={selected}
           onclose={() => (selectedId = null)}
           onchanged={() => void loadAgents()}
+          onselect={(id) => {
+            // ★ 2026-11（D160）：复制完成后直接选中副本（意图是"去改那份抄本"）
+            selectedId = id
+            creating = false
+          }}
         />
       {/if}
     {/snippet}

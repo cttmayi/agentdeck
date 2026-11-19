@@ -401,31 +401,10 @@ describe('接口层：内置条目各按各的岗位回答（审核者已下线�
     return { dir, id: reviewer.id }
   }
 
-  test('★★★ 「恢复成默认值」按在**已下线的审核者**上 ⇒ 409 说清它下线了，一个字节都不写', async () => {
-    const seeded = await seedLegacyReviewer()
-    await withDaemon(seeded.dir, async (url) => {
-      const res = await fetch(`${url}/api/agents/${seeded.id}/restore-default`, { method: 'POST' })
-      const text = await res.text()
-      // ★ 分批第 137 批：它的默认身份已随评审删除。"恢复成默认值"若写空串就是清空它——
-      //   那比不恢复更坏，所以如实拒绝并给出去处（可在智能体页删掉）。
-      assert.equal(res.status, 409, text)
-      const body = JSON.parse(text) as { code?: string; error: string }
-      assert.equal(body.code, 'builtin_retired')
-      assert.match(body.error, /已下线/)
-      assert.match(body.error, /不再评审/)
-      // 指令与名字一个字都没动。
-      // ★ 2026-11（D111）：列表接口返回的是**组装后**指令（内置会附上运行时守则），
-      //   所以这里断言的是**正文原样**（`startsWith`）——追加的守则是平台运行时拼的，
-      //   不是一次写入；若正文被覆盖过，开头对不上。
-      const after = (await agentsOf(url)).find((a) => a.id === seeded.id)!
-      assert.ok(
-        after.instructions.startsWith(LEGACY_REVIEWER_INSTRUCTIONS),
-        `正文必须原样保留（拿到的组装后指令：${after.instructions.slice(0, 60)}…）`,
-      )
-      assert.equal(after.name, LEGACY_REVIEWER_NAME)
-    })
-  })
-
+  /*
+   * ⚠️ 2026-11（D160）：「恢复成默认值」那条接口整条删掉了（使用者定）⇒ 依赖它的用例
+   *   一并删除。这类"坏记录"现在由**启动对账**接手（半内置按用户记录处理并点名）。
+   */
   test('★★★ 已下线的内置审核者**可以删**；起草者仍然铁律不可删', async () => {
     // ★ 分批第 192 批（使用者：「审核者（内置）是否已经没有用了」）。
     //   实测它当时是**走不掉的一行**：内置 ⇒ 只读（改不了）、`skill-reviewer` ⇒ 没有默认值
@@ -465,49 +444,8 @@ describe('接口层：内置条目各按各的岗位回答（审核者已下线�
    *   **同一类拒绝要说清"拦下的到底是谁"**——错方向的解释比没有解释更费人。
    */
 
-test('★★ 挂着内置标记但角色是业务角色 ⇒ 「恢复成默认值」**明说不知道**，不猜一套写进去', async () => {
-    // 先按盘上的样子摆一条坏记录（角色既不是起草者也不是审核者），再起 daemon 读它。
-    //
-    // ⚠️ 光插 agent 不够：store 的 `#stores` 是**按 workspace 索引**建起来的
-    //    （`listWorkspaceIds()` 读 `wsIndex`），没有 workspace 记录的目录根本不会被打开。
-    //    我第一版只插了 agent，接口回的是 404「agent 不存在」——看起来像接口坏了。
-    const dir = await makeTempDir('builtin-role-unknown')
-    const seed = await FileStore.open({ dataDir: dir, fsync: false })
-    const now = Date.now()
-    await seed.insertWorkspace({
-      id: WS as Workspace['id'],
-      name: '探针工作区',
-      executeTemplate: '',
-      reviewTemplate: '',
-      chatTemplate: '',
-      defaultAgentId: null,
-      locale: 'zh',
-      createdAt: now,
-      updatedAt: now,
-    })
-    // ⚠️ 2026-11（S4）：这条记录是"挂着内置标记、但**认不出是哪个岗位**"。
-    //   角色退场之后它就是一个缺 `builtinKind` 的内置记录（老数据/被手改过）。
-    const weird = mkAgent(undefined, '奇怪的内置', '它是谁？', true)
-    await seed.insertAgent(weird)
-    await seed.close()
-
-    await withDaemon(dir, async (url) => {
-      const res = await fetch(`${url}/api/agents/${weird.id}/restore-default`, { method: 'POST' })
-      const text = await res.text()
-      assert.equal(res.status, 400, text)
-      const body = JSON.parse(text) as { code?: string; error: string }
-      assert.equal(body.code, 'builtin_kind_unknown')
-      /*
-       * ★ 2026-11（D154）：文案从"缺哪个岗位"改成"缺哪个**出厂槽位**"——记录上已经没有
-       *   岗位字段了，认不出它指的是槽位表里没有它（老记录 / 手改过数据）。
-       */
-      assert.match(body.error, /出厂槽位/, '文案要说清缺的是"哪一条出厂成员"，否则使用者不知道去改哪条')
-      // 一条字都不许写进去（猜错的后果比"没恢复"严重得多）。
-      // ★ 2026-11（D111）：列表返回组装后指令 ⇒ 断言正文原样（startsWith），
-      //   追加的守则是运行时拼的，不是写入。
-      const after = (await agentsOf(url)).find((a) => a.id === weird.id)!
-      assert.ok(after.instructions.startsWith('它是谁？'), `正文必须原样：${after.instructions.slice(0, 60)}…`)
-      assert.equal(after.name, '奇怪的内置')
-    })
-  })
+  /*
+   * ⚠️ 2026-11（D160）：「恢复成默认值」那条接口整条删掉了（使用者定）⇒ 依赖它的用例
+   *   一并删除。这类"坏记录"现在由**启动对账**接手（半内置按用户记录处理并点名）。
+   */
 })

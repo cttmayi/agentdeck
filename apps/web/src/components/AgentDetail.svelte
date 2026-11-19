@@ -57,6 +57,13 @@
   export let agent: Agent
   export let onclose: () => void
   export let onchanged: () => void
+  /**
+   * ★ 2026-11（D160）：**切到另一条**（复制完成后选中副本）。
+   *
+   * 组件自己不认识列表（`selectedId` 在 `Agents.svelte` 手里），所以这里只把新 id
+   * 交出去；不传就退化成"只刷新列表"（其它复用这个组件的地方不受影响）。
+   */
+  export let onselect: ((id: string) => void) | undefined = undefined
 
   let busy = false
   let error = ''
@@ -802,110 +809,26 @@
     }
   }
 
-  async function restoreDefault(): Promise<void> {
-    const ok = await askConfirm({
-      title: tx('agents.restoreDefaultTitle'),
-      message: tx('agents.restoreDefaultBody', { name: agent.name }),
-      confirmLabel: tx('agents.restoreDefault'),
-    })
-    if (!ok) return
-    error = ''
-    busy = true
-    try {
-      const res = await fetch(`/api/agents/${encodeURIComponent(agent.id)}/restore-default`, {
-        method: 'POST',
-      })
-      if (!res.ok) throw new Error(await res.text())
-      // 拉回最新记录：草稿里可能还留着被改过的指令，不刷新的话界面上看着"恢复没生效"
-      await loadAgents()
-      onclose()
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err)
-    } finally {
-      busy = false
-    }
-  }
-
   /**
-   * ★ 2026-11（D150）：**改成你自己的智能体**（detach）。
+   * ★★ 2026-11（D160）：**复制这条智能体**（平台成员与自建都行）。
    *
-   * 两步走，顺序不能反：
-   *   ① `GET …/detach-preview` 只**算**影响面（对话 / 任务 / 默认 / 编排引用 / 历史 run）；
-   *   ② 把那份清单摆进确认框，人点了确认才 `POST …/detach`。
+   * 它替掉了两颗按钮（「恢复成默认值」/「改为普通智能体」）：想改口吻就改**副本**，
+   * 原件永远干净——平台那条不会"变成你的"，也不会触发平台重新出厂一条。
    *
-   * 为什么不在点之前就写：这条路会把一条只读的平台成员**变成能改能删的普通智能体**，
-   * 而它可能正被对话与编排用着——"改完之后会发生什么"必须说在动手之前。
+   * ⚠️ 复制成功后**选中副本**（而不是留在原件上）：使用者的意图是"去改那份抄本"，
+   *    停在这儿会让人以为没成功（列表里多了一条，但不是当前这条）。
+   *    这一步由父组件的 `onselect` 完成——组件自己不认识列表。
    */
-  async function detachToOwn(): Promise<void> {
+  async function copyAgent(): Promise<void> {
     error = ''
     busy = true
-    let refs: {
-      conversationCount: number
-      assignedIssues: number
-      isDefault: boolean
-      workflowNames: string[]
-      actionRuns: number
-    }
     try {
-      const res = await fetch(`/api/agents/${encodeURIComponent(agent.id)}/detach-preview`)
-      if (!res.ok) throw new Error(await res.text())
-      refs = ((await res.json()) as { references: typeof refs }).references
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err)
-      busy = false
-      return
-    }
-    busy = false
-
-    /*
-     * 影响面按**事实**列，一句一句说清"会变什么"：
-     *   · 对话：执行者身份不变（`chat` 还在）；
-     *   · 动作入口：搬到平台重新出厂的那一条上；
-     *   · 编排里按名字引用：以前会被拒，改完**开始生效**（这是变好，但也得说）；
-     *   · 历史 run：一条都不删。
-     * 为 0 的那几项不列（"0 条对话"是噪音）。
-     */
-    const lines: string[] = []
-    if (refs.conversationCount > 0) {
-      lines.push(tx('agents.detachRefConversations', { n: String(refs.conversationCount) }))
-    }
-    if (refs.assignedIssues > 0) {
-      lines.push(tx('agents.detachRefIssues', { n: String(refs.assignedIssues) }))
-    }
-    if (refs.isDefault) lines.push(tx('agents.detachRefDefault'))
-    if (refs.workflowNames.length > 0) {
-      lines.push(tx('agents.detachRefWorkflows', { names: refs.workflowNames.join('、') }))
-    }
-    if (refs.actionRuns > 0) {
-      lines.push(tx('agents.detachRefRuns', { n: String(refs.actionRuns) }))
-    }
-    const ok = await askConfirm({
-      title: tx('agents.detachTitle'),
-      message:
-        tx('agents.detachBody', { name: agent.name }) +
-        (lines.length > 0 ? `\n\n${lines.join('\n')}` : ''),
-      confirmLabel: tx('agents.detach'),
-    })
-    if (!ok) return
-
-    busy = true
-    try {
-      const res = await fetch(`/api/agents/${encodeURIComponent(agent.id)}/detach`, {
+      const res = await api<{ agent: Agent }>(`/api/agents/${encodeURIComponent(agent.id)}/copy`, {
         method: 'POST',
       })
-      if (!res.ok) throw new Error(await res.text())
-      const out = (await res.json()) as { recreated: string[] }
-      /*
-       * ⚠️ 写完必须**立刻重拉列表**：内置组里少一条、自建组里多一条，
-       *    不刷新的话使用者看到的是旧数据（以为没生效）。这一页仍然停在它身上
-       *    （它现在是普通智能体，可以接着改），所以不 `onclose()`。
-       */
       await loadAgents()
-      showToast(
-        out.recreated.length > 0
-          ? tx('agents.detachDone', { fresh: out.recreated.join('、') })
-          : tx('agents.detachDonePlain'),
-      )
+      showToast($t('agents.copyDone', { name: res.agent.name }))
+      onselect?.(res.agent.id)
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
     } finally {
@@ -1127,27 +1050,21 @@
             >{$t('agents.deleteButton')}</button
           >
         {:else}
-          <button
-            type="button"
-            data-agent-restore
-            disabled={busy}
-            title={$t('agents.restoreDefaultTitle')}
-            onclick={() => void restoreDefault()}>{$t('agents.restoreDefault')}</button
-          >
           <!--
-            ★ 2026-11（D150）：**正规出口**——"我只想改一下它的口吻"。
-              ⚠️ 先 `GET …/detach-preview` 把**影响面**算出来、摆进确认框，确认了才写：
-                 "改完之后会发生什么"必须说在点确认之前（设计稿第 ④ 条）。
-              ⚠️ 写完要**立刻重拉列表**（`updateAgent` 之外的那条路不会自动刷）——
-                 使用者会看到"内置组里少了一条、自建组里多了一条"，界面不刷新就是旧数据。
+            ★ 2026-11（D160）：平台成员身上**只剩「复制」与「关闭」**。
+            改之前这里有「恢复成默认值」与「改为普通智能体」两颗——都删了（使用者定）：
+              · **复制**严格覆盖了"我想改一下它的口吻"：复制一条自建的去改，平台那条原样不动，
+                不会触发"平台重新出厂一条"，历史 run 也留在原处；
+              · "恢复成默认值"要解决的问题（老版本把平台成员改坏了）现在由**启动对账**接手
+                （空指令 / 认得出的历史默认版本 / 旧默认名字三种会自动修）。
           -->
           <button
             type="button"
-            data-agent-detach
+            data-agent-copy
             disabled={busy}
-            title={$t('agents.detachTitle')}
-            onclick={() => void detachToOwn()}>{$t('agents.detach')}</button
-          >
+            title={$t('agents.copyTitle')}
+            onclick={() => void copyAgent()}
+          >{$t('agents.copy')}</button>
         {/if}
         <button type="button" data-agent-cancel onclick={cancelEdit}>{$t('common.close')}</button>
       {:else}
@@ -1182,6 +1099,14 @@
             : dirty ? $t('agents.saveTitle') : $t('agents.saveNothing')}
           >{busy ? $t('common.saving') : $t('common.save')}</button
         >
+        <!-- ★ 2026-11（D160）：**自建也能复制**（"试试另一套指令"的分支不用从零写）。 -->
+        <button
+          type="button"
+          data-agent-copy
+          disabled={busy}
+          title={$t('agents.copyTitle')}
+          onclick={() => void copyAgent()}
+        >{$t('agents.copy')}</button>
         <button type="button" data-agent-cancel onclick={cancelEdit}>{$t('common.cancel')}</button>
         <button type="button" class="btn btn--danger" data-agent-delete onclick={() => void remove()}
           >{$t('agents.deleteButton')}</button

@@ -123,36 +123,10 @@ describe('内置起草者：启动就有、不能删、不能改坏、能恢复�
     })
   })
 
-  test('★★★ 「恢复成默认值」：改过之后能一键回到默认（一字不差）', async () => {
-    await withDaemon(async (url) => {
-      const drafter = await drafterOf(url)
-      await fetch(`${url}/api/agents/${drafter.id}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: '我自己改的起草者', instructions: '改坏了' }),
-      })
-      const res = await fetch(`${url}/api/agents/${drafter.id}/restore-default`, { method: 'POST' })
-      assert.equal(res.status, 200, await res.text())
-      const after = await drafterOf(url)
-      assert.equal(after.name, DRAFTER_NAME)
-      assert.equal(after.instructions, DRAFTER_INSTRUCTIONS)
-    })
-  })
-
   /*
-   * ⚠️ 2026-11（S3）：这里原来是「起草者进不了智能体组」。组退场 ⇒ 没有组可进，用例删。
-   *   起草者仍然有边界（它不接业务任务：`builtinKindOf` + `POST /api/task` 那一段）。
+   * ⚠️ 2026-11（D160）：这里原来有两条「恢复成默认值」的用例（能回到默认 / 普通 agent 没有
+   *   默认值可恢复）。**那条接口整条删掉了**（使用者定："内置智能体不应该有『恢复默认值』…
+   *   或者可以有一个『复制智能体』的功能"）⇒ 用例随之删除；替它的是 `agent-copy.test.ts`
+   *   （复制平台成员 ⇒ 得到一条自建的副本，原件一个字都不动）。
    */
-
-test('普通 agent 没有"默认值"可恢复（400 而不是假装成功）', async () => {
-    await withDaemon(async (url) => {
-      const body = (await (await fetch(`${url}/api/agents`)).json()) as { agents: AgentRow[] }
-      const plain = body.agents.find((a) => a.builtin !== true)
-      assert.ok(plain)
-      const res = await fetch(`${url}/api/agents/${plain.id}/restore-default`, { method: 'POST' })
-      assert.equal(res.status, 400)
-      const err = (await res.json()) as { code?: string }
-      assert.equal(err.code, 'not_builtin_agent')
-    })
-  })
 })

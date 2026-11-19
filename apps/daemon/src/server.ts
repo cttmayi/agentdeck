@@ -113,8 +113,8 @@ import {
   slotOf,
   slotOfAgent,
 } from './platform-slots.ts'
-import { canDetach, detachPlatformMember, detachReferences } from './member-detach.ts'
 import {
+  USER_ENTRIES,
   canBeDispatched,
   canBeReferencedByWorkflow,
   canChat,
@@ -3848,6 +3848,75 @@ async function injectedSkillsOf(
       return
     }
 
+    /**
+     * ★★ 2026-11（D160）：**复制智能体**（`POST /api/agents/:id/copy`）。
+     *
+     * 它是「想改一下这条智能体」的**正路**，替掉了原来的两颗按钮（「恢复成默认值」与
+     * 「改为普通智能体」）：
+     *   · 平台成员原样不动 ⇒ 平台自己的流程一点不受影响，也不会"多出厂一条"；
+     *   · 想改口吻就改**副本**，原件永远干净；
+     *   · 自建智能体也能复制（开个"试试另一套指令"的分支，不用从零写）。
+     *
+     * **复制什么**（一条一条都有理由）：
+     *   · 名字（`原名（副本）`，重名时补序号）——不然列表里两条一模一样，谁是谁分不清；
+     *   · 指令 / CLI / 模型 / 环境变量 / 审核标准 / 工作目录——"它怎么干活"的配置；
+     *   · 挂载的**共享技能**（只留库里还在的那些——复制一条已卸载的技能 id 等于造一条
+     *     悬空引用，而它要到运行时才炸）；
+     *   · 记忆开关（偏好，跟着配置走）。
+     * **不复制**：
+     *   · **记忆条目**——那是它自己的经验，跟着历史走；抄过去会让副本"记得没发生过的事"；
+     *   · **独有技能**（`agents/<id>/SKILL/`）——文件资产，复制过去就是两份各自维护；
+     *   · **归属/入口**：副本一律 `owner: 'user'` + 三项入口全开。它就是一个普通智能体，
+     *     不继承 `action:<id>` 那种"平台会来叫它"的入口（那些由槽位表决定）。
+     */
+    const agentCopyMatch = /^\/api\/agents\/([^/]+)\/copy$/.exec(path)
+    if (req.method === 'POST' && agentCopyMatch) {
+      const agentId = decodeURIComponent(agentCopyMatch[1]!) as Agent['id']
+      const source = await store.getAgent(agentId)
+      if (!source) {
+        sendJson(res, 404, { error: `agent 不存在：${agentId}` })
+        return
+      }
+      const all = await store.listAgents(workspaceId)
+      // 重名时补序号：`原名（副本）`、`原名（副本） 2`……
+      const taken = new Set(all.map((a) => a.name as string))
+      const base = `${String(source.name)}（副本）`
+      let name = base
+      for (let n = 2; taken.has(name); n += 1) name = `${base} ${n}`
+
+      // 只保留库里还在的共享技能（悬空 id 要到运行时才炸）
+      const known = new Set((await store.listSkills(workspaceId)).map((sk) => sk.id as string))
+      const skillIds = source.skillIds.filter((id) => known.has(id as string))
+
+      const now = Date.now()
+      const copy: Agent = {
+        id: ulid() as Agent['id'],
+        workspaceId,
+        name,
+        /*
+         * ⚠️ 抄的是**原文**（`source.instructions`），不是 `effectiveInstructions()`——
+         *   后者给平台成员拼过平台守则；抄进副本会让那段守则变成"使用者写的"，
+         *   第二次组装就会拼两遍。
+         */
+        instructions: source.instructions,
+        memoryEnabled: source.memoryEnabled === true,
+        model: source.model,
+        runtimeKey: source.runtimeKey,
+        workDir: source.workDir,
+        skillIds: skillIds as Agent['skillIds'],
+        env: source.env,
+        reviewStandard: source.reviewStandard,
+        owner: 'user',
+        entries: [...USER_ENTRIES],
+        createdAt: now,
+        updatedAt: now,
+      }
+      await store.insertAgent(copy)
+      info(`已复制智能体：「${String(source.name)}」→「${name}」`)
+      sendJson(res, 201, { agent: { ...copy, slot: null, halfBuiltin: false }, source: { id: source.id, name: source.name } })
+      return
+    }
+
     // ── 改 agent（FR-AGENT-19：可点开看细节并编辑）──
     //
     // 用 PATCH 语义：**只改传了的字段**。整体替换会让"只想改个名字"的请求
@@ -3864,153 +3933,13 @@ async function injectedSkillsOf(
      * 要改指令就直接在「智能体」页改——那里本来就能改，「恢复成默认值」仍然在（内置 agent 用）。
      */
 
-    // ── 内置 agent 的「恢复成默认值」（2026-10，定稿第 ② / ⑥ 条）──
-    //
-    // 只恢复**平台能保证的那部分**（指令 + 名字 + 技能集合 = 不挂）：使用者的改动
-    // 是他自己的资产，所以升级不覆盖（第 ⑥ 条）——但"改坏了想回原样"必须有一条路，
-    // 否则那条"使用者改了指令 ⇒ 起草质量变差"的故障就永远只能靠删了重建。
-    /**
-     * ★ 2026-11（D150）：**把一条平台成员改成普通智能体**（`detach`，设计稿 §7）。
-     *
-     * 两条路，分开是有原因的：
-     *   · `GET …/detach-preview` **只算不写**——界面要先把"改完之后会发生什么"摆给人看，
-     *     确认了才动手（设计稿第 ④ 条）。算引用要扫对话/任务/run/编排，放在详情接口里
-     *     会让每次点开一条成员都付这份钱，所以单独一条路、点了才算；
-     *   · `POST …/detach` 才是写。
-     *
-     * ⚠️ 判据与只读闸**同一句**（`ownerOf(...) === 'platform'`）："能不能改"与"能不能
-     *    脱离"是同一件事的两面，读取值不许分叉。
+    /*
+     * ⚠️ 2026-11（D160）：这里原来是「恢复成默认值」（`POST /api/agents/:id/restore-default`）。
+     *   **整条删掉**（使用者定）：平台成员是只读的，"回不到平台版本"这件事由
+     *   **复制**解决（复制一条自建的去改，原件不动）；而真正被改坏的记录由启动对账修
+     *   （空指令、认得出的历史默认版本、旧默认名字），那三种以外的自定义文本**刻意不覆盖**。
      */
-    const agentDetachMatch = /^\/api\/agents\/([^/]+)\/detach(-preview)?$/.exec(path)
-    if (agentDetachMatch) {
-      const agentId = decodeURIComponent(agentDetachMatch[1]!) as Agent['id']
-      const preview = agentDetachMatch[2] === '-preview'
-      const current = await store.getAgent(agentId)
-      if (!current) {
-        sendJson(res, 404, { error: `agent 不存在：${agentId}` })
-        return
-      }
-      if (!canDetach(current)) {
-        sendJson(res, 400, {
-          error:
-            `「${current.name}」不是平台成员（${ownerOf(current) === 'user' ? '它本来就是你自己的智能体' : '归属不明'}），` +
-            '没有"改成普通智能体"这一步。',
-          code: 'agent_not_platform',
-        })
-        return
-      }
-      if (preview) {
-        if (req.method !== 'GET') {
-          sendJson(res, 405, { error: '预览只认 GET' })
-          return
-        }
-        sendJson(res, 200, {
-          references: await detachReferences(store, workspaceId, current, workflows),
-        })
-        return
-      }
-      if (req.method !== 'POST') {
-        sendJson(res, 405, { error: 'detach 只认 POST' })
-        return
-      }
-      const result = await detachPlatformMember({ store, workspaceId, agent: current, workflows })
-      info(
-        `「${current.name}」已改成你自己的智能体（入口三项全开）：${result.references.conversationCount} 条对话、` +
-          `${result.references.actionRuns} 条动作 run 与它有关；平台已重新出厂${
-            result.recreated.length > 0 ? `「${result.recreated.join('、')}」` : '它的原始成员'
-          }`,
-      )
-      sendJson(res, 200, {
-        agent: { ...result.agent, owner: ownerOf(result.agent), entries: entriesOf(result.agent) },
-        references: result.references,
-        recreated: result.recreated,
-      })
-      return
-    }
 
-    const agentRestoreMatch = /^\/api\/agents\/([^/]+)\/restore-default$/.exec(path)
-    if (agentRestoreMatch && req.method === 'POST') {
-      const agentId = decodeURIComponent(agentRestoreMatch[1]!) as Agent['id']
-      const current = await store.getAgent(agentId)
-      if (!current) {
-        sendJson(res, 404, { error: `agent 不存在：${agentId}` })
-        return
-      }
-      /*
-       * ⚠️ 2026-11（D154）：**老记录的三种说法要排在归属判断之前**。
-       *
-       * 为什么顺序要紧：`ownerOf()` 把已下线的 `skill-reviewer` 归一成 `user`（D145：
-       * 它可改可删、没有默认身份），于是"能不能恢复默认"这一步会先撞上"它不是平台成员"，
-       * 把"它已经下线了"这句更有用的话盖掉。老记录里 `builtin` / `builtinKind` 还在，
-       * 所以这里按老字段把两种情况认出来，给它们各自该有的话。
-       */
-      if (current.builtinKind === 'skill-reviewer') {
-        sendJson(res, 409, {
-          error:
-            `「${current.name}」是已下线的内置审核者（沉淀线不再评审，§12.15）——` +
-            `它没有默认值可恢复。不需要它的话，可以在「智能体」页把它删掉（它已经不被任何链路使用）。`,
-          code: 'builtin_retired',
-        })
-        return
-      }
-      if (current.builtin === true && legacySlotOf(current) === null && ownerOf(current) !== 'platform') {
-        sendJson(res, 400, {
-          error:
-            `「${current.name}」挂着内置标记，但没有可识别的「出厂槽位」——` +
-            '不知道该恢复成哪一套默认值。如果是新版本加的内置条目，请升级后重启。',
-          code: 'builtin_kind_unknown',
-        })
-        return
-      }
-      if (ownerOf(current) !== 'platform') {
-        // 非平台成员的 agent 没有"默认值"可言（他的指令就是他写的）
-        sendJson(res, 400, {
-          error: `「${current.name}」不是平台内置的智能体，没有默认值可恢复。`,
-          code: 'not_builtin_agent',
-        })
-        return
-      }
-      // ★ 分批第 70 批：恢复成**这条自己**的默认值，不是"一律起草者的那一套"。
-      //
-      //   量出来的坏法：对「Skill 审核者」按这个按钮 ⇒ 名字变「起草者（内置）」、指令
-      //   变起草者文本，角色却还是 `skill-reviewer`；而它自己的对账随后看到"非空且不在
-      //   历史里"⇒ `left-alone`，永久静默损坏。按钮在界面上对**两条内置都出现**
-      //   （`AgentDetail.svelte`：`{#if agent.builtin}`），所以这是一点就中的坑。
-      /*
-       * ★ 2026-11（D154）：**从槽位表反查它是哪一条**（老数据回退记录上的老字段）。
-       *   `null` = 它是平台成员、但没占任何槽位——那是数据不一致，如实报，不猜。
-       */
-      const kind = await slotOf(store, workspaceId, current)
-      if (kind === null) {
-        /*
-         * 挂着内置标记但**岗位值缺 / 认不出**（老记录 / 被手改过）：这时候
-         * "默认值"到底是哪一套没人知道，**说清楚**比猜一套写进去好。
-         *
-         * ⚠️ 2026-11（S4）：这里原来报的是"角色是 X"——角色退场之后，缺的是
-         * `builtinKind`（读时兜底会把老记录的 `role` 升格成它，所以正常升级路径
-         * 走不到这里）。
-         */
-        sendJson(res, 400, {
-          error:
-            `「${current.name}」挂着内置标记，但没有可识别的「内置岗位」——` +
-            `不知道该恢复成哪一套默认值。如果是新版本加的内置条目，请升级后重启。`,
-          code: 'builtin_kind_unknown',
-        })
-        return
-      }
-
-      const defaults = builtinDefaultsOf(kind)
-      const restored: Agent = {
-        ...current,
-        name: defaults.name,
-        instructions: defaults.instructions,
-        skillIds: [],
-        updatedAt: Date.now(),
-      }
-      await store.insertAgent(restored)
-      sendJson(res, 200, { agent: restored })
-      return
-    }
 
     /**
      * 记忆的磁盘镜像同步（分批第 241 批）：三个写入口共用，三件事一起做完。
