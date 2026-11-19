@@ -976,6 +976,16 @@
     ⚠️ 改名只改**草稿**（与卡片里其它字段一致）：点「保存」才写库。
   -->
   <header class="detail-head agent-head">
+    <!--
+      ★ 2026-11（D156）：**窄屏的规范出口**。`.back-to-list` 在宽屏是 `display:none`
+      （列表就在左边），≤72rem 时由 `app.css` 的断点显示——与任务页那颗「← 返回列表」
+      是同一个类、同一套行为。
+      ⚠️ 改之前窄屏只能靠动作里那颗「取消」出去，而「取消」的语义是"放弃改动"，
+        读起来不像"回到列表"（探针曾把这件事记成一条事实：侧边栏那一项在选中态下是空操作）。
+    -->
+    <button type="button" class="btn btn--ghost btn--sm back-to-list" data-agent-back onclick={onclose}>
+      {$t('agents.backToList')}
+    </button>
     {#if renaming}
       <input
         class="agent-rename-input"
@@ -1839,6 +1849,24 @@
    * `.detail-head` 的网格/副题/动作排布在 `app.css`（任务页、聊天页共用同一份）。
    * 这里只补这一页特有的两样：改名的输入框、以及"名字改过但没保存"的那句提示。
    */
+  /**
+   * ★ 2026-11（D156）：**栏头吸顶**。
+   *
+   * 这一页的栏头是 `AgentDetail` 自己渲染的（改名输入框 / 只读态 / 脏态这几件事都在
+   * 组件内部，没法像任务页那样交给 `MainArea` 的 `title`/`actions`），而它因此住在
+   * `.pane-body`（`overflow-y: auto`）里——不钉住的话正文一滚，标题和「保存 / 删除」
+   * 就一起滚走了，与任务页 / 聊天页（栏头在滚动容器**外面**）观感不同。
+   *
+   * `background: var(--surface)` 是必须的：吸顶元素没底色，滚上来的内容会从它下面
+   * 透出来，看起来像重影。
+   */
+  .agent-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface);
+  }
+
   .agent-head h2 {
     /* 标题里塞了徽标与「改名」，允许折行——但名字本身仍然不换行（超长省略） */
     flex-wrap: wrap;

@@ -408,6 +408,35 @@
         // 每张卡都要有：名字、角色徽章、一行说明（指令摘要 + 关系/技能/runtime 两部分）
         // ★ 2026-10（紧凑性）：原先是**两行**说明（`.agent-note` × 2，各占一行），
         //   使用者要求合并成一行——所以这里改量 `.agent-notes` 里的两个子 span。
+        /**
+         * ★★ 2026-11（D156）：**长名字的智能体行仍然是"标题一行 + 副行一行"**（范例页那条
+         *   "长标题被裁成一行"）。
+         *
+         * 为什么这条要专门量：`.agent-line` 是 `flex-wrap: wrap`（为了让「默认」徽标在窄栏
+         * 里能换行），而 `wrap` 与"标题单行裁切"是一对互相拉扯的东西——名字很长时如果
+         * `strong` 上的省略号五件套有一条失效，它就会把行撑成两行，而**页面看起来只是
+         * "这一行比别的高一点"**。所以这里量三条：标题被裁（scrollWidth > clientWidth）、
+         * 标题元素所在的那一行**没有折行**（行高与短名字那条差 ≤2px）、副行仍在。
+         */
+        facts['agents.longNameRow'] = (() => {
+          const rows = [...d().querySelectorAll('.agent-list .agent-row')]
+          const pick = (needle) =>
+            rows.find((r) => (r.querySelector('.agent-line strong')?.textContent ?? '').includes(needle))
+          const long = pick('探针夹具智能体')
+          const short = pick('短名')
+          if (!long) return null
+          const strong = long.querySelector('.agent-line strong')
+          const box = long.getBoundingClientRect()
+          return {
+            found: true,
+            // 长名字必须被裁（否则它会把这一行撑高）
+            clipped: strong ? strong.scrollWidth > strong.clientWidth + 1 : false,
+            longH: Math.round(box.height),
+            shortH: short ? Math.round(short.getBoundingClientRect().height) : null,
+            hasSub: !!long.querySelector('.list-row-sub'),
+          }
+        })()
+
         facts['agents.everyCardWellFormed'] =
           cards().length > 0 &&
           cards().every(
@@ -1415,6 +1444,20 @@
         facts['agents.narrowListDisplay'] = need('窄屏左栏', () =>
           cs(d().querySelector('.list-pane')).display,
         )
+        /**
+         * ★ 2026-11（D156）：窄屏必须有一个**规范的出口**（`.back-to-list`，与任务页同一个类）。
+         *   改之前这里只有动作里那颗「取消」——语义是"放弃改动"，不是"回到列表"；
+         *   而侧边栏那一项在选中态下是空操作（下面的 `sidebarNavNoOpWhenSelected` 记着这条事实）。
+         */
+        facts['agents.narrowBackToList'] = (() => {
+          const btn = d().querySelector('.detail-pane .detail-head .back-to-list')
+          if (!btn) return { found: false }
+          return {
+            found: true,
+            visible: getComputedStyle(btn).display !== 'none',
+            label: (text(btn) ?? '').trim(),
+          }
+        })()
         facts['agents.narrowDetailDisplay'] = need('窄屏右栏（选中态）', () =>
           cs(d().querySelector('.detail-pane')).display,
         )
@@ -1427,6 +1470,27 @@
         //    ★ 两种口径分开记：`sidebarNoOp` 是一条**事实**（它是个真缺陷，
         //       但不是这一批要改的东西——改界面与对齐探针是两件事），
         //       `narrowExit*` 量的是**真的出得去**。
+        /**
+         * ★ 2026-11（D156）：**详情栏头不许跟着正文滚走**（§2.6 的"正文自己滚，栏头不跟着滚"）。
+         *
+         * 任务页 / 聊天页把栏头交给 `MainArea`（它在 `.pane-body` **外面**）；
+         * 智能体页的栏头由 `AgentDetail` 自己渲染，因此住在 `.pane-body` 里——
+         * 不钉住的话标题与「保存 / 删除」会一起滚出视口。两种形态都算合规：
+         *   · 不在滚动容器里（`insideBody === false`）；
+         *   · 在，但 `position: sticky`（这一页的做法）。
+         * ⚠️ 这条以前没有任何判据：探针一直在量 `.detail-head` 的高度，但从没问过
+         *   "它会不会被滚走"。
+         */
+        facts['agents.detailHeadScroll'] = (() => {
+          const head = d().querySelector('.detail-pane .detail-head')
+          if (!head) return null
+          return {
+            insideBody: head.closest('.pane-body') !== null,
+            position: getComputedStyle(head).position,
+            background: getComputedStyle(head).backgroundColor,
+          }
+        })()
+
         const navAgentsBtn = [...d().querySelectorAll('.nav-item')].find((b) =>
           text(b)?.includes('智能体'),
         )

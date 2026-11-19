@@ -293,7 +293,12 @@ import ListRow from '../components/ListRow.svelte'
     empty={$agents.length === 0}
     emptyTitle={$t('agents.emptyTitle')}
     emptyHint={$t('agents.emptyHint')}
-    emptyFiltered={visibleAgents.length === 0}
+    /*
+     * ★ 2026-11（D156）：按 §2.6 的写法给全——`items.length > 0 && visible.length === 0`。
+     *   原来只给后半句（"一条都没搜出来"），靠 `empty` 先命中才没出错；把条件写全，
+     *   下一个改这段的人不必再去读 `ListPane` 的分支顺序。
+     */
+    emptyFiltered={$agents.length > 0 && visibleAgents.length === 0}
     emptyFilteredTitle={$t('agents.emptyFiltered')}
     emptyFilteredHint={$t('agents.emptyFilteredHint')}
   >

@@ -329,6 +329,30 @@ const CHECKS = [
   { view: '智能体', key: 'agents.cardCount', label: '渲染出 agent 卡片', ok: (v) => v >= 1, show: (v) => `${v} 张` },
   {
     view: '智能体',
+    key: 'agents.longNameRow',
+    /**
+     * ★★ 2026-11（D156）：范例页那条"**长标题被裁成一行**"在智能体页的落地判据。
+     *
+     * 由来：`.agent-line` 是 `flex-wrap: wrap`，而"单行省略"的五件套写在 `strong` 上——
+     * 两件事互相拉扯。名字很长时只要省略号链条断一环，行就被撑成两行，而**页面看起来
+     * 只是"这一行比别的高一点"**（这类缺陷靠肉眼盯不出来，得拿长/短两条比）。
+     */
+    label:
+      '★★ 长名字的智能体行仍是「标题一行 + 副行一行」：标题被省略号裁掉（`scrollWidth > clientWidth`）、' +
+      '行高与短名字那条差 ≤2px、副行还在——`flex-wrap` 与"单行裁切"互相拉扯的地方',
+    ok: (v) =>
+      !!v &&
+      v.found === true &&
+      v.clipped === true &&
+      v.hasSub === true &&
+      (v.shortH === null || Math.abs(v.longH - v.shortH) <= 2),
+    show: (v) =>
+      v === null
+        ? 'null（没找到长名字那条夹具）'
+        : `裁住 ${String(v.clipped)}　长 ${String(v.longH)}px / 短 ${String(v.shortH)}px　副行 ${String(v.hasSub)}`,
+  },
+  {
+    view: '智能体',
     key: 'agents.everyCardWellFormed',
     label: '每张卡片都有名字与一行说明（摘要 + 元信息；2026-11/D155 起不再画成员徽章）',
     ok: (v) => v === true,
@@ -369,6 +393,44 @@ const CHECKS = [
   { view: '智能体', key: 'agents.afterExitClass', label: '★★ 点出口之后 with-detail 撤掉（真的回到列表，不是"按钮在但走不掉"）', ok: (v) => !String(v).includes('with-detail') },
   { view: '智能体', key: 'agents.afterExitListDisplay', label: '★ 出口之后左栏回来', ok: (v) => v === 'flex' },
   { view: '智能体', key: 'agents.afterExitDetailDisplay', label: '★★ 窄屏下出口之后详情栏消失（否则使用者卡在一张表单里）', ok: (v) => v === 'none' },
+  {
+    view: '智能体',
+    key: 'agents.detailHeadScroll',
+    /**
+     * ★★ 2026-11（D156）：**详情栏头不跟正文滚**（§2.6 表的"正文自己滚，栏头不跟着滚"）。
+     *
+     * 这条判据是这次"对照范例页全面体检"补上的**判断缺口**：探针一直在量栏头的高度、
+     * 动作的轨道，却从没问过"滚动时它会不会一起走"。
+     * 两种形态都合规：栏头在滚动容器**外面**（任务页 / 聊天页），或者在里面但 `sticky`。
+     * 另外要求 sticky 时**有底色**——没有底色，滚上来的内容会透出来（像重影）。
+     */
+    label:
+      '★★ 详情栏头**不跟着正文滚**：要么在滚动容器外面（任务 / 聊天），要么吸顶且带底色' +
+      '（智能体页的栏头住在正文里，因为它要显示改名输入 / 只读态 / 脏态）',
+    ok: (v) =>
+      !!v &&
+      typeof v === 'object' &&
+      (v.insideBody === false ||
+        (v.position === 'sticky' && v.background !== 'rgba(0, 0, 0, 0)')),
+    show: (v) =>
+      v === null
+        ? 'null（没找到 .detail-head）'
+        : `在正文滚动容器里 ${String(v.insideBody)}　position ${String(v.position)}　底色 ${String(v.background)}`,
+  },
+  {
+    view: '智能体',
+    key: 'agents.narrowBackToList',
+    /**
+     * ★★ 2026-11（D156）：窄屏的出口必须是**规范的返回按钮**（`.back-to-list`）。
+     *   改之前窄屏只有动作里那颗「取消」（语义是"放弃改动"），而侧边栏那一项在选中态下
+     *   是空操作——"能出去"这件事当时靠的是巧合。
+     */
+    label:
+      '★★ 窄屏（≤72rem）详情栏头里有「← 返回列表」，而且**真的显示**（`.back-to-list` 在宽屏隐藏、' +
+      '窄屏由断点显示；与任务页同一个类）',
+    ok: (v) => !!v && v.found === true && v.visible === true && String(v.label ?? '').includes('返回'),
+    show: (v) => (v === null ? 'null' : `在 ${String(v.found)}　显示 ${String(v.visible)}　「${String(v.label)}」`),
+  },
   {
     view: '智能体',
     key: 'agents.detailNoHero',
@@ -7084,6 +7146,32 @@ try {
   //   只能靠两者对比来断言——写一个魔法阈值（"不超过 64px"）既容易被无关的
   //   间距调整弄红，又挡不住"两个都是 100px"这种真问题。
   // 记下第一条的 id：沉淀夹具那条源 run 要挂在它上面（`subject: {type:'issue'}`）。
+
+  /*
+   * ★ 2026-11（D156）：**智能体页的长名字夹具**（对照列表页范例体检时补的）。
+   *
+   * 为什么需要：`.agent-line` 是 `flex-wrap: wrap`（为了让「默认」徽标在窄栏里能换到
+   * 第二行），而范例页要求"长标题被裁成一行"。没有一条长名字的记录，这条性质
+   * **一条判据都量不到**——"单行省略"的 CSS 写着不等于它在这个页面上真的生效。
+   * 造两条（一条很长、一条很短）才比得出来（与任务页那条夹具同一个办法）。
+   */
+  const seedAgentName =
+    '探针夹具智能体（别动它）：这个名字故意写得非常长，长到足以在智能体列表的窄栏里换行，' +
+    '因为使用者可以随便起名，而行高与标题行数不该由名字长度决定。'
+  try {
+    for (const name of [seedAgentName, '短名']) {
+      const res = await fetch(`${base}/api/agents`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name, instructions: '由 tools/layout-probe 造的夹具。' }),
+      })
+      if (!res.ok) {
+        log(yellow(`⚠ 造夹具智能体失败（HTTP ${res.status}）——智能体页那两条长名字检查会空过`))
+      }
+    }
+  } catch (err) {
+    log(yellow(`⚠ 造夹具智能体时出错：${String(err)}`))
+  }
 
   try {
     for (const title of [seedTitle, '短标题']) {

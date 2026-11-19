@@ -258,6 +258,8 @@ export const agentsText = {
     zh: '换个关键词，或清空搜索框。',
     en: 'Try another keyword, or clear the search box.',
   },
+  /** ★ 2026-11（D156）：窄屏详情栏头那颗「← 返回列表」（`.back-to-list`，宽屏自动隐藏）。 */
+  'agents.backToList': { zh: '← 返回列表', en: '← Back to list' },
   'agents.pickOneTitle': { zh: '从左边选一个智能体', en: 'Pick an agent on the left' },
   'agents.pickOneHint': {
     zh: '点左边的条目看它的指令、挂的技能，以及它用哪个 CLI 跑。',
