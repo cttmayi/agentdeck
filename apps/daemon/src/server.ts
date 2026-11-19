@@ -104,6 +104,7 @@ import {
   migratePlatformSkillsToExclusive,
 } from './agent-maker-skills.ts'
 import { MEMORY_EXISTING_MEMORY_FILE, MEMORY_TRANSCRIPT_FILE } from './platform-actions.ts'
+import { checkWorkflowAgentRefs, resolveWorkflowAgent } from './workflow-agents.ts'
 import { builtinAccountingRows, reconcileStartup } from './startup-reconcile.ts'
 import {
   SLOT_LABELS,
@@ -2495,25 +2496,21 @@ async function injectedSkillsOf(
               // 内嵌智能体（2026-11）：按名字引用**现有智能体**当执行者。
               const agentName = node.slice('inline:'.length)
               const agents = await store.listAgents(workspaceId)
-              const agent = agents.find((a) => (a.name as string) === agentName)
-              if (!agent) return { ok: false, runId: null, error: `内嵌智能体不存在：${agentName}` }
               /*
-               * ★ 2026-11（D145，使用者拍板"两处都约束"）：**引擎这侧也要查接入点**。
+               * ★★ 2026-11（D163）：**解析唯一化**——`resolveWorkflowAgent()` 一处收口。
                *
-               * 改之前这里没有任何门——`agents.find(name)` 是**全量**名单，于是编排代码
-               * 可以直接引用「沉淀起草者」「编排生成者」当执行者，跑起来按它们的平台指令
-               * 干活。另一半（编辑器/生成者的候选名单）由 `/api/workflows` 与生成者校验
-               * 那边同步过滤，所以"看得到就能跑、看不到就报错"是一致的。
+               * 改之前这里是 `agents.find(a => a.name === agentName)`：**静默取第一个**。
+               * 而智能体的名字从来没有唯一约束（改名也是使用者的自由）⇒ 重名时永远命中
+               * "更早那条"，界面、采纳校验、运行日志**一个字都不说**。使用者看到的是
+               * "我明明选了新那条，怎么跑的是旧的"（`助手` 就是现成的一例：内置一条 +
+               * 老版本播种的那条，两条都接编排）。
+               *
+               * 现在：找不到 / **重名（歧义）** / 接入点里没有 `workflow` 三种情况分开报，
+               * 与采纳校验（`checkWorkflowAgentRefs`）**同一句话**。
                */
-              if (!canBeReferencedByWorkflow(agent)) {
-                return {
-                  ok: false,
-                  runId: null,
-                  error:
-                    `「${agentName}」不能被编排引用——它的接入点里没有「被编排调用」` +
-                    `（平台成员默认不给）。换一个自己建的智能体。`,
-                }
-              }
+              const resolved = resolveWorkflowAgent(agents, agentName)
+              if (!resolved.ok) return { ok: false, runId: null, error: resolved.error }
+              const agent = resolved.agent
               agentRef = { id: agent.id as AgentId, name: agent.name as string, instructions: agent.instructions ?? '' }
             } else {
               /*
@@ -8129,6 +8126,32 @@ async function injectedSkillsOf(
        *   改之前是全量名单 ⇒ 平台成员（起草者 / 编排生成者）也能通过校验，然后在运行
        *   时才被引擎拒——"校验说行、跑起来必炸"是最坏的一种不一致。
        */
+      /*
+       * ★★ 2026-11（D163）：**先查"名字能不能唯一解析"**，再走语法/名字校验——
+       *   重名是"名字存在但选不出是哪条"，`validateWorkflowCode` 那层看不出来（它只查有没有）。
+       *   ⚠️ 与引擎解析同一句话（`resolveWorkflowAgent`），否则就是"校验说行、跑起来必炸"。
+       */
+      const refs = checkWorkflowAgentRefs(agents, parsed.code)
+      if (!refs.ok) {
+        /*
+         * ⚠️ 错误码保持向后兼容：**"不存在"与"存在但不可引用"仍然报
+         *   `workflow_code_unknown_agent`**（界面与既有用例认这个），只有**重名歧义**
+         *   用新码 `workflow_code_ambiguous`——那是一种以前根本不会出现的失败。
+         */
+        sendJson(res, 400, {
+          error: refs.error,
+          code: refs.code === 'agent_ambiguous' ? 'workflow_code_ambiguous' : 'workflow_code_unknown_agent',
+          /*
+           * `unknownAgents` 是既有契约（界面与用例都读它点名"是哪几个"）。
+           * 重名那档另外给 `ambiguousAgents`——两件事不是一回事，混成一个字段会让人
+           * 以为"名字不存在"。
+           */
+          ...(refs.code === 'agent_ambiguous'
+            ? { ambiguousAgents: [refs.name] }
+            : { unknownAgents: [refs.name] }),
+        })
+        return
+      }
       const check = validateWorkflowCode(parsed.code, workflowReferenceableNames(agents))
       if (!check.ok) {
         sendJson(res, 400, {
