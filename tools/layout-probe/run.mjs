@@ -2769,6 +2769,66 @@ const CHECKS = [
   },
   {
     view: '智能体',
+    // ⚠️ key 必须是探针**真的采集过**的那个名字：第一版写成 `agents.builtinActionButtons`
+    //    （一个不存在的 key）⇒ 判据永久"没量到这个值"，而那一行看起来像在守着它。
+    key: 'agents.builtinDetailButtons',
+    /**
+     * ★ 2026-11（D150 顺带补的空洞）：平台成员详情那一排按钮。
+     *
+     * 这三个事实（`builtinDetailButtons` / `builtinHasRestore` / `builtinHasDelete`）在
+     * 探针里躺了很久，**没有任何判据读它们**——"断言在，但量不到"正是本仓库最怕的空洞
+     * （徽标那条判据的注释里写着同一个教训）。现在钉三条：
+     *   ① 有「恢复成默认值」（只读的唯一自救出口）；
+     *   ② **没有「删除」**——留一个点了必然被服务端拒的按钮，比没有按钮更坏；
+     *   ③ 有「改为普通智能体」（D150 的正规出口，见下一条判据）。
+     */
+    label:
+      '★★ 平台成员详情那一排：有「恢复成默认值」、**没有「删除」**（点了必然 400 的按钮' +
+      '比没有按钮更坏）、并且有「改为普通智能体」这条正规出口',
+    ok: (v) => {
+      if (!Array.isArray(v)) return false
+      const has = (needle) => v.some((t) => String(t ?? '').includes(needle))
+      return has('恢复成默认值') && !has('删除') && has('改为普通智能体')
+    },
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '智能体',
+    key: 'agents.detach',
+    /**
+     * ★★ 2026-11（D150）：把平台成员**改成普通智能体**（`detach`）。
+     *
+     * 量四件事，缺一不可：
+     *   ① 按钮在，且点得动；
+     *   ② 弹出的是**平台居中确认框**，里面把**结果**说清（"变成你自己的智能体" +
+     *      "平台会重新出厂一条"）——这正是不做"确定吗？"空话的地方：
+     *      一条只读成员可能正被对话与编排用着，人得知道改完会发生什么；
+     *   ③ 点「取消」**真的什么都没变**（框关掉）；
+     *   ④ 取消之后这条**还是平台成员**（内置徽标还在）。
+     */
+    label:
+      '★★ 「改为普通智能体」：确认框里说清**结果**（变成你的 + 平台重新出厂一条），' +
+      '点取消之后框关掉、这条**还是平台成员**（徽标还在）',
+    ok: (v) => {
+      if (!v || typeof v !== 'object') return false
+      return (
+        v.dialog !== null &&
+        typeof v.dialog === 'object' &&
+        v.dialog.saysOwn === true &&
+        v.dialog.saysSeeded === true &&
+        v.canceled === true &&
+        v.stillPlatform === true
+      )
+    },
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `按钮 ${JSON.stringify(v.button)}　说清结果 ${String(v.dialog?.saysOwn)}/${String(
+            v.dialog?.saysSeeded,
+          )}　取消关掉 ${String(v.canceled)}　仍是平台成员 ${String(v.stillPlatform)}`,
+  },
+  {
+    view: '智能体',
     key: 'agents.builtinBadgeTitle',
     label: '★ 那枚徽标的 `title` 说清了"整份只读、要回默认用恢复成默认值"（短标签不丢信息）',
     ok: (v) => typeof v === 'string' && v.includes('只读') && v.includes('恢复成默认值'),

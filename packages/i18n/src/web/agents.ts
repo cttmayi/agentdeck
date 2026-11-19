@@ -367,6 +367,49 @@ export const agentsText = {
    *   使用者 D145 拍板：「相关入口**显示但置灰**」——位置要摆出来（保证界面一致），
    *   但要说明为什么造不了，否则它看起来就像坏了。
    */
+  /*
+   * ★ 2026-11（D150）：**「改为普通智能体」**（detach）。
+   *   它是"我只想改一下它的口吻"的正规出口：平台成员只读，改不了就只能自己造一条。
+   *   确认框里那句 `detachBody` 说的是**结果**（变成你的 + 平台重新出厂一条），
+   *   下面 `detachRef*` 那几条是**影响面**（有几条对话/编排与它有关），按事实列、为 0 不列。
+   */
+  'agents.detach': { zh: '改为普通智能体', en: 'Convert to my agent' },
+  'agents.detachTitle': {
+    zh: '改成你自己的智能体（之后可改可删）',
+    en: 'Convert to your own agent (then editable and deletable)',
+  },
+  'agents.detachBody': {
+    zh: '「{name}」会变成你自己的智能体：入口三项全开、可以改名字与指令。平台会同时重新出厂一条原始的「{name}」，平台自己的流程照常用新的那条。',
+    en: '“{name}” becomes your own agent (all three entry points, editable). The platform immediately seeds a fresh original “{name}” in its place, and its own flows keep using that new one.',
+  },
+  'agents.detachRefConversations': {
+    zh: '· {n} 条对话的执行者是它——对话照常能继续（执行者身份不变）',
+    en: '· {n} conversation(s) use it as executor — they keep working',
+  },
+  'agents.detachRefIssues': {
+    zh: '· {n} 条任务的指派是它——它们变成能派活之后照常执行',
+    en: '· {n} task(s) are assigned to it — they keep running',
+  },
+  'agents.detachRefDefault': {
+    zh: '· 它是当前的默认执行者——改成普通智能体后仍然可以当默认',
+    en: '· It is the current default executor — still allowed afterwards',
+  },
+  'agents.detachRefWorkflows': {
+    zh: '· 编排 {names} 里按名字引用了它——以前那种引用会被拒，改完之后开始生效',
+    en: '· Referenced by name in: {names} — those references start working afterwards',
+  },
+  'agents.detachRefRuns': {
+    zh: '· 它跑过 {n} 条动作 run——历史一条都不删，只是后续由新出厂的那条来跑',
+    en: '· {n} action run(s) — history is kept; future ones run on the fresh member',
+  },
+  'agents.detachDone': {
+    zh: '已改成你自己的智能体；平台已重新出厂「{fresh}」',
+    en: 'Converted. Seeded a fresh “{fresh}” for the platform.',
+  },
+  'agents.detachDonePlain': {
+    zh: '已改成你自己的智能体；平台已重新出厂原始成员',
+    en: 'Converted. Seeded a fresh original platform member.',
+  },
   'agents.newPlatformMember': { zh: '新建平台成员', en: 'New platform member' },
   'agents.newPlatformMemberTitle': {
     zh: '平台成员由平台出厂播种（起草 / 整理记忆 / 生成智能体 / 生成编排各一条），不能在这里新建。用「新建智能体」造出来的是你自己的智能体。',

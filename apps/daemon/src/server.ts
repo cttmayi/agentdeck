@@ -105,6 +105,7 @@ import {
 } from './agent-maker-skills.ts'
 import { MEMORY_EXISTING_MEMORY_FILE, MEMORY_TRANSCRIPT_FILE } from './platform-actions.ts'
 import { builtinAccountingRows, reconcileStartup } from './startup-reconcile.ts'
+import { canDetach, detachPlatformMember, detachReferences } from './member-detach.ts'
 import {
   canBeDispatched,
   canBeReferencedByWorkflow,
@@ -3855,6 +3856,65 @@ async function injectedSkillsOf(
     // 只恢复**平台能保证的那部分**（指令 + 名字 + 技能集合 = 不挂）：使用者的改动
     // 是他自己的资产，所以升级不覆盖（第 ⑥ 条）——但"改坏了想回原样"必须有一条路，
     // 否则那条"使用者改了指令 ⇒ 起草质量变差"的故障就永远只能靠删了重建。
+    /**
+     * ★ 2026-11（D150）：**把一条平台成员改成普通智能体**（`detach`，设计稿 §7）。
+     *
+     * 两条路，分开是有原因的：
+     *   · `GET …/detach-preview` **只算不写**——界面要先把"改完之后会发生什么"摆给人看，
+     *     确认了才动手（设计稿第 ④ 条）。算引用要扫对话/任务/run/编排，放在详情接口里
+     *     会让每次点开一条成员都付这份钱，所以单独一条路、点了才算；
+     *   · `POST …/detach` 才是写。
+     *
+     * ⚠️ 判据与只读闸**同一句**（`ownerOf(...) === 'platform'`）："能不能改"与"能不能
+     *    脱离"是同一件事的两面，读取值不许分叉。
+     */
+    const agentDetachMatch = /^\/api\/agents\/([^/]+)\/detach(-preview)?$/.exec(path)
+    if (agentDetachMatch) {
+      const agentId = decodeURIComponent(agentDetachMatch[1]!) as Agent['id']
+      const preview = agentDetachMatch[2] === '-preview'
+      const current = await store.getAgent(agentId)
+      if (!current) {
+        sendJson(res, 404, { error: `agent 不存在：${agentId}` })
+        return
+      }
+      if (!canDetach(current)) {
+        sendJson(res, 400, {
+          error:
+            `「${current.name}」不是平台成员（${ownerOf(current) === 'user' ? '它本来就是你自己的智能体' : '归属不明'}），` +
+            '没有"改成普通智能体"这一步。',
+          code: 'agent_not_platform',
+        })
+        return
+      }
+      if (preview) {
+        if (req.method !== 'GET') {
+          sendJson(res, 405, { error: '预览只认 GET' })
+          return
+        }
+        sendJson(res, 200, {
+          references: await detachReferences(store, workspaceId, current, workflows),
+        })
+        return
+      }
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'detach 只认 POST' })
+        return
+      }
+      const result = await detachPlatformMember({ store, workspaceId, agent: current, workflows })
+      info(
+        `「${current.name}」已改成你自己的智能体（入口三项全开）：${result.references.conversationCount} 条对话、` +
+          `${result.references.actionRuns} 条动作 run 与它有关；平台已重新出厂${
+            result.recreated.length > 0 ? `「${result.recreated.join('、')}」` : '它的原始成员'
+          }`,
+      )
+      sendJson(res, 200, {
+        agent: { ...result.agent, owner: ownerOf(result.agent), entries: entriesOf(result.agent) },
+        references: result.references,
+        recreated: result.recreated,
+      })
+      return
+    }
+
     const agentRestoreMatch = /^\/api\/agents\/([^/]+)\/restore-default$/.exec(path)
     if (agentRestoreMatch && req.method === 'POST') {
       const agentId = decodeURIComponent(agentRestoreMatch[1]!) as Agent['id']

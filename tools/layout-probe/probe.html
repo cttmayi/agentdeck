@@ -4285,6 +4285,57 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           facts['agents.builtinHasRestore'] = detailBtns.some((t) => t.includes('恢复成默认值'))
           // ⚠️ 判据是"**没有**删除按钮"：留一个点了会被服务端拒的按钮，比没有按钮更坏
           facts['agents.builtinHasDelete'] = detailBtns.some((t) => t.includes('删除'))
+          /**
+           * ★ 2026-11（D150）：**「改为普通智能体」那条正规出口**。
+           *
+           * 这一条量三件事（都是"点了之后会不会吓人一跳"的边界）：
+           *   ① 按钮在（平台成员这一页要能看见它，否则只读就没有出口）；
+           *   ② 点了会弹出**平台居中确认框**，里面把**结果与影响面**说清楚
+           *      （不是"确定吗？"这种空话——那样人只能赌）；
+           *   ③ 点「取消」之后**什么都没变**（徽标还在、列表里还是平台成员）。
+           * ⚠️ 确认框必须取消掉：真 detach 会把这条成员换成普通智能体，
+           *    后面几条判据（内置徽标 / 技能锁定）量的现场就没了。
+           */
+          const detachBtn = d().querySelector('[data-agent-detach]')
+          facts['agents.detachButton'] = detachBtn ? (text(detachBtn) ?? '').trim() : null
+          if (detachBtn) {
+            click(detachBtn)
+            await until(() => !!d().querySelector('.modal, [role=dialog]'), 60)
+            const dialog = d().querySelector('.modal, [role=dialog]')
+            facts['agents.detachDialog'] = (() => {
+              if (!dialog) return null
+              const body = text(dialog) ?? ''
+              return {
+                text: body.slice(0, 600),
+                // 说清了"会变成你的"（结果）与"平台会重新出厂"（后果）
+                saysOwn: body.includes('你自己的智能体'),
+                saysSeeded: body.includes('重新出厂'),
+                cancel: [...dialog.querySelectorAll('button')].map((b) => (text(b) ?? '').trim()),
+              }
+            })()
+            const cancelBtn = dialog
+              ? [...dialog.querySelectorAll('button')].find(
+                  (b) => (text(b) ?? '').trim() === '取消',
+                )
+              : null
+            if (cancelBtn) click(cancelBtn)
+            facts['agents.detachCanceled'] = await until(
+              () => !d().querySelector('.modal, [role=dialog]'),
+              40,
+            )
+            // 取消之后**还是平台成员**（徽标在）
+            facts['agents.detachStillPlatform'] = !!d().querySelector(
+              '[data-agent-builtin-badge]',
+            )
+          }
+          // 合成一条给判据读（`run.mjs` 的 `agents.detach`）——判据一个 key 读一件事，
+          // 而这条要的是"按钮 / 框里的话 / 取消之后的状态"三件事一起成立。
+          facts['agents.detach'] = {
+            button: facts['agents.detachButton'] ?? null,
+            dialog: facts['agents.detachDialog'] ?? null,
+            canceled: facts['agents.detachCanceled'] ?? null,
+            stillPlatform: facts['agents.detachStillPlatform'] ?? null,
+          }
           const skillsCell = d().querySelector('.skills-cell')
           facts['agents.builtinSkillsLocked'] = !!(skillsCell && skillsCell.className.includes('locked'))
           facts['agents.builtinSkillsText'] = skillsCell ? text(skillsCell) : null
