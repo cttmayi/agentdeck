@@ -1038,61 +1038,15 @@
       })}
     </p>
     </div>
+    <!--
+      ★ 2026-11（D162）：这一排按 **主操作 → 普通动作 → 次操作 → 危险** 排（§2.6），
+      而且「设为默认」**对平台成员也显示**（使用者："内置助手不能被设置默认呢"——
+      它确实有 `task` + `chat`，是合格的默认，但按钮原来被 `!readOnly` 挡掉了：
+      "设成默认"改的是**工作区设置**，不是这条智能体，与它只读与否无关）。
+    -->
     <div class="detail-actions">
-      {#if readOnly}
-        <!--
-          ★ 分批第 273 批：内置 agent **没有「保存」**——服务端整份拒绝它的 PATCH，
-            留着这颗按钮就是"点了必然 400"的假动作（使用者："保存/删除这些按钮都是置灰的"）。
-          能做的只有：删（仅已下线的 skill 审核者）、恢复成默认值、取消。
-        -->
-        {#if retiredBuiltin}
-          <button type="button" class="btn btn--danger" data-agent-delete onclick={() => void remove()}
-            >{$t('agents.deleteButton')}</button
-          >
-        {:else}
-          <!--
-            ★ 2026-11（D160）：平台成员身上**只剩「复制」与「关闭」**。
-            改之前这里有「恢复成默认值」与「改为普通智能体」两颗——都删了（使用者定）：
-              · **复制**严格覆盖了"我想改一下它的口吻"：复制一条自建的去改，平台那条原样不动，
-                不会触发"平台重新出厂一条"，历史 run 也留在原处；
-              · "恢复成默认值"要解决的问题（老版本把平台成员改坏了）现在由**启动对账**接手
-                （空指令 / 认得出的历史默认版本 / 旧默认名字三种会自动修）。
-          -->
-          <button
-            type="button"
-            data-agent-copy
-            disabled={busy}
-            title={$t('agents.copyTitle')}
-            onclick={() => void copyAgent()}
-          >{$t('agents.copy')}</button>
-        {/if}
-        <button type="button" data-agent-cancel onclick={cancelEdit}>{$t('common.close')}</button>
-      {:else}
-        <!--
-          ★ 2026-11（D159）：**「设为默认」从行内搬到了这里**（使用者选了严格按范例的收法：
-            行 = 标题 + 副行 + 可选的一颗危险动作）。条件与行内那颗一模一样：
-            不是平台成员（只读）、接入点里有 `task`（能派活才配当默认）、且它还不是默认。
-          位置：本颗（普通动作）→ `保存`（主操作）→ `取消` → `删除`（危险、最后）。
-          ⚠️ 写动作成功后界面必须跟着数据走：`setDefaultAgent()` 内部会重拉列表，
-            列表上那枚「默认」徽章随之移动（不在这里手动改任何状态）。
-        -->
-        <!--
-          ★ 2026-11（D161）：条件与服务端**同一句**——默认智能体要同时有「任务」与「聊天」
-            （只有任务的话，活接下来了却聊不了）。
-        -->
-        {#if !readOnly && hasEntry(agent, 'task') && hasEntry(agent, 'chat') && agent.id !== $effectiveDefaultAgentId}
-          <button
-            type="button"
-            data-agent-set-default
-            disabled={busy}
-            title={$t('agents.setDefaultTitle')}
-            onclick={() => void makeDefault()}
-          >{$t('agents.setDefault')}</button>
-        {/if}
-        <!--
-          ★ 2026-11（D146）：入口一个都不留也**不给保存**——服务端同样会拒（
-             `parseUserEntries`），这里只是让它在点下去之前就说清楚。
-        -->
+      {#if !readOnly}
+        <!-- ★ 2026-11（D146）：入口一个都不留也**不给保存**——服务端同样会拒。 -->
         <button
           type="submit"
           class="btn btn--primary"
@@ -1103,15 +1057,40 @@
             : dirty ? $t('agents.saveTitle') : $t('agents.saveNothing')}
           >{busy ? $t('common.saving') : $t('common.save')}</button
         >
-        <!-- ★ 2026-11（D160）：**自建也能复制**（"试试另一套指令"的分支不用从零写）。 -->
+      {/if}
+      <!--
+        ★ 2026-11（D159/D161/D162）：条件与服务端**同一句**——默认智能体要同时具备
+        「任务」与「聊天」；且它还不是默认。**不看只读态**：平台成员也可以当默认
+        （内置「助手」本身就是出厂默认）。
+        ⚠️ 写成功后界面跟着数据走：`setDefaultAgent()` 内部会重拉列表，
+          列表上那枚「默认」徽章随之移动（这里不手动改任何状态）。
+      -->
+      {#if hasEntry(agent, 'task') && hasEntry(agent, 'chat') && agent.id !== $effectiveDefaultAgentId}
         <button
           type="button"
-          data-agent-copy
+          data-agent-set-default
           disabled={busy}
-          title={$t('agents.copyTitle')}
-          onclick={() => void copyAgent()}
-        >{$t('agents.copy')}</button>
-        <button type="button" data-agent-cancel onclick={cancelEdit}>{$t('common.cancel')}</button>
+          title={$t('agents.setDefaultTitle')}
+          onclick={() => void makeDefault()}
+        >{$t('agents.setDefault')}</button>
+      {/if}
+      <!-- ★ 2026-11（D160）：**复制**（平台成员与自建都能用；想改内置就改副本）。 -->
+      <button
+        type="button"
+        data-agent-copy
+        disabled={busy}
+        title={$t('agents.copyTitle')}
+        onclick={() => void copyAgent()}
+      >{$t('agents.copy')}</button>
+      <button type="button" data-agent-cancel onclick={cancelEdit}
+        >{readOnly ? $t('common.close') : $t('common.cancel')}</button
+      >
+      {#if !readOnly}
+        <button type="button" class="btn btn--danger" data-agent-delete onclick={() => void remove()}
+          >{$t('agents.deleteButton')}</button
+        >
+      {:else if retiredBuiltin}
+        <!-- 已下线的内置审核者：它已经不被任何链路使用，允许删。 -->
         <button type="button" class="btn btn--danger" data-agent-delete onclick={() => void remove()}
           >{$t('agents.deleteButton')}</button
         >

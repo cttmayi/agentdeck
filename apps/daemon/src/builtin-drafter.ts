@@ -1302,6 +1302,28 @@ export async function ensureBuiltinAgents(
   const memoryTidy = await ensureBuiltinMemoryTidy(store, workspaceId, table)
   const agentMaker = await ensureBuiltinAgentMaker(store, workspaceId, table)
   const workflowMaker = await ensureBuiltinWorkflowMaker(store, workspaceId, table)
+  /*
+   * ⚠️⚠️ 2026-11（D162）：**对账之后必须把每个槽位认领进表**——不管那一条是新建的还是
+   *   **早就在的**。
+   *
+   *   这是个真 bug（使用者一句"还有 3 个有『内置』字样呢"量出来的）：`claimSlot()` 原来只在
+   *   "新建"那一支调用，而老工作区里的成员是被 `resolveSlot()` 用**老字段兜底**找到的，
+   *   找到了却**从不写进表**。后果有三层，一层比一层难发现：
+   *     ① 名字迁移（去「（内置）」后缀）遍历的是表 ⇒ 那几条**永远不会被改名**；
+   *     ② `alignMemberEntries` 也遍历表 ⇒ 它们的接入点永远不会被对齐到注册表；
+   *     ③ 每次启动都要走一遍老字段兜底——"表是唯一来源"这句话在升级路径上不成立。
+   *   现在统一在这里认领：只要 ensure 给出了 agentId（created / healed / left-alone），
+   *   就把那个 id 写进表。`skipped` 没有 id，自然跳过。
+   */
+  for (const [slot, result] of [
+    ['assistant', assistant],
+    ['drafter', drafter],
+    ['memory-tidy', memoryTidy],
+    ['agent-maker', agentMaker],
+    ['workflow-maker', workflowMaker],
+  ] as const) {
+    if (result.action !== 'skipped') claimSlot(table, slot, result.agentId)
+  }
   if (own) await saveSlotTable(store, workspaceId, table)
   return { assistant, drafter, memoryTidy, agentMaker, workflowMaker, slots: table }
 }

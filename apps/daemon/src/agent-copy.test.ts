@@ -290,3 +290,138 @@ describe('★ 内置助手：三项入口 + 默认智能体', () => {
     })
   })
 })
+
+/**
+ * ★ 2026-11（D162）：**老工作区里"早就在"的成员也要被认领进槽位表**。
+ *
+ * 使用者一句「还有 3 个有『内置』字样呢」量出来的真 bug：`claimSlot()` 原来只在
+ * **新建**那一支调用，而老工作区的成员是 `resolveSlot()` 用老字段兜底找到的 ——
+ * 找到了却**从不写进表**。于是：① 名字迁移（去「（内置）」后缀）遍历表 ⇒ 那几条永远不改名；
+ * ② `alignMemberEntries` 同理；③ 每次启动都靠老字段兜底，"表是唯一来源"在升级路径上不成立。
+ */
+describe('★ 老工作区：已有的成员被认领进槽位表，名字与接入点随之对齐', () => {
+  test('★★ 四条老形态记录 + 无默认 ⇒ 对账后：名字去后缀、槽位全在、默认是助手', async () => {
+    const dir = await makeTempDir('agent-legacy-slot-claim')
+    const now = Date.now()
+    const { FileStore } = await import('@agentdeck/store-file')
+    const { wsId } = await import('@agentdeck/domain/testing')
+    const WS = wsId('ws-legacy-claim')
+    const seed = await FileStore.open({ dataDir: dir, fsync: false })
+    await seed.insertWorkspace({ id: WS, name: '老工作区', createdAt: now, updatedAt: now } as never)
+    for (const [id, name, kind] of [
+      ['legacy-drafter', '沉淀起草者（内置）', 'drafter'],
+      ['legacy-tidy', '记忆整理者（内置）', 'memory-tidy'],
+      ['legacy-maker', '智能体生成者（内置）', 'agent-maker'],
+      ['legacy-wf', '编排生成者（内置）', 'workflow-maker'],
+    ] as const) {
+      await seed.insertAgent({
+        id,
+        workspaceId: WS,
+        name,
+        instructions: '旧身份',
+        memoryEnabled: false,
+        model: null,
+        runtimeKey: 'default',
+        workDir: null,
+        skillIds: [],
+        env: {},
+        reviewStandard: null,
+        builtin: true,
+        builtinKind: kind,
+        createdAt: now,
+        updatedAt: now,
+      } as never)
+    }
+    await seed.close()
+
+    const d = await startDaemon({
+      dataDir: dir,
+      port: 0,
+      fsync: false,
+      backend: {
+        key: 'claude',
+        protocol: 'stream-json',
+        rejectDetectable: true,
+        async probe() {
+          return { available: false, command: 'claude', cliVersion: null }
+        },
+        async execute() {
+          throw new Error('这个测试不该执行任何 run')
+        },
+      } as never,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    try {
+      const { agents, defaultAgentId } = await json<{
+        agents: AgentRow[]
+        defaultAgentId: string | null
+      }>(`${d.url}/api/agents`)
+
+      // ① 名字里的「（内置）」后缀全没了
+      assert.equal(
+        agents.some((a) => String(a.name).includes('（内置）')),
+        false,
+        `所有内置成员的名字都不该再带后缀（实际：${agents.map((a) => a.name).join('、')}）`,
+      )
+      // ② 四个老成员都认领进了槽位表（`slot` 来自表，不再靠老字段兜底）
+      for (const [name, slot] of [
+        ['沉淀起草者', 'drafter'],
+        ['记忆整理者', 'memory-tidy'],
+        ['智能体生成者', 'agent-maker'],
+        ['编排生成者', 'workflow-maker'],
+      ] as const) {
+        assert.equal(agents.find((a) => a.name === name)?.slot, slot, `${name} 的槽位`)
+      }
+      // ③ 新建的助手也在，而且默认就是它
+      const assistant = agents.find((a) => a.slot === 'assistant')
+      assert.ok(assistant, '老工作区也要补建内置助手')
+      assert.equal(defaultAgentId, assistant.id, '还没有默认 ⇒ 对账把它设成助手')
+    } finally {
+      await d.close()
+      await cleanup(dir)
+    }
+  })
+})
+
+/**
+ * ★ 2026-11（D162）：**默认智能体可以换成平台成员**（使用者："内置助手不能被设置默认呢"）。
+ *
+ * 界面那颗按钮原来被 `!readOnly` 挡着——而"设成默认"改的是**工作区设置**，不是这条
+ * 智能体本身，与它只读与否无关。接口层从来没有这条限制（只要求 chat + task），
+ * 所以这里钉住"接口放行"，界面侧的可见性由探针钉。
+ */
+describe('★ 平台成员（含内置助手）可以被设成默认', () => {
+  test('★★ 建一条自建执行者设为默认，再把它换回内置助手', async () => {
+    await withDaemon(async (url) => {
+      const assistant = (await agentsOf(url)).find((a) => a.slot === 'assistant')!
+      const mine = (await (
+        await fetch(`${url}/api/agents`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: '我的执行者', instructions: '' }),
+        })
+      ).json()) as AgentRow
+
+      const setDefault = (id: string) =>
+        fetch(`${url}/api/agents/default`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ agentId: id }),
+        })
+
+      assert.equal((await setDefault(mine.id)).status, 200)
+      assert.equal(
+        (await json<{ defaultAgentId: string | null }>(`${url}/api/agents`)).defaultAgentId,
+        mine.id,
+      )
+      // ★ 换回**平台成员**（只读的那条）——它同样合格（chat + task）
+      assert.equal((await setDefault(assistant.id)).status, 200)
+      assert.equal(
+        (await json<{ defaultAgentId: string | null }>(`${url}/api/agents`)).defaultAgentId,
+        assistant.id,
+        '内置助手可以被设回默认（只读与否与这件事无关）',
+      )
+    })
+  })
+})
