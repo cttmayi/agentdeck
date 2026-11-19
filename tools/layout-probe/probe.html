@@ -279,6 +279,22 @@
           return false
         }
 
+        /**
+         * ★ 2026-11（D147）：顶栏那一排动作里，**「新建平台成员」要在、而且要置灰**。
+         *
+         * 使用者 D145 拍板：「一期只允许用户造 `owner=user`，相关入口**显示但置灰**」。
+         * 这条判据要的是三件事：位置（顶栏那排）、状态（`disabled`）、以及**给得出原因**
+         * （`title` 非空）——只灰不说，读起来就是坏了。
+         */
+        facts['agents.pageActions'] = [...d().querySelectorAll('.topbar .page-actions button')].map(
+          (b) => ({
+            label: (text(b) ?? '').trim(),
+            primary: b.className.includes('primary'),
+            disabled: b.disabled === true,
+            title: (b.getAttribute('title') ?? '').trim(),
+          }),
+        )
+
         facts['agents.gotData'] = gotCards
         if (!gotCards) errors.push('智能体页等了 15 秒也没出现任何 .list-row-main（数据没到或列表没渲染）')
 
@@ -4838,7 +4854,10 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           // ★ 2026-10（D58）：主操作排在最前（它就是「新建任务」——侧栏那一项
           //   并进了这一页），顺序也钉住。
           ['#/tasks', '任务', ['新建任务', '列表', '看板', '刷新']],
-          ['#/agents', '智能体', ['新建智能体', '设置', '刷新']],
+          // ★ 2026-11（D147）：多了一颗**置灰的「新建平台成员」**（D145 拍板"相关入口
+          //   显示但置灰"）。它排在「新建智能体」之后——两者是"造一个"这个问题的两个
+          //   答案，摆一起才读得出"一个能点、一个不能"。
+          ['#/agents', '智能体', ['新建智能体', '新建平台成员', '设置', '刷新']],
           // ⚠️ 2026-11（D123）：工具页退场 ⇒ 这一轮换成**沉淀**页（它也有页面动作，
           //    而且"页名 + 这一页能做什么"的判据在它身上同样成立）。
           ['#/crystallize', '沉淀', ['新建沉淀', '设置']],

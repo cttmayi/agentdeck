@@ -362,6 +362,26 @@ export const agentsText = {
    *    `template.footVisible` 量得到）。所以这里只有三个入口名，没有第二句解释。
    */
   'agents.entriesLabel': { zh: '入口', en: 'Entry points' },
+  /*
+   * ★ 2026-11（D147）：顶栏那颗**置灰**的「新建平台成员」。
+   *   使用者 D145 拍板：「相关入口**显示但置灰**」——位置要摆出来（保证界面一致），
+   *   但要说明为什么造不了，否则它看起来就像坏了。
+   */
+  'agents.newPlatformMember': { zh: '新建平台成员', en: 'New platform member' },
+  'agents.newPlatformMemberTitle': {
+    zh: '平台成员由平台出厂播种（起草 / 整理记忆 / 生成智能体 / 生成编排各一条），不能在这里新建。用「新建智能体」造出来的是你自己的智能体。',
+    en: 'Platform members are seeded by the platform (drafter / memory tidy / agent maker / workflow maker). Use “New agent” to create your own.',
+  },
+  /*
+   * ★ 2026-11（D147）：**半内置**（`builtin: true` 但认不出是哪一条）的标记。
+   *   它按使用者自己的智能体处理（能改能删），所以要标出来——否则人看到一条带内置
+   *   记号、却不属于任何岗位的智能体，只会以为界面坏了。
+   */
+  'agents.halfBuiltinBadge': { zh: '配置损坏', en: 'Broken config' },
+  'agents.halfBuiltinTitle': {
+    zh: '这条记录带着「平台内置」标记，但认不出是哪一条平台成员（多半是手改过数据或老版本写坏的）。它按你自己的智能体处理：可以改，也可以删。',
+    en: 'This record is flagged as platform-builtin but matches no known platform member. Treat it as your own agent: editable and deletable.',
+  },
   'agents.entryChat': { zh: '对话', en: 'Chat' },
   'agents.entryTask': { zh: '任务', en: 'Tasks' },
   'agents.entryWorkflow': { zh: '编排', en: 'Workflows' },

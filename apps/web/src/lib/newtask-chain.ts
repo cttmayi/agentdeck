@@ -1,5 +1,5 @@
 import type { Agent } from './api.ts'
-import { hasEntry } from './members.ts'
+import { hasEntry, isPlatformMember } from './members.ts'
 
 /**
  * 新建任务页**唯一**要推导的那一件事：这条任务交给谁执行。
@@ -63,6 +63,6 @@ export function blockedAssignees(
   agents: readonly Agent[],
 ): Array<{ agentId: string; name: string; reason: string }> {
   return agents
-    .filter((a) => (a.owner === 'platform' || a.builtin === true) && !hasEntry(a, 'task'))
+    .filter((a) => isPlatformMember(a) && !hasEntry(a, 'task'))
     .map((a) => ({ agentId: a.id, name: a.name, reason: '平台成员，不接业务任务' }))
 }

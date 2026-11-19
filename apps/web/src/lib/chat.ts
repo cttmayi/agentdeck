@@ -1,7 +1,7 @@
 import { renderText, webText, type TextParams, type WebTextId } from '@agentdeck/i18n'
 import { currentLocale } from './locale.ts'
 import type { Agent, ChatTurnView, Skill } from './api.ts'
-import { hasEntry } from './members.ts'
+import { hasEntry, isPlatformMember } from './members.ts'
 
 /**
  * 聊天页的纯逻辑。
@@ -126,7 +126,7 @@ export function blockedChatExecutors(
   agents: readonly Agent[],
 ): Array<{ agentId: string; name: string; reason: string }> {
   return agents
-    .filter((a) => (a.owner === 'platform' || a.builtin === true) && !hasEntry(a, 'chat'))
+    .filter((a) => isPlatformMember(a) && !hasEntry(a, 'chat'))
     .map((a) => ({ agentId: a.id, name: a.name, reason: '平台成员，不参与对话' }))
 }
 

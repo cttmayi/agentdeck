@@ -18,6 +18,7 @@
 import ListRow from '../components/ListRow.svelte'
   import AgentDetail from '../components/AgentDetail.svelte'
   import type { Agent } from '../lib/api.ts'
+  import { hasEntry, isHalfBuiltinAgent, isPlatformMember } from '../lib/members.ts'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { t } from '../lib/i18n.ts'
   import { listGrip } from '../lib/list-grip.ts'
@@ -133,8 +134,14 @@ import ListRow from '../components/ListRow.svelte'
    * ⚠️ 判据是 `builtin === true`（协议字段），**不是名字**：名字使用者能改（起草者可以改名），
    *    而内置标记是平台写的。
    */
-  $: builtinAgents = visibleAgents.filter((a) => a.builtin === true)
-  $: ownAgents = visibleAgents.filter((a) => a.builtin !== true)
+  /*
+   * ★ 2026-11（D147）：判据从 `builtin === true` 换成 `isPlatformMember()`（= 读 `owner`）。
+   *   两者的差别在**半内置**与已下线的 `skill-reviewer`：它们的 `builtin` 还是 `true`，
+   *   但服务端已经按 `owner: 'user'` 处理（能改、能删）——照旧按 `builtin` 归堆，会把
+   *   一条能删的智能体放进"内置（不能删）"那一组，两条界面说法互相矛盾。
+   */
+  $: builtinAgents = visibleAgents.filter((a) => isPlatformMember(a))
+  $: ownAgents = visibleAgents.filter((a) => !isPlatformMember(a))
   /**
    * 折叠状态：**内置默认收拢、自建默认展开**（使用者定的）。
    *
@@ -207,6 +214,26 @@ import ListRow from '../components/ListRow.svelte'
         settingsOpen = false
         selectedId = null
       },
+    },
+    /**
+     * ★ 2026-11（D147）：**置灰的「新建平台成员」**（设计稿 §7 画过、一期没做）。
+     *
+     * 使用者 D145 拍板：「一期只允许用户造 `owner=user`，相关入口**显示但置灰**」。
+     * 摆出来而不是藏起来，是因为"平台成员从哪来"这件事必须有个可见的答案——四个成员
+     * 已经在列表的「内置」组里，那么"能不能再加一个"就该在原地回答，而不是让使用者
+     * 去别处找。`title` 说明为什么（置灰而不说，读起来就是坏了）。
+     *
+     * ⚠️ `onActivate` 是空的**但按钮是 `disabled`**：不是"点了没反应"，浏览器根本不让点
+     *    ——这两种在界面上是不同的事实（`page-actions` 里 `disabled` 会真的传给 `<button>`）。
+     */
+    {
+      id: 'newPlatformMember',
+      label: $t('agents.newPlatformMember'),
+      kind: 'secondary',
+      icon: 'plus',
+      disabled: true,
+      title: $t('agents.newPlatformMemberTitle'),
+      onActivate: () => {},
     },
     {
       id: 'settings',
@@ -329,6 +356,18 @@ import ListRow from '../components/ListRow.svelte'
                 ⚠️ 这里原来有一个「未挂 skill」徽标，2026-10 删了：它写下的那句话
                    已经不是真的（审核者不挂 skill 也能审）。
               -->
+              <!--
+                ★ 2026-11（D147）：**半内置**（`builtin: true` 但认不出是哪一条）要在行上
+                   说出来。它按使用者自己的智能体处理（能改能删），所以它既不在「内置」
+                   那一组，也不该看起来和普通智能体一模一样。
+              -->
+              {#if isHalfBuiltinAgent(a)}
+                <span
+                  class="badge blocked"
+                  data-agent-half-builtin
+                  title={$t('agents.halfBuiltinTitle')}>{$t('agents.halfBuiltinBadge')}</span
+                >
+              {/if}
               {#if a.id === $effectiveDefaultAgentId}
                 <!-- 新建任务的默认选择是谁，必须在列表上看得见 -->
                 <span class="badge default-badge">{$t('agents.defaultBadge')}</span>
@@ -358,8 +397,13 @@ import ListRow from '../components/ListRow.svelte'
                 **没有「取消默认」**：必须有一个默认（使用者的要求）。
                 只对执行者给出这个动作——审核者不接任务（服务端也会拒）。
             -->
-            <!-- ⚠️ 2026-11（S4）：判据从 `role === 'executor'` 换成"不是内置岗位"。 -->
-            {#if a.builtinKind === undefined && a.id !== $effectiveDefaultAgentId}
+            <!--
+              ⚠️ 2026-11（S4）：判据从 `role === 'executor'` 换成"不是内置岗位"。
+              ★ 2026-11（D147）：再换成 **`entries` 里有 `task`**（D145 定的唯一判据）——
+                "能不能派活"和"能不能当默认"必须是同一句话，否则会出现"能设成默认、
+                却派不动活"的组合。服务端 `PUT /api/agents/default` 用的也是它。
+            -->
+            {#if hasEntry(a, 'task') && a.id !== $effectiveDefaultAgentId}
               <button
                 type="button"
                 class="btn btn--ghost btn--sm default-toggle"

@@ -28,6 +28,7 @@
     USER_ENTRY_LABEL_KEYS,
     agentEntries,
     hasAnyEntry,
+    isPlatformMember,
   } from '../lib/members.ts'
 
   /**
@@ -524,10 +525,20 @@
    * 而界面上原来把这些都画成**可编辑**：改了再点保存 ⇒ 400。那是本仓库最忌讳的一类——
    * 界面上看着能改、实际改不了。所以这里按事实把整张卡片切成只读态。
    */
-  $: readOnly = agent.builtin === true
-  /** retired 的内置审核者：没有默认值可恢复，但允许删（它已经不被任何链路使用）。 */
-  // ⚠️ 2026-11（S4）：判据从角色换成内置岗位（`skill-reviewer` 那条已下线）。
-  $: retiredBuiltin = readOnly && agent.builtinKind === 'skill-reviewer'
+  /**
+   * ★ 2026-11（D147）：只读态读 **`owner`**（D145 定的唯一判据），不再读 `agent.builtin`。
+   *
+   * 为什么必须改：`builtin` 与 `owner` 现在已经会分叉——**半内置**（`builtin: true` 但没有
+   * 认得出的岗位）与已下线的 `skill-reviewer` 都被判成 `owner: 'user'`（服务端允许改、允许删），
+   * 而界面照旧按 `builtin` 判 ⇒ 一行明明能删的智能体在这一页被锁成只读，
+   * **看着能改、实际改不了**，还有可能反过来（服务端拒、界面放行）。
+   */
+  $: readOnly = isPlatformMember(agent)
+  /**
+   * 已下线的内置审核者（`skill-reviewer`）：它现在是**普通智能体**（`owner: 'user'`，
+   * 能改能删），所以徽标只负责说清"它是那条已下线流程留下的"——不再代表只读。
+   */
+  $: retiredBuiltin = agent.builtinKind === 'skill-reviewer'
   /**
    * 草稿有没有改动（没改动时「保存」置灰——点了也不会有事发生，那是假按钮）。
    *
@@ -917,7 +928,7 @@
     {:else}
       <h2>
         <span class="agent-head-name" data-agent-head-name>{draft.name}</span>
-        {#if !agent.builtin}
+        {#if !readOnly && !retiredBuiltin}
           <!--
             ★ 分批第 273 批：内置 agent 不画岗位徽标（它的岗位在卡片「角色」那一格显示）。
             ⚠️ 2026-11（S4，D127）：用户建的 agent 现在**没有角色**——统一叫「智能体」，
@@ -925,7 +936,7 @@
           -->
           <span class="badge in_progress">{$t('agents.rolePlain')}</span>
         {/if}
-        {#if agent.builtin}
+        {#if readOnly || retiredBuiltin}
           <!--
             ★ 分批第 275 批（使用者："为什么起草者显示的是『平台内置：删不掉，只能「恢复成
               默认值」』"）：那**是一整句解释塞在徽标的位置上**。它写于 2026-10，那时这一页
@@ -1133,7 +1144,7 @@
 
 
 
-        <div class="cell skills-cell" class:locked={agent.builtin}>
+        <div class="cell skills-cell" class:locked={readOnly}>
           <span class="cell-label">{$t('agents.attachedSkillsLabel')}</span>
           <!-- ★ 2026-11（使用者："还是没放进去呢，还是2个框"）：**一个框**——
                共享技能与独有技能共用一个带边框的框（`.skill-box`），框内横线隔开。 -->
@@ -1148,7 +1159,7 @@
               现在**用同一个 `.skill-picker`**、同一套选项，只是勾选框 `disabled`：
               勾着的就是平台替它挂的。骨架对齐 + "它挂了什么"仍然一眼看得见。
           -->
-          {#if agent.builtin}
+          {#if readOnly}
             {#if pickableSkills.length > 0}
               <div class="skill-picker locked" data-skill-picker-locked>
                 {#each pickableSkills as s (s.id)}
@@ -1235,7 +1246,7 @@
                     {s.name}
                     {#if s.name !== s.slug}<code class="skill-slug">{s.slug}</code>{/if}
                   </span>
-                  {#if !agent.builtin}
+                  {#if !readOnly}
                     <span class="exclusive-actions">
                       <button
                         type="button"

@@ -485,6 +485,38 @@ const CHECKS = [
   },
   {
     view: '智能体',
+    key: 'agents.pageActions',
+    /**
+     * ★ 2026-11（D147）：顶栏那颗**置灰的「新建平台成员」**。
+     *
+     * 使用者 D145 拍板：「一期只允许用户造 `owner=user`，相关入口**显示但置灰**」。
+     * 三件事缺一不可：
+     *   ① 位置——它在**顶栏那排**（不是藏在某处菜单里，也不在左栏栏头）；
+     *   ② 状态——真的是 `disabled`（不是"点了没反应"那种假置灰）；
+     *   ③ 原因——`title` 非空（置灰而不说，读起来就是坏了）。
+     * 另钉：这一排**只有一颗 primary**（新建智能体），置灰那颗不许是 primary
+     * ——两颗 primary 就没有主次了。
+     */
+    label:
+      '★★ 智能体页顶栏有**置灰的「新建平台成员」**：位置在那一排、`disabled`、且带原因'
+      + '（`title` 非空）；同时这一排仍只有一颗 primary',
+    ok: (v) => {
+      if (!Array.isArray(v)) return false
+      const entry = v.find((b) => String(b?.label ?? '').includes('新建平台成员'))
+      if (!entry) return false
+      const primaries = v.filter((b) => b?.primary === true)
+      return (
+        entry.disabled === true &&
+        entry.primary !== true &&
+        String(entry.title ?? '').trim() !== '' &&
+        primaries.length === 1 &&
+        String(primaries[0]?.label ?? '') === '新建智能体'
+      )
+    },
+    show: (v) => (Array.isArray(v) ? JSON.stringify(v) : String(v)),
+  },
+  {
+    view: '智能体',
     key: 'agents.listGroups',
     /**
      * ★ 分批第 268 批（使用者："期待分组，将『内置』分成一直，其他分成组（取名你帮忙取一下）"）。
@@ -3540,7 +3572,11 @@ const CHECKS = [
       // ★ 2026-10（D58）：任务页多了一个主操作（建任务被并进这一页）——
       //   这里同时钉住它排在**最前**（主操作该在模式开关前面）。
       JSON.stringify(v['#/tasks']) === JSON.stringify(['新建任务', '列表', '看板', '刷新']) &&
-      JSON.stringify(v['#/agents']) === JSON.stringify(['新建智能体', '设置', '刷新']) &&
+      // ★ 2026-11（D147）：智能体页多了一颗**置灰的「新建平台成员」**。意图（"这排只属于
+      //   当前这一页"）没变，只是这一页真的多了一个入口——`agents.pageActions` 那条另外
+      //   钉住它必须 disabled + 带原因。
+      JSON.stringify(v['#/agents']) ===
+        JSON.stringify(['新建智能体', '新建平台成员', '设置', '刷新']) &&
       // ⚠️ 2026-11（S6）：沉淀页的页面动作长这样（新建沉淀 + 设置）——逐个写死，
       //    与"按钮跟着页换"这条判据同一个立场：不写成"数量 > 0"。
       JSON.stringify(v['#/crystallize']) === JSON.stringify(['新建沉淀', '设置']),
