@@ -330,14 +330,8 @@ const CHECKS = [
   {
     view: '智能体',
     key: 'agents.everyCardWellFormed',
-    label: '每张卡片都有名字、角色徽章、一行说明（摘要 + 元信息，2026-10 由两行合并）',
+    label: '每张卡片都有名字与一行说明（摘要 + 元信息；2026-11/D155 起不再画成员徽章）',
     ok: (v) => v === true,
-  },
-  {
-    view: '智能体',
-    key: 'agents.executorShowsReviewer',
-    label: '执行者卡片上"由谁审它"解析出了名字（不是"已不存在"）',
-    ok: (v) => typeof v === 'string' && v.length > 0 && !v.includes('已不存在'),
   },
   { view: '智能体', key: 'agents.initialClass', label: '未选中时布局不带 with-detail', ok: (v) => !String(v).includes('with-detail') },
   { view: '智能体', key: 'agents.initialListDisplay', label: '未选中时左栏可见', ok: (v) => v === 'flex' },
@@ -867,31 +861,13 @@ const CHECKS = [
     label: '夹具：内置起草者那一行在列表里（下面两条量的是它的角色徽标）',
     ok: (v) => v === true,
   },
-  {
-    view: '智能体',
-    key: 'agents.drafterRowBadge',
-    label:
-      '★★★ 内置起草者的徽标说「起草」而**不是「执行」**（2026-10 实修：列表原先只会说 执行/审核，加了两个内置角色后它们被标成执行者）',
-    ok: (v) => v === '起草',
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '智能体',
-    key: 'agents.memoryTidyRowBadge',
-    /**
-     * ★ 分批第 244 批：内置「记忆整理者」在「智能体」页列出来，徽标是「整理记忆」。
-     *
-     * 使用者原话：「要和沉淀技能一样，也有一个智能体显示在智能体页面列表中，方便我查看其 prompt」。
-     * 这条量的是"它真的在那张列表上、而且说得清自己是谁"——徽标若还写「执行」，
-     * 就会有人去问"它为什么不接活"（而答案是它压根不是执行者）。
-     */
-    label:
-      '★★★ 内置「记忆整理者」出现在智能体列表里，徽标说「整理记忆」而不是「执行」' +
-      '（它是「整理成记忆」那条分析 run 的作者，prompt 在这一页能看能改）',
-    ok: (v, facts) => facts['agents.memoryTidyRowFound'] === true && v === '整理记忆',
-    show: (v, facts) =>
-      `在列表里 ${String(facts['agents.memoryTidyRowFound'])}　徽标 ${JSON.stringify(v)}`,
-  },
+  /*
+   * ⚠️ 2026-11（D155）：这里原来有两条判据——"起草者的徽标说「起草」而不是「执行」"与
+   *   "记忆整理者的徽标说「整理记忆」"。**列表行不再画成员徽标**（使用者："智能体的徽标
+   *   就不显示了吧，都是智能体"），所以那两条随界面一起删：判据守的是界面事实，界面
+   *   没有这件事了，判据就该跟着走（留在那里只会挡着下一次改动）。
+   *   "它在那张列表上"这件事仍由 `agents.drafterRowFound` / `agents.memoryTidyRowFound` 守着。
+   */
   {
     view: '智能体',
     key: 'agents.runtimeOptionDuplicates',
@@ -4009,16 +3985,17 @@ const CHECKS = [
     view: '行内细节（D65）',
     key: 'rowdetail.chip',
     label:
-      '★ 徽标同一形状：任务阶段标签与智能体角色徽标都是胶囊（`--radius-pill`；原来任务描边方角 r4px）',
+      '★ 徽标同一形状：任务阶段标签与编排「来源」徽标都是胶囊（`--radius-pill`；原来任务描边方角 r4px）' +
+      '。⚠️ 2026-11（D155）：**智能体那一腿删了**——列表行不再画成员徽标（"都是智能体"），' +
+      '那一页已经没有可比的东西；判据从"三页一样"收成"这两页一样"',
     // 299 批：`100px`/`999px` 都收敛成 `--radius-pill`（999px）——探针认的是
     // "两边一样且都是胶囊"，不是那个历史字面量。
     // ★ D136：编排页的「来源」徽标也要同一个形状（采样扩到五页之后一并量）
     ok: (v) =>
       !!v &&
-      v.tasks === v.agents &&
-      v.workflows === v.agents &&
+      v.tasks === v.workflows &&
       (v.tasks === '999px' || v.tasks === '100px'),
-    show: (v) => ['tasks', 'agents', 'workflows'].map((k) => `${k}: ${v?.[k]}`).join('　'),
+    show: (v) => ['tasks', 'workflows'].map((k) => `${k}: ${v?.[k]}`).join('　'),
   },
   {
     view: '行内细节（D65）',

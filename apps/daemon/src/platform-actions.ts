@@ -11,7 +11,6 @@
  *   |---|---|---|
  *   | `skill-draft`     | 沉淀起草者   | 沉淀页「开始起草」           |
  *   | `memory-tidy`     | 记忆整理者   | 聊天页「整理记忆」           |
- *   | `agent-draft`     | 智能体生成者 | 聊天里让它写岗位卡           |
  *   | `agent-commit`    | 智能体生成者 | 聊天页「确认生成智能体」     |
  *   | `workflow-commit` | 编排生成者   | 聊天页「确认采纳编排」       |
  *
@@ -72,8 +71,9 @@ export const DRAFT_ARTIFACT_DIR = 'skill'
  * 一个平台动作。
  *
  * ⚠️ **一个动作只有一个执行者**。同一件事认两个成员，就会出现"到底是谁写的"
- *    说不清、以及两边的技能/指令慢慢分叉（`agent-draft` 与 `agent-commit` 分开
- *    写两行，是因为它们确实是两个动作：前者产卡、后者落库）。
+ *    说不清、以及两边的技能/指令慢慢分叉。（曾经 `agent-draft` 与 `agent-commit`
+ *    分开两行，认为"产卡"与"落库"是两个动作——但前者**从未产出过任何 run**，见下面
+ *    `agent-commit` 上面那段注释。）
  */
 export type PlatformAction = {
   /** = run 的 `subject.type`（有 run 的动作）或采纳路由名（纯采纳的动作）。 */
@@ -112,7 +112,6 @@ export type PlatformAction = {
 export type PlatformActionId =
   | 'skill-draft'
   | 'memory-tidy'
-  | 'agent-draft'
   | 'agent-commit'
   | 'workflow-commit'
 
@@ -158,18 +157,17 @@ export const PLATFORM_ACTIONS: readonly PlatformAction[] = [
       ],
     },
   },
-  {
-    id: 'agent-draft',
-    member: 'agent-maker',
-    startFrom: { page: 'chat', where: '聊天里让它写岗位卡' },
-    material: [],
-    produce: { dir: AGENT_DRAFT_DIR, file: AGENT_DRAFT_FILE },
-    adopt: {
-      // 产卡这一步本身没有采纳接口——采纳是下面那一行 `agent-commit`。
-      route: null,
-      steps: [],
-    },
-  },
+  /*
+   * ⚠️ 2026-11（D155）：这里原来有一行 `agent-draft`（"智能体生成者写岗位卡的那条 run"）。
+   *   **它是死接口**：`SubjectRef` 枚举里有它、`workdir.ts` 给它留了目录名映射，
+   *   但**没有任何代码产出这种 run**——生成者的"写岗位卡"发生在一条**普通聊天 run** 里
+   *   （`subject.type = 'conversation'`），产物靠读磁盘上的 `agent-draft/agent-draft.md`。
+   *   留着它的唯一后果是：注册表给「智能体生成者」多派了一条 `action:agent-draft` 入口，
+   *   于是它身上显示**两个**平台动作徽标（「写岗位卡」+「确认生成智能体」），
+   *   而「编排生成者」只有一个——使用者一句"为什么有 2 个平台动作？"就把这处不一致问了出来。
+   *   删掉之后两个生成者都是**一个**动作（各自的"采纳"那一半），语义也对了：
+   *   **起草发生在聊天里，不是一条独立的平台动作。**
+   */
   {
     id: 'agent-commit',
     member: 'agent-maker',

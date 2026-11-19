@@ -61,16 +61,14 @@ export const USER_ENTRY_LABEL_KEYS: Record<
  *    同时在这里加一行文案——少加一处就是类型错误（不会静默显示成空徽标）。
  */
 export const ACTION_ENTRY_LABEL_KEYS: Record<
-  'skill-draft' | 'memory-tidy' | 'agent-draft' | 'agent-commit' | 'workflow-commit',
+  'skill-draft' | 'memory-tidy' | 'agent-commit' | 'workflow-commit',
   | 'agents.actionSkillDraft'
   | 'agents.actionMemoryTidy'
-  | 'agents.actionAgentDraft'
   | 'agents.actionAgentCommit'
   | 'agents.actionWorkflowCommit'
 > = {
   'skill-draft': 'agents.actionSkillDraft',
   'memory-tidy': 'agents.actionMemoryTidy',
-  'agent-draft': 'agents.actionAgentDraft',
   'agent-commit': 'agents.actionAgentCommit',
   'workflow-commit': 'agents.actionWorkflowCommit',
 }

@@ -85,11 +85,16 @@ describe('接入点 entries：谁能叫它（多选）', () => {
     assert.equal(canBeReferencedByWorkflow(drafter), false, '平台成员默认不进编排候选')
     assert.equal(canBeCalledByAction(drafter, 'skill-draft'), true)
 
-    // ★ 多选的最小证据：生成者**既是聊天入口**，又有两个动作
+    /*
+     * 多选的最小证据：生成者**既是聊天入口**，又有一个动作。
+     * ⚠️ 2026-11（D155）：原来这里还断言 `action:agent-draft`——那是**死接口**（没有任何
+     *   代码产出 `agent-draft` 这种 run，"写岗位卡"发生在普通聊天 run 里），已删。
+     *   于是两个生成者都只有**一个**动作（各自的"采纳"）。
+     */
     const maker = member({ name: 'm', builtin: true, builtinKind: 'agent-maker' })
     assert.equal(canChat(maker), true)
-    assert.equal(canBeCalledByAction(maker, 'agent-draft'), true)
     assert.equal(canBeCalledByAction(maker, 'agent-commit'), true)
+    assert.deepEqual(entriesOf(maker), ['chat', 'action:agent-commit'])
     assert.equal(canBeDispatched(maker), false)
   })
 

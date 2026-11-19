@@ -388,9 +388,10 @@
             ) ?? null
           const drafterRow = rowOf('起草者')
           facts['agents.drafterRowFound'] = !!drafterRow
-          facts['agents.drafterRowBadge'] = drafterRow
-            ? (drafterRow.querySelector('.badge')?.textContent ?? '').trim()
-            : null
+          /*
+           * ⚠️ 2026-11（D155）：这里原来还量"起草者那一行的**徽标**写着「起草」"。
+           *   列表行不再画成员徽标（使用者："都是智能体"）⇒ 那个事实与它的判据一起删。
+           */
           // ★ 分批第 137 批：内置 skill 审核者已下线（沉淀线不再评审）⇒ 启动时只播种起草者。
           //   "那一行在不在 / 徽标说什么"的测量连同内置审核者一起删除（功能没了，判据也该没了）。
           facts['agents.skillAuditorRowFound'] = null
@@ -402,9 +403,7 @@
            */
           const tidyRow = rowOf('记忆整理者')
           facts['agents.memoryTidyRowFound'] = !!tidyRow
-          facts['agents.memoryTidyRowBadge'] = tidyRow
-            ? (tidyRow.querySelector('.badge')?.textContent ?? '').trim()
-            : null
+          // ⚠️ 2026-11（D155）：同上，徽标不画了 ⇒ 只量"那一行在不在"。
         }
         // 每张卡都要有：名字、角色徽章、一行说明（指令摘要 + 关系/技能/runtime 两部分）
         // ★ 2026-10（紧凑性）：原先是**两行**说明（`.agent-note` × 2，各占一行），
@@ -414,14 +413,16 @@
           cards().every(
             (c) =>
               !!c.querySelector('strong') &&
-              !!c.querySelector('.badge') &&
+              // ★ 2026-11（D155）：行上不再画成员徽标（"都是智能体"）⇒ 不再要求 .badge
               !!c.querySelector('.agent-notes-trunc') &&
               !!c.querySelector('.agent-notes-meta'),
           )
-        facts['agents.executorShowsReviewer'] = need('执行者卡片上的审核者', () => {
-          const exec = cards().find((c) => c.textContent.includes('执行'))
-          return exec ? text(exec.querySelector('.agent-notes-meta')) : null
-        })
+        /*
+         * ⚠️ 2026-11（D155）：这里原来量"执行者卡片上的元信息里，'由谁审它'解析出了名字"。
+         *   两个前提都已经不成立：① **审核者这条概念在 D127 就退场了**（元信息里没有它了）；
+         *   ② 列表行不再画成员徽标（原来靠它找"执行者那张卡"）。
+         *   整条事实与判据一起删——留着只会量到一个恒为 null 的东西。
+         */
 
         const layout = () => d().querySelector('.split-layout')
         const main = () => d().querySelector('main.main')
@@ -4779,9 +4780,17 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
 
         // ⚠️ 第二个执行者是**夹具**（run.mjs 在启动 Chrome 之前造的，见那边的注释：
         //    不能在探针里造，虚拟时间会让"等界面刷新"看早）。
-        facts['defaultAgent.executorCount'] = [...d().querySelectorAll('.agent-row')].filter(
-          (row) => row.querySelector('.badge.in_progress'),
-        ).length
+        /*
+         * ⚠️ 2026-11（D155）：原来靠"行里有 `.badge.in_progress`"数执行者——**列表行不再画
+         *   成员徽标**了（使用者："都是智能体"），于是它恒为 0。
+         *   这是个**夹具前置条件**（"至少有两个执行者才测得了换默认"），不是界面断言 ⇒
+         *   直接问接口：`entries` 里有 `task` 的条数。
+         */
+        facts['defaultAgent.executorCount'] = await (async () => {
+          const res = await f.contentWindow.fetch('/api/agents').then((r) => r.json())
+          const list = res.agents ?? []
+          return list.filter((a) => (a.entries ?? []).includes('task')).length
+        })()
 
         facts['defaultAgent.badgeCount'] = d().querySelectorAll('.agent-list .default-badge').length
         facts['defaultAgent.noCancelButton'] = cancelBtns().length === 0

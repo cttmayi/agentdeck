@@ -38,9 +38,12 @@ export const agentsText = {
    *   只读的就锁住）。只读控件右上角那枚小字与其余只读文案都从这里来。
    */
   'agents.lockReadOnly': { zh: '只读', en: 'read-only' },
-  /* ⚠️ 2026-11（D153）：「类型 / 岗位」那一格删掉之后，它专用的五条词条
-       （`roleLabel` / `roleFixed` / `roleFixedHint` / `roleDesc*` / `rolePlainHint`）
-       一并删了——留着就是给不存在的界面写文案。 */
+  /* ⚠️ 2026-11（D153：「类型 / 岗位」那一格删掉）＋ D155（列表行的成员徽标删掉）：
+       这两处界面没了之后，它们专用的词条一并删了——`roleLabel` / `roleFixed` /
+       `roleFixedHint` / `roleDesc*` / `rolePlainHint`（D153）与 `roleDrafter` /
+       `roleMemoryTidy` / `roleAgentMaker` / `roleSkillReviewer` / `rolePlain`（D155）。
+       留着就是给不存在的界面写文案；"这条是哪一条出厂成员"现在由**名字**（带「（内置）」）
+       与详情页的「入口 / 平台动作」说。 */
   /** 只读态的写入口：输入框里那句占位说明它不是坏了，是不能写。 */
   'agents.memoryAddLocked': { zh: '内置智能体不能手写记忆（由平台维护）', en: 'Built-in agents take no hand-written memories' },
   'agents.saveTitle': { zh: '保存改动（记忆也在这里一起提交）', en: 'Save changes (memory is submitted here too)' },
@@ -61,11 +64,9 @@ export const agentsText = {
    * ⚠️ 2026-11（S4，D127）：`agents.roleExecutor`（执行）/ `agents.roleReviewer`（审核）
    *   随**角色退场**删——用户建的 agent 不再分执行与审核，统一叫「智能体」。
    */
-  'agents.rolePlain': { zh: '智能体', en: 'Agent' },
   // ★ 2026-10（D81/D82）：内置的起草者 / 沉淀审核者……列表徽标要能说出它们是谁。
   //   ⚠️ 少了这两条，列表上它们会显示成「执行」——一个**永远不会接任务**的 agent
   //   被标成执行者，使用者会去问"它为什么不干活"。
-  'agents.roleDrafter': { zh: '起草', en: 'Draft' },
   // ★ 分批第 191 批删掉五条词条：`agents.restoreInstructions` / `…Title` / `…Body` /
   //   `…None` / `…Done`（「恢复上一版指令」随「沉淀成 Agent」一起下线——快照的唯一写入方
   //   是那条入库路径，功能删掉后它就成了死接口。使用者 2026-11 定：整条删掉）。
@@ -80,14 +81,11 @@ export const agentsText = {
    * 统一成「沉淀审核」——与 `settings.reviewerScriptRun` 那个开关一致。
    * 判据见 `tests/i18n-terms.test.ts`（术语一致检查）。
    */
-  'agents.roleSkillReviewer': { zh: '沉淀审核', en: 'Audit drafts' },
   // ★ 分批第 244 批：内置「记忆整理者」（「整理成记忆」那条分析 run）。
   //   同样必须有自己的词——否则列表上它被标成「执行」，而那是一条永远不接活的 agent。
-  'agents.roleMemoryTidy': { zh: '整理记忆', en: 'Tidy memory' },
   // ★ 2026-11 设计定稿：内置「智能体生成者」（聊天里问岗位、出岗位卡的那一条）。
   //   同样必须有自己的词——它是唯一**能聊天**的内置角色，标成「执行」会让人以为
   //   它接任务干活（它只问只写不干活）。
-  'agents.roleAgentMaker': { zh: '生成智能体', en: 'Agent maker' },
   /*
    * ⚠️ 2026-11（S4，D127）：`agents.roleExecutorHint` / `roleReviewerHint` /
    *   `roleReviewerHintShort` 三条（角色选择器两张卡的副说明）随角色退场删。
@@ -431,7 +429,6 @@ export const agentsText = {
   'agents.entriesActionsLabel': { zh: '平台动作', en: 'Platform actions' },
   'agents.actionSkillDraft': { zh: '起草技能', en: 'Draft a skill' },
   'agents.actionMemoryTidy': { zh: '整理记忆', en: 'Tidy memory' },
-  'agents.actionAgentDraft': { zh: '写岗位卡', en: 'Write a job card' },
   'agents.actionAgentCommit': { zh: '确认生成智能体', en: 'Confirm new agent' },
   'agents.actionWorkflowCommit': { zh: '确认采纳编排', en: 'Confirm workflow' },
   'agents.entryTask': { zh: '任务', en: 'Tasks' },

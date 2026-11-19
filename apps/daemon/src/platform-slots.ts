@@ -160,6 +160,38 @@ export function releaseSlot(table: SlotTable, agentId: string): PlatformSlot | n
 }
 
 /**
+ * ★ 2026-11（D155）：把**平台成员的接入点对齐到注册表**（平台声明，不是使用者配置）。
+ *
+ * 为什么需要：`entries` 在数据里存了一份，而它其实是**注册表派生的**（哪条动作归谁）。
+ * 注册表一变（比如删掉死接口 `agent-draft`），老记录里那一份就过期了——界面会继续显示
+ * 一条"没人认的动作"徽标，而新记录没有，同一页两种样子。
+ *
+ * ⚠️ 只动**平台成员**（槽位表里那些）；用户智能体的 `entries` 是使用者勾的，一个字都不碰。
+ *
+ * 返回被对齐的名字（给启动日志用；没变就是空数组）。
+ */
+export async function alignMemberEntries(
+  store: Store,
+  workspaceId: WorkspaceId,
+  table: SlotTable,
+  expected: (slot: PlatformSlot) => readonly string[],
+): Promise<string[]> {
+  const changed: string[] = []
+  for (const slot of PLATFORM_SLOTS) {
+    const agentId = table[slot]
+    if (agentId === undefined) continue
+    const agent = await store.getAgent(agentId as Agent['id'])
+    if (agent === null || ownerOf(agent) !== 'platform') continue
+    const want = [...expected(slot)]
+    const have = Array.isArray(agent.entries) ? agent.entries : []
+    if (want.length === have.length && want.every((e, i) => e === have[i])) continue
+    await store.insertAgent({ ...agent, entries: want, updatedAt: Date.now() })
+    changed.push(agent.name as string)
+  }
+  return changed
+}
+
+/**
  * 取一个槽位现在的记录（表 + 老字段兜底，见 `resolveSlot`）。
  *
  * ⚠️ 这是**异步**的（要读工作区与 agent），与老的那个同步 `findBuiltinAgent(agents, kind)`

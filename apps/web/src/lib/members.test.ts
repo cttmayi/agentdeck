@@ -105,19 +105,28 @@ describe('★ 平台动作接入点：显示出来，且认不出的也照样显
   test('服务端给的 entries 里 action 那些按原顺序出来，各带一条文案键', () => {
     const maker = agent({
       owner: 'platform',
-      entries: ['chat', 'action:agent-draft', 'action:agent-commit'],
+      entries: ['chat', 'action:agent-commit', 'action:workflow-commit'],
     })
     const rows = actionEntriesOf(maker)
     assert.deepEqual(
       rows.map((r) => r.id),
-      ['agent-draft', 'agent-commit'],
+      ['agent-commit', 'workflow-commit'],
       '只挑 action: 那几条，顺序照服务端给的',
     )
-    assert.deepEqual(
-      rows.map((r) => r.labelKey),
-      ['agents.actionAgentDraft', 'agents.actionAgentCommit'],
-    )
-    assert.equal(rows[0]!.raw, 'action:agent-draft', '原始值要留着（界面挂在 title 上）')
+    assert.deepEqual(rows.map((r) => r.labelKey), [
+      'agents.actionAgentCommit',
+      'agents.actionWorkflowCommit',
+    ])
+    assert.equal(rows[0]!.raw, 'action:agent-commit', '原始值要留着（界面挂在 title 上）')
+  })
+
+  test('★ 已删除的动作（D155 的 agent-draft）在老记录里仍能读出来——回退显示机器名', () => {
+    // 老记录里可能还带着它（那是删之前的迁移写的）。文案表删了，界面显示原始值，
+    // 而不是让徽标凭空消失（"它被什么叫着"这件事不该因为界面没跟上就看不见）。
+    const legacy = agent({ owner: 'platform', entries: ['action:agent-draft'] })
+    const rows = actionEntriesOf(legacy)
+    assert.deepEqual(rows.map((r) => r.id), ['agent-draft'])
+    assert.equal(rows[0]!.labelKey, '')
   })
 
   test('★ 认不出的 action id 也照样列出来（文案键为空 ⇒ 界面显示机器名，而不是消失）', () => {

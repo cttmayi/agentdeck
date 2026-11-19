@@ -135,6 +135,46 @@ describe('★★ 真跑一遍：内置成员齐了、owner/entries 写进了数�
     })
   })
 
+  /**
+   * ★★ 2026-11（D155）：**平台成员的接入点跟着注册表走**。
+   *
+   * 由来：`agent-draft` 是一个死接口（没有任何代码产出那种 run），删掉之后注册表变了，
+   * 而老记录里的 `entries` 还留着 `action:agent-draft`——不修的话界面上老成员多一枚
+   * "没人认的动作"徽标、新成员没有，同一页两种样子。
+   *
+   * 判据两半：**平台成员被对齐**，而**用户智能体的 entries 一个字都不动**（那是使用者勾的）。
+   */
+  test('★★ 启动对账把平台成员的 entries 对齐注册表；用户的 entries 不碰', async () => {
+    await withStore(async (store) => {
+      await reconcileStartup({ store, workspaceId: WS, workflows: [], info: () => {}, warn: () => {} })
+      const maker = (await store.listAgents(WS)).find((a) => a.name === '智能体生成者（内置）')!
+      // 造一份"过期"的接入点（老版本写进去的，含已删除的 agent-draft）
+      await store.insertAgent({ ...maker, entries: ['chat', 'action:agent-draft', 'action:agent-commit'] })
+      // 用户智能体：他自己勾的，绝不能被"对齐"掉
+      const mine = {
+        ...maker,
+        id: 'mine-1' as typeof maker.id,
+        name: '我的智能体',
+        owner: 'user' as const,
+        entries: ['chat'],
+      }
+      await store.insertAgent(mine)
+
+      await reconcileStartup({ store, workspaceId: WS, workflows: [], info: () => {}, warn: () => {} })
+      const after = await store.listAgents(WS)
+      assert.deepEqual(
+        after.find((a) => a.id === maker.id)!.entries,
+        ['chat', 'action:agent-commit'],
+        '平台成员的接入点要对齐注册表（agent-draft 已经删了）',
+      )
+      assert.deepEqual(
+        after.find((a) => a.id === mine.id)!.entries,
+        ['chat'],
+        '用户智能体的接入点是使用者勾的，一个字都不许动',
+      )
+    })
+  })
+
   test('★ 编排引用了平台成员时要**点名**（只报不改）', async () => {
     await withStore(async (store) => {
       const warnings: string[] = []

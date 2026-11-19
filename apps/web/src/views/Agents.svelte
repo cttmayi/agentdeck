@@ -105,22 +105,13 @@ import ListRow from '../components/ListRow.svelte'
    *    统一叫「智能体」；只有平台内置的那几种按岗位显示（起草 / 记忆整理 / 生成智能体 /
    *    沉淀审核）。徽标配色也不再分"审核中 / 进行中"——那是流程状态，不是身份。
    */
-  /**
-   * ★ 2026-11（D154）：读 **`slot`**（服务端按槽位表算好的）——记录上不再有 `builtinKind`。
-   *   这是**显示**用的（"这是哪一条出厂成员"），不参与任何能力判断。
-   *   `skill-reviewer` 那一支留着：老记录里还有它（已下线，归用户）。
+  /*
+   * ★ 2026-11（D155）：这里原来有两个函数（`roleLabelOf` / `roleBadgeOf`）给每行画一枚
+   *   "这条是哪一条出厂成员"的徽标。使用者："智能体的徽标就不显示了吧，都是智能体"——
+   *   在列表里它什么都多余：**它们都是智能体**，而"是哪一条出厂成员"名字里就有
+   *   （`沉淀起草者（内置）`），要看细节有详情页的「入口」与平台动作徽标。
+   *   判据（探针那两条"起草者的徽标说「起草」而不是「执行」"）随之删掉——意图本身没了。
    */
-  function roleLabelOf(a: Agent): string {
-    if (a.slot === 'drafter') return $t('agents.roleDrafter')
-    if (a.slot === 'memory-tidy') return $t('agents.roleMemoryTidy')
-    if (a.slot === 'agent-maker') return $t('agents.roleAgentMaker')
-    if (a.builtinKind === 'skill-reviewer') return $t('agents.roleSkillReviewer')
-    return $t('agents.rolePlain')
-  }
-  function roleBadgeOf(a: Agent): string {
-    // 平台成员（有槽位）用 in_review，用户自建的用 in_progress（纯配色，不是判据）
-    return a.slot === undefined || a.slot === null ? 'in_progress' : 'in_review'
-  }
 
   $: visibleAgents = $agents.filter((a) => {
     if (!filter.trim()) return true
@@ -357,7 +348,8 @@ import ListRow from '../components/ListRow.svelte'
           {#snippet children()}
             <span class="agent-line">
               <strong>{a.name}</strong>
-              <span class="badge {roleBadgeOf(a)}">{roleLabelOf(a)}</span>
+              <!-- ★ 2026-11（D155）：这里原来有一枚"是哪一条出厂成员"的徽标，删了
+                   （使用者："都是智能体"；名字里已经写着是哪一条）。 -->
               <!--
                 ⚠️ 这里原来有一个「未挂 skill」徽标，2026-10 删了：它写下的那句话
                    已经不是真的（审核者不挂 skill 也能审）。

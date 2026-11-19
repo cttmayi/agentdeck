@@ -995,14 +995,12 @@
     {:else}
       <h2>
         <span class="agent-head-name" data-agent-head-name>{draft.name}</span>
-        {#if !readOnly && !retiredBuiltin}
-          <!--
-            ★ 分批第 273 批：内置 agent 不画岗位徽标（它的岗位在卡片「角色」那一格显示）。
-            ⚠️ 2026-11（S4，D127）：用户建的 agent 现在**没有角色**——统一叫「智能体」，
-            不再分「执行 / 审核」。
-          -->
-          <span class="badge in_progress">{$t('agents.rolePlain')}</span>
-        {/if}
+        <!--
+          ⚠️ 2026-11（D155）：这里原来给自建的智能体挂一枚「智能体」徽标。使用者："智能体的
+          徽标就不显示了吧，**都是智能体**"——一枚人人都有的徽标不区分任何东西，纯噪点。
+          现在标题栏只在**平台成员**（与已下线的审核者）身上留一枚徽标，因为那一条确实需要
+          一个"它由平台维护"的记号。
+        -->
         {#if readOnly || retiredBuiltin}
           <!--
             ★ 分批第 275 批（使用者："为什么起草者显示的是『平台内置：删不掉，只能「恢复成

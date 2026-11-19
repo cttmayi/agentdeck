@@ -51,7 +51,8 @@ import {
   platformMemberRefsInWorkflows,
 } from './platform-member.ts'
 import { DRAFTER_SKILL_SLUG } from './builtin-drafter.ts'
-import { loadSlotTable, saveSlotTable, type SlotTable } from './platform-slots.ts'
+import { alignMemberEntries, loadSlotTable, saveSlotTable, type SlotTable } from './platform-slots.ts'
+import { PLATFORM_MEMBER_ENTRIES } from './platform-member.ts'
 
 /* ══════════════════════════════════════════════════════════════════
  * 内置成员对账结果的"日志行"（D144：逐项都要说得出来）
@@ -208,6 +209,21 @@ export async function reconcileStartup(deps: ReconcileDeps): Promise<ReconcileRe
       await saveSlotTable(store, workspaceId, table)
       slots = table
       builtin = ensured
+      /*
+       * ★ 2026-11（D155）：**把平台成员的接入点对齐到注册表**（平台声明的那一份）。
+       *   注册表一变（比如删掉死接口 `agent-draft`），老记录里存的 `entries` 就过期了——
+       *   不修的话同一页会出现"老成员多一枚没人认的动作徽标、新成员没有"。
+       *   ⚠️ 只动平台成员；用户智能体的 `entries` 是使用者勾的，不碰。
+       */
+      const realigned = await alignMemberEntries(
+        store,
+        workspaceId,
+        table,
+        (slot) => PLATFORM_MEMBER_ENTRIES[slot],
+      )
+      if (realigned.length > 0) {
+        info(`平台成员的接入点已对齐注册表：${realigned.join('、')}`)
+      }
       for (const [label, r, why] of builtinAccountingRows(ensured)) {
         if (r.action === 'created') {
           info(`已建立${label}（${why}，可在「智能体」页查看与编辑）`)

@@ -23,12 +23,16 @@ import { ensureBuiltinAgents } from './builtin-drafter.ts'
 
 const SERVER_SRC = new URL('./server.ts', import.meta.url)
 
-describe('★ 动作注册表：五行，id 唯一，执行者都是平台成员', () => {
-  test('五个动作都在，id 不重复', () => {
+describe('★ 动作注册表：四行，id 唯一，执行者都是平台成员', () => {
+  test('四个动作都在，id 不重复', () => {
+    /*
+     * ⚠️ 2026-11（D155）：原来是五个——`agent-draft` 删了（**死接口**：没有任何代码产出
+     *   那种 run；"写岗位卡"发生在普通聊天 run 里）。删掉它之后，两个生成者都只有
+     *   自己的"采纳"一个动作，与「编排生成者」一致。
+     */
     assert.deepEqual(PLATFORM_ACTION_IDS, [
       'skill-draft',
       'memory-tidy',
-      'agent-draft',
       'agent-commit',
       'workflow-commit',
     ])
