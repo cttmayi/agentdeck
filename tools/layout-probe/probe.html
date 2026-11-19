@@ -706,10 +706,39 @@
             hasSave: labels.some((l) => l.includes('保存')),
             hasCancel: labels.some((l) => l.includes('取消')),
             sameTrack,
+            /**
+             * ★★ 2026-11（D157）：**栏头里三块的位置**（这一条以前完全没量过）。
+             *
+             * `.detail-head` 是两列网格：标题 + 副题必须在**同一个格子**里上下两行，
+             * 动作在**右边**那一列、与文字块同一行。不包 `.detail-head-main` 的话，
+             * 副题会占掉动作那一格、动作掉到第二行左边——使用者一眼就看出来了：
+             * "「CLI：default · 记忆 0 条 · 0 个技能」的位置不对，放副标题的位置？"
+             */
+            layout: (() => {
+              const subEl = head.querySelector('[data-agent-head-sub]')
+              const actEl = head.querySelector('.detail-actions')
+              if (!h2 || !subEl || !actEl) return null
+              const rh = h2.getBoundingClientRect()
+              const rs = subEl.getBoundingClientRect()
+              const ra = actEl.getBoundingClientRect()
+              return {
+                // 副题与标题**左沿对齐**（同一个格子里）
+                subAligned: Math.abs(rs.left - rh.left) <= 2,
+                // 副题在标题**下方**
+                subBelow: rs.top >= rh.bottom - 2,
+                // 动作在**右边**那一列（标题块右边沿之后）
+                actRight: ra.left >= rh.right - 2,
+                // 动作与文字块**同一行**（垂直区间有交叠）
+                actSameRow: ra.top < rs.bottom && ra.bottom > rh.top,
+              }
+            })(),
             // 名字的第二个入口：卡片里那个输入框已经删了
             legacyNameInput: d().querySelector('#agent-name') !== null,
           }
         })()
+        // 单独发布一份给判据读（`agents.headBarLayout`）——判据一个 key 读一件事，
+        // 埋在上面那个大对象里的话它读不到（第一版就是这么红成"没量到这个值"的）。
+        facts['agents.headBarLayout'] = facts['agents.headBar']?.layout ?? null
 
         /**
          * ★ 分批第 273/274 批（使用者："这些内置智能体在我点击之后是不能修改的，那这些保存、删除

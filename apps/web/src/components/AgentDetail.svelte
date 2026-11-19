@@ -986,6 +986,16 @@
     <button type="button" class="btn btn--ghost btn--sm back-to-list" data-agent-back onclick={onclose}>
       {$t('agents.backToList')}
     </button>
+    <!--
+      ⚠️⚠️ 2026-11（D157）：**标题与副题必须包在同一个格子里**（`.detail-head-main`）。
+      `.detail-head` 是两列网格（`minmax(0,1fr) auto`）：不包的话它们是**三个并列的网格子项**
+      ⇒ 自动排布把 h2 放进第 1 行第 1 列、**副题（CLI / 记忆 / 技能数）落进第 1 行第 2 列**
+      （也就是动作那一格），而动作被挤到第 2 行左边。使用者一眼看出的就是这件事：
+      "「CLI：default · 记忆 0 条 · 0 个技能」的位置不对，放副标题的位置？"
+      `MainArea` 那半边在 D139 已经这么包了，这一页是**自己渲染栏头**（改名输入 / 只读态 /
+      脏态都在组件内部），所以漏了这一步。
+    -->
+    <div class="detail-head-main">
     {#if renaming}
       <input
         class="agent-rename-input"
@@ -1054,6 +1064,7 @@
         skills: String(draft.skillIds.length),
       })}
     </p>
+    </div>
     <div class="detail-actions">
       {#if readOnly}
         <!--
@@ -1879,7 +1890,8 @@
     min-width: 0;
   }
   .agent-rename-input {
-    grid-column: 1;
+    /* 它在 `.detail-head-main` 里（不再是网格的直接子项），`grid-column` 不再适用 */
+    display: block;
     font: inherit;
     font-size: var(--fs-lg);
     font-weight: 600;

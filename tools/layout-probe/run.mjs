@@ -395,6 +395,37 @@ const CHECKS = [
   { view: '智能体', key: 'agents.afterExitDetailDisplay', label: '★★ 窄屏下出口之后详情栏消失（否则使用者卡在一张表单里）', ok: (v) => v === 'none' },
   {
     view: '智能体',
+    key: 'agents.headBarLayout',
+    /**
+     * ★★★ 2026-11（D157）：**栏头三块的相对位置**——这一条以前完全没量过，
+     *   而它就藏着一个真的看得见的错。
+     *
+     * `.detail-head` 是两列网格（`minmax(0,1fr) auto`）。标题、副题、动作**必须是**：
+     *   · 标题与副题在**同一个格子**里（副题左沿对齐标题、且在标题下方）；
+     *   · 动作在**右边那一列**、与文字块**同一行**。
+     * 少包一层 `.detail-head-main` 会怎样：副题占掉第 1 行第 2 列（动作那一格），
+     * 动作被挤到第 2 行左边——使用者原话："「CLI：default · 记忆 0 条 · 0 个技能」
+     * 的位置不对，放副标题的位置？"
+     * `MainArea` 那半边 D139 已经包好了；智能体页**自己渲染栏头**，漏了。
+     */
+    label:
+      '★★★ 详情栏头三块的位置对：**副题与标题左沿对齐、在标题下方**（同一个格子），' +
+      '**动作在右列且与文字块同一行**——少包一层 `.detail-head-main` 就会让副题霸占动作那一格、' +
+      '动作掉到第二行左边',
+    ok: (v) =>
+      !!v &&
+      typeof v === 'object' &&
+      v.subAligned === true &&
+      v.subBelow === true &&
+      v.actRight === true &&
+      v.actSameRow === true,
+    show: (v) =>
+      v === null
+        ? 'null（栏头里少了标题/副题/动作之一）'
+        : `副题对齐 ${String(v.subAligned)}　在下方 ${String(v.subBelow)}　动作在右 ${String(v.actRight)}　同一行 ${String(v.actSameRow)}`,
+  },
+  {
+    view: '智能体',
     key: 'agents.detailHeadScroll',
     /**
      * ★★ 2026-11（D156）：**详情栏头不跟正文滚**（§2.6 表的"正文自己滚，栏头不跟着滚"）。
