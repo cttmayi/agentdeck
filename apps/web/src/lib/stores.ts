@@ -22,6 +22,7 @@ import {
 } from './api.ts'
 import type { SyncStatus } from './sync.ts'
 import { setLocaleFromIdentity } from './i18n.ts'
+import { hasEntry } from './members.ts'
 
 /**
  * 全局状态。
@@ -211,8 +212,13 @@ export const loadAgents = (): Promise<void> =>
  *     等下一次有人设默认时自然被覆盖。
  */
 export const effectiveDefaultAgentId = derived([agents, defaultAgentId], ([$agents, $id]) => {
-  // ⚠️ 2026-11（S4）：判据从"角色是执行者"换成"不是平台内置岗位"。
-  const executors = $agents.filter((a) => a.builtinKind === undefined)
+  /*
+   * ★ 2026-11（D152）：这里原来写 `a.builtinKind === undefined`（"不是内置岗位就当执行者"）
+   *   ——岗位字段兼职能力开关，D145 之后它该读的只有**接入点**。
+   *   "能不能当默认"与"能不能派活"必须是同一句话（服务端 `PUT /api/agents/default`
+   *   用的就是 `canBeDispatched`），否则会出现"设得了默认、派不动活"的组合。
+   */
+  const executors = $agents.filter((a) => hasEntry(a, 'task'))
   if ($id && executors.some((a) => a.id === $id)) return $id
   return executors[0]?.id ?? null
 })

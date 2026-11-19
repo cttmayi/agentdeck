@@ -7,6 +7,7 @@ import {
   TERMINAL_RUN_STATUSES,
   applyChoice,
   chatFilesState,
+  canChatAgent,
   executorChoices,
   isTurnRunning,
   skillsHeldBackByDaemon,
@@ -297,5 +298,68 @@ describe('记忆总开关：agentMemoryEnabled', () => {
 
   test('★★ 列表还没到（找不到这个 agent）⇒ **不拦**（首帧不该看起来像功能坏了）', () => {
     assert.equal(agentMemoryEnabled('a1', []), true)
+  })
+})
+
+/**
+ * ★ 2026-11（D152）：**「能不能当对话执行者」只有一处判据**。
+ *
+ * 之前有三处各自判：`executorChoices` 里那一段、`Chat.svelte` 的 `executors`、
+ * `skillsHeldBackByDaemon` 里的 `builtinKind === undefined`。三条判据今天**碰巧**
+ * 一致（平台成员默认没有 `chat`），但那是运气：只要某个成员的 `entries` 里出现
+ * `chat`（完全合法的数据），三处就会给出不同答案，而分叉的表现是
+ * "下拉里有它、点进去又说它不能聊"这种没法解释的组合。
+ */
+describe('★ 能聊天 = 接入点里有 chat（一处定义，三处都读它）', () => {
+  function withEntries(id: string, entries: string[], extra: Partial<Agent> = {}): Agent {
+    return { id, name: id, skillIds: [], ...extra, entries } as unknown as Agent
+  }
+
+  test('★★ 平台成员只要接入点里有 chat 就能聊——不再看岗位', () => {
+    // 起草者：平台成员，但**被给**了 chat 入口（数据里合法的形态）
+    const drafterWithChat = withEntries('d1', ['chat', 'action:skill-draft'], {
+      builtin: true,
+      builtinKind: 'drafter',
+      owner: 'platform',
+    })
+    assert.equal(canChatAgent(drafterWithChat), true, '判据是 entries，不是 builtinKind')
+    const out = executorChoices([drafterWithChat], [], null, true)
+    assert.equal(out.some((c) => c.value === 'agent:d1'), true, '下拉里要能选到它')
+  })
+
+  test('★ 用户建的智能体只要把 chat 去掉，就不能聊（能派活 ≠ 能聊天）', () => {
+    const taskOnly = withEntries('u1', ['task'], { owner: 'user' })
+    assert.equal(canChatAgent(taskOnly), false)
+    assert.equal(executorChoices([taskOnly], [], null, true).length, 0)
+  })
+
+  test('★ 老 daemon（没有 entries）按内置岗位名单兜底：生成者能聊，起草者不能', () => {
+    const maker = { id: 'm1', name: 'm1', skillIds: [], builtin: true, builtinKind: 'agent-maker' } as unknown as Agent
+    const drafter = { id: 'd1', name: 'd1', skillIds: [], builtin: true, builtinKind: 'drafter' } as unknown as Agent
+    const plain = { id: 'p1', name: 'p1', skillIds: [] } as unknown as Agent
+    assert.equal(canChatAgent(maker), true)
+    assert.equal(canChatAgent(drafter), false)
+    assert.equal(canChatAgent(plain), true, '用户建的一律能聊')
+  })
+
+  test('★★ skillsHeldBackByDaemon 用的是同一句判据（它原来自己写了一份）', () => {
+    // 这个 fixture 在上面那段 describe 里局部定义（作用域不同，这里自己造一份）
+    const skills: Skill[] = [
+      { id: 's1', slug: 'algorithmic-art', name: 'algorithmic-art' } as unknown as Skill,
+      { id: 's2', slug: 'skill-creator', name: 'skill-creator' } as unknown as Skill,
+    ]
+    // 平台成员 + chat 入口 = 执行者 ⇒ 没人挂的 skill 会被挡（旧 daemon 不支持对话带 skill）
+    const platformChat = withEntries('p1', ['chat'], { owner: 'platform', builtin: true })
+    assert.deepEqual(
+      skillsHeldBackByDaemon([platformChat], skills, false).map((s) => s.slug),
+      ['algorithmic-art', 'skill-creator'],
+      '它既然能聊，那"没人挂"的 skill 就都该按它的口径算（两条都没人挂）',
+    )
+    // 没有 chat 入口 ⇒ 一个执行者都没有 ⇒ 页面该说"先去建一个"，而不是"被挡住了"
+    const platformNoChat = withEntries('p2', ['action:skill-draft'], {
+      owner: 'platform',
+      builtin: true,
+    })
+    assert.deepEqual(skillsHeldBackByDaemon([platformNoChat], skills, false), [])
   })
 })

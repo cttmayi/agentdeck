@@ -25,6 +25,7 @@
   import {
     agentMemoryEnabled,
     applyChoice,
+    canChatAgent,
     chatFilesState,
     blockedChatExecutors,
     executorChoices,
@@ -330,7 +331,11 @@
    *   用户建的 agent 一律能聊天；内置的只有「智能体生成者」放行（那在
    *   `executorChoices` 里判，见下）。
    */
-  $: executors = $agents.filter((agent) => agent.builtinKind === undefined)
+  /*
+   * ★ 2026-11（D152）：判据从 `builtinKind === undefined` 换成 `canChatAgent()`
+   *   ——"能不能当对话执行者"现在只有一处定义（接入点里有没有 `chat`）。
+   */
+  $: executors = $agents.filter(canChatAgent)
   /**
    * 下拉的全部选项：执行者 + **每一条装着的 skill**。
    *

@@ -113,6 +113,26 @@ export type DraftPick = {
 export const CHAT_CAPABLE_BUILTIN_KINDS = ['agent-maker', 'workflow-maker'] as const
 
 /**
+ * ★ 2026-11（D152）：**能不能当对话执行者**——界面侧**唯一**的那句话。
+ *
+ * 判据是 `entries` 里有 `chat`（与 daemon 的 `canChat` 同一句）。老 daemon 不返回
+ * `entries` 时退回到"内置岗位名单"（`CHAT_CAPABLE_BUILTIN_KINDS`）——否则升级当天
+ * 所有平台成员都会从下拉里消失。
+ *
+ * ⚠️ 为什么必须只有这一处：原来有三处各自判"能聊天"——`executorChoices` 里那段
+ *    表达式、`Chat.svelte` 的 `executors`、`skillsHeldBackByDaemon` 里那句
+ *    `builtinKind === undefined`。三条判据今天**碰巧**一致（平台成员默认没有 chat），
+ *    但只要有一条成员的 `entries` 里出现 `chat`（允许的数据形态），那三处就会分叉，
+ *    而分叉的表现是"下拉里有它、点进去说它不能聊"这种没法解释的组合。
+ */
+export function canChatAgent(agent: Agent): boolean {
+  if (agent.entries !== undefined) return hasEntry(agent, 'chat')
+  // 老 daemon：没有 entries 可读，按"内置岗位名单"兜底（用户建的一律能聊）
+  if (agent.builtinKind === undefined) return true
+  return (CHAT_CAPABLE_BUILTIN_KINDS as readonly string[]).includes(agent.builtinKind)
+}
+
+/**
  * **不能选、但要显示出来**的那几条（2026-11，D145 使用者拍板："显示出来，只是置灰"）。
  *
  * 为什么不再"悄悄滤掉"：同一个下拉在不同人眼里长度不一样，人会以为"我的智能体少了"。
@@ -146,21 +166,11 @@ export function executorChoices(
   canCarrySkills: boolean,
 ): ExecutorChoice[] {
   /*
-   * 能聊天的是：所有**用户建的** agent，加上内置的**聊天型岗位**
-   * （`CHAT_CAPABLE_BUILTIN_KINDS`）。写等值集合，不写 `kind !== 'drafter'`。
+   * ★ 2026-11（D145/D152）：判据是接入点里有没有 `chat`，**只有一处定义**
+   *   （`canChatAgent`）——这一页、`Chat.svelte` 的 `executors`、以及
+   *   `skillsHeldBackByDaemon` 都读它。
    */
-  /*
-   * ★ 2026-11（D145）：判据换成**接入点**（`entries` 里有 `chat`），与 daemon 的
-   *   `canChat` 同一句。`CHAT_CAPABLE_BUILTIN_KINDS` 那份名单不再参与判定（留着给
-   *   兼容老 daemon：老 daemon 不返回 entries，此时按名单兜底）。
-   */
-  const executors = agents.filter(
-    (agent) =>
-      hasEntry(agent, 'chat') ||
-      (agent.entries === undefined &&
-        (agent.builtinKind === undefined ||
-          (CHAT_CAPABLE_BUILTIN_KINDS as readonly string[]).includes(agent.builtinKind))),
-  )
+  const executors = agents.filter(canChatAgent)
   const choices: ExecutorChoice[] = executors.map((agent) => ({
     value: `agent:${agent.id}`,
     kind: 'agent' as const,
@@ -195,7 +205,12 @@ export function skillsHeldBackByDaemon(
   canCarrySkills: boolean,
 ): Skill[] {
   if (canCarrySkills) return []
-  const executors = agents.filter((agent) => agent.builtinKind === undefined)
+  /*
+   * ★ 2026-11（D152）：这里原来写 `agent.builtinKind === undefined`（"不是内置岗位就当
+   *   执行者"）——那正是 D145 要消灭的那种判据：**岗位字段兼职能力开关**。
+   *   现在读同一句 `canChatAgent`（= 接入点里有 `chat`）。
+   */
+  const executors = agents.filter(canChatAgent)
   if (executors.length === 0) return []
   return skills.filter(
     (skill) => !executors.some((agent) => (agent.skillIds ?? []).includes(skill.id)),

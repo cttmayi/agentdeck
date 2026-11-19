@@ -41,8 +41,8 @@ export const agentsText = {
   /** 角色格右边那张卡：告诉人这一维为什么不能被选（内置角色不在这条业务链上）。 */
   'agents.roleFixed': { zh: '平台固定', en: 'Set by the platform' },
   'agents.roleFixedHint': {
-    zh: '内置智能体只在平台自己发起的那一轮里干活（起草沉淀技能 / 整理记忆），所以它不在「执行 / 审核」这条业务链上——派活、进组都轮不到它；聊天只有「智能体生成者」例外（它全部的工作就是聊天，出岗位卡）。',
-    en: 'Built-in agents only run when the platform starts them (drafting a skill, tidying memory) — they are not part of the task → review → action chain, so they take no tasks and join no groups; the agent maker is the only one that chats (asking about a job and writing its job card).',
+    zh: '平台成员只干平台自己发起的那几件事（起草沉淀技能 / 整理记忆 / 出岗位卡 / 出编排），派活与进编排都轮不到它；哪些入口能叫它，看下面「入口」那一格。',
+    en: 'Platform members only run what the platform starts (drafting a skill, tidying memory, writing a job card or a workflow); which entry points reach them is the “Entry points” field below.',
   },
   'agents.roleDescDrafter': { zh: '把一段经验写成 skill', en: 'Turns an experience into a skill' },
   'agents.roleDescMemoryTidy': { zh: '把对话里的话整理成记忆', en: 'Turns a conversation into memories' },
@@ -101,7 +101,15 @@ export const agentsText = {
    *   `roleReviewerHintShort` 三条（角色选择器两张卡的副说明）随角色退场删。
    *   `agents.roleLabel`（"角色"那一格的名字）也一起删——那一格现在是"岗位说明"。
    */
-  'agents.roleLabel': { zh: '岗位', en: 'Kind' },
+  /*
+   * ★ 2026-11（D152）：这一格的标题原来叫「岗位」。
+   *
+   * 改名的理由不是审美，是**这个词现在描述的比它实际管的宽**：这一格在平台成员身上
+   * 显示"它是哪一条出厂成员 + 由平台固定"，在自建智能体身上只有一句「智能体」——
+   * 而"岗位"这个词会让人以为它是个**能力开关**（正是 D145 要拆掉的那层）。
+   * 「类型」两种情形都读得通，也不会与「指令 = 第一句话的 ② 身份」撞词。
+   */
+  'agents.roleLabel': { zh: '类型', en: 'Kind' },
   'agents.nameLabel': { zh: '名称', en: 'Name' },
   // ── 记忆（分批第 240 批）──
   // ★ 位置在「指令」下面：人设是人定的、记忆是长出来的，两者挨着放才分得清。
