@@ -54,7 +54,8 @@ import {
  */
 const LEGACY_REVIEWER_NAME = 'Skill 审核者（内置）'
 const LEGACY_REVIEWER_INSTRUCTIONS = '你是平台内置的审核者：只指出哪里不合格，不要重写产出。'
-import { startDaemon, builtinAccountingRows } from './server.ts'
+import { startDaemon } from './server.ts'
+import { builtinAccountingRows } from './startup-reconcile.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 const WS = wsId('ws-builtin-role')

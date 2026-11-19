@@ -103,8 +103,8 @@ import {
   ensureBuiltinAgentMakerSkills,
   migratePlatformSkillsToExclusive,
 } from './agent-maker-skills.ts'
-import { ensureBuiltinWorkflowMakerSkills } from './workflow-maker-skills.ts'
 import { MEMORY_EXISTING_MEMORY_FILE, MEMORY_TRANSCRIPT_FILE } from './platform-actions.ts'
+import { builtinAccountingRows, reconcileStartup } from './startup-reconcile.ts'
 import {
   canBeDispatched,
   canBeReferencedByWorkflow,
@@ -1234,30 +1234,6 @@ function parseEnvMap(
  * ⚠️ 别再把它加回来：一旦 skill 又能声明动作，"谁能改状态"就又有了第二个出处。
  */
 
-/**
- * 启动对账要写进日志的**内置岗位清单**（顺序 = 日志顺序）。
- *
- * ★ 2026-11（D144）：这里原来漏了「编排生成者」（D135 加的那一条）——它被建出来时
- *   **一行日志都没有**，而"某个内置被重建 / 被修复"正是靠这条日志才看得见
- *   （使用者改过的指令不会被动，但"平台刚动了它"这件事得说一声）。
- *
- * ⚠️ 新增一个内置岗位必须在这里加一行：`builtin-role-identity.test.ts` 有一条判据按
- *    `ensureBuiltinAgents()` 的返回**逐项**核对，漏了当场红（而不是等到某天发现日志里少一条）。
- */
-export function builtinAccountingRows(
-  builtin: Awaited<ReturnType<typeof ensureBuiltinAgents>>,
-): ReadonlyArray<readonly [string, EnsureDrafterResult, string]> {
-  return [
-    ['内置起草者', builtin.drafter, '沉淀这条链用的'],
-    // ★ 分批第 244 批：「整理记忆」用的那一条（与起草者同一套对账）
-    ['内置记忆整理者', builtin.memoryTidy, '「整理记忆」用的'],
-    // ★ 2026-11 设计定稿：「智能体生成者」——在聊天里问岗位、出岗位卡的那一条
-    ['内置智能体生成者', builtin.agentMaker, '「确认生成智能体」用的'],
-    ['内置编排生成者', builtin.workflowMaker, '「确认采纳编排」用的'],
-    // ★ D135/D144：「编排生成者」——在聊天里问流程、出编排代码的那一条
-  ]
-}
-
 export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   const warn = options.onWarn ?? ((m: string) => console.warn(`[warn] ${m}`))
   const info = options.onInfo ?? ((m: string) => console.log(m))
@@ -1854,152 +1830,15 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    *   **错方向的解释比没有解释更费人**——使用者会照着那句话去改错地方。
    */
 
-  // 内置起草者（2026-10 定稿 §9）：每次启动对一次账
-  // ══════════════════════════════════════════════════════════════════
-  //
-  // ⚠️ **每次启动**都跑，不是"首启播种一次"：它要满足"不许删"（使用者绕过界面删掉，
-  //    下次启动要回来）与"自愈"（内置标记丢了、指令被清空了要补回默认）。幂等由
-  //    `ensureBuiltinDrafter` 内部保证：**使用者改过的指令一字不动**（第 ⑥ 条）。
-  //    对账结果只在真动手时吭声——正常启动不该多一句噪音。
-  /**
-   * ★ 分批第 259 批的一次性迁移：**记忆默认关，只有「助手」保持开着**
-   *   （逻辑与三条边界在 `memory.ts` 的 `migrateMemoryEnabledDefaults` 里，那里有测试）。
-   *   它只改开关，不动记忆条目。
-   */
-  {
-    const { switched } = await migrateMemoryEnabledDefaults(store, workspaceId)
-    if (switched.length > 0) {
-      info(
-        `记忆默认关：${switched.length} 个智能体已关掉记忆（只有「助手」保持开）——` +
-          '要用的话在它自己的配置页打开「启用记忆」；已有条目一条都没删',
-      )
-    }
-  }
-
-
-  const builtin = await ensureBuiltinAgents(store, workspaceId)
-  for (const [label, r, why] of builtinAccountingRows(builtin)) {
-    if (r.action === 'created') {
-      info(`已建立${label}（${why}，可在「智能体」页查看与编辑）`)
-    } else if (r.action === 'healed') {
-      warn(`${label}被修复：${r.why}（已恢复成默认，使用者改过的内容不会被动）`)
-    }
-  }
-  /**
-   * ★ 分批第 207 批：**把起草者的技能挂载与技能库对齐**（启动时一次）。
-   *
-   * 为什么由平台做：内置 agent 是只读的（分批第 190 批），使用者没法自己把 distilly 挂上去；
-   * 而"起草 run 注入什么"这一批起完全由**挂载**决定 ⇒ 挂载必须始终对着技能库的现状。
-   * 装/卸技能之后也有一次（见那两条路由），启动这一次是兜底（比如使用者手改了数据目录）。
-   */
-  {
-    const mount = await syncDrafterSkillMount(store, workspaceId)
-    if (mount.skillIds.length === 0) {
-      info(
-        `起草者还没挂上「沉淀用技能」（${DRAFTER_SKILL_SLUG}）：装好之后自动挂上，` +
-          '在装好之前不能开始沉淀',
-      )
-    } else {
-      info(`起草者挂了：${mount.skillSlugs.join('、')}`)
-    }
-  }
-
-  /**
-   * ★ 2026-11 设计定稿（§3.3）+ D111：**智能体生成者的平台技能 = 它的独有技能**。
-   *
-   * 上一版是"动态安装进技能库 + 挂载对齐"——技能页会看到三条、还能卸。D111 之后
-   * 这三份是生成者目录里的**文件资产**（不进技能库、不进技能页、不可卸载），这里
-   * 做两件事：老库里的三条**搬进**生成者目录（一次性迁移）、缺的从随仓库分发的
-   * `catalog/platform-skills/` **播种**（幂等）。装不上也只是"规范没注入"，不阻塞启动。
-   */
-  {
-    const migrated = await migratePlatformSkillsToExclusive(store, workspaceId)
-    if (migrated.moved.length > 0) {
-      info(`生成者平台技能已从技能库迁入独有目录：${migrated.moved.join('、')}`)
-    }
-    const ensure = await ensureBuiltinAgentMakerSkills(store, workspaceId)
-    if (ensure.seeded.length > 0) {
-      info(`生成者平台技能已就位（独有技能）：${ensure.seeded.join('、')}`)
-    }
-    if (ensure.skipped.length > 0) {
-      warn(`生成者平台技能播种跳过：${ensure.skipped.join('；')}`)
-    }
-  }
-
   /*
-   * ★ 2026-11（D143）：**编排生成者的平台技能**（`orchestration-authoring`）同样在启动时播种。
+   * ★ 2026-11（D149）：八段"每次启动都要做一次"的事收进了一个函数（`reconcileStartup`）。
    *
-   * 为什么要它：使用者问「"编排生成者（内置）" 里面并没有描述 API 的细节，它怎么会知道
-   * 怎么写编排呢」——原来的指令只有五行伪代码，签名/语义/坑全没有。API 细节走技能
-   * （与智能体生成者同一分工，D111），指令里只留"动笔之前照它写"。
-   * ⚠️ 播种失败不阻塞启动（上面那段同一口径）：`onWarn` 说清跳过了哪一份。
+   * 为什么：它们原来散在两百行里，而**顺序**只写在注释里——最要命的那条是
+   * "`owner`/`entries` 写回必须排老字段清理之后"（反了会让清理"没东西可清"，日志里
+   * 那句"清了谁"随之消失，`agent-legacy-cleanup.test.ts` 当场抓过）。现在顺序是
+   * **数据**（`RECONCILE_PLAN` 的 `needs`），有判据、也有运行时自检。
    */
-  {
-    const ensureWf = await ensureBuiltinWorkflowMakerSkills(store, workspaceId)
-    if (ensureWf.seeded.length > 0) {
-      info(`编排生成者平台技能已就位（独有技能）：${ensureWf.seeded.join('、')}`)
-    }
-    if (ensureWf.skipped.length > 0) {
-      warn(`编排生成者平台技能播种跳过：${ensureWf.skipped.join('；')}`)
-    }
-  }
-
-  // ══════════════════════════════════════════════════════════════════
-  // ★ 启动时把老 agent 记录里**已撤下的字段**从磁盘上摘掉（2026-10）
-  // ══════════════════════════════════════════════════════════════════
-  //
-  // 撤掉的是 `reviewerAgentId`（执行者的"由谁审它"）与行动权限那三个字段
-  // （`allowedActions` / `debugActions` / `actionParams`）——理由见
-  // `packages/protocol/src/agent-legacy.ts`。schema 字段删掉之后老记录里的键
-  // **不会自己消失**，所以这里真的改一遍：使用者要的是"不要遗留旧数据"，
-  // 不是"界面看不见"。
-  //
-  // ⚠️ 这里原来跑的是 `planDeadActionCleanup`（清掉"永远不可能被满足"的动作名，
-  //    D41 收尾）。它的**对象已经不存在**——agent 上不再有动作名单，整份名单连同
-  //    那个模块一起删掉了；这一步现在是"把整个字段摘掉"，比它更彻底。
-  await runAgentLegacyCleanupOnce({ store, info })
-
-  /*
-   * ★ 2026-11（D145）：**把归属与接入点写进数据**（`owner` + `entries`）。
-   *
-   * 三条口径（见 `platform-member.ts`）：只补缺的、不删老字段、半内置不猜但**点名**。
-   * ⚠️ 必须排在 `runAgentLegacyCleanupOnce` **之后**：那条清理要先把老键（`reviewerAgentId`
-   *    等）摘掉并**在日志里点名**；而这里的写回是"把整条记录重写一遍"，跑在前面会把
-   *    老键提前抹掉——清理就变成"没东西可清"，日志里那句"清了谁"也随之消失。
-   *    （这个顺序是测试 `agent-legacy-cleanup.test.ts` 当场抓出来的。）
-   */
-  {
-    const migrated = await migratePlatformMemberFields(store, workspaceId)
-    if (migrated.migrated.length > 0) {
-      info(`平台成员属性已写入（owner + entries）：${migrated.migrated.length} 条记录`)
-    }
-    if (migrated.halfBuiltin.length > 0) {
-      warn(
-        `有 ${migrated.halfBuiltin.length} 条记录配置损坏（builtin 标记在、岗位值缺）：` +
-          `${migrated.halfBuiltin.join('、')}——已按「用户的普通智能体」处理（可改可删），` +
-          `要恢复平台成员请用「恢复成默认值」或重新出厂`,
-      )
-    }
-  }
-
-
-  /*
-   * ★ 2026-11（D145）：**上线前扫一遍现有编排代码**。
-   *
-   * 「派任务 / 被编排引用」这两道守卫是这一轮**新加**的：改之前编排代码能直接引用平台
-   * 成员（引擎解析是 `agents.find(name)` 的全量名单），所以升级当天，老编排里很可能
-   * 已经引用了起草者/编排生成者——那样它会**在运行时被拒**。与其让人跑到一半撞墙，
-   * 不如启动时**点名说出来**（第 ① 步：只报不改，改哪条由人决定）。
-   */
-  {
-    const stale = await platformMemberRefsInWorkflows(store, workspaceId, workflows)
-    if (stale.length > 0) {
-      warn(
-        `有 ${stale.length} 条编排引用了平台成员（它们的接入点里没有「被编排调用」，` +
-          `运行会被拒）：${stale.join('、')}——把里面的名字换成自己建的智能体即可`,
-      )
-    }
-  }
+  await reconcileStartup({ store, workspaceId, workflows, info, warn })
 
   // ★ Web UI 的构建产物不进版本库（gitignore），所以 clone 下来直接起 daemon
   //   会**没有界面**。这种情况必须说清楚怎么做，而不是发一个空白页让人以为
