@@ -23,6 +23,12 @@
   import { showToast } from '../lib/view.ts'
   import PromptField from './PromptField.svelte'
   import ChatMemoryTidy from './ChatMemoryTidy.svelte'
+  import {
+    USER_ENTRY_CHOICES,
+    USER_ENTRY_LABEL_KEYS,
+    agentEntries,
+    hasAnyEntry,
+  } from '../lib/members.ts'
 
   /**
    * 智能体详情 / 编辑（FR-AGENT-19）。
@@ -176,6 +182,14 @@
      *    而它们的记忆其实一直在用——那种不一致比没有开关更糟。
      */
     memoryEnabled: agent.memoryEnabled !== false,
+    /**
+     * ★ 2026-11（D146）：**入口**（对话 / 任务 / 编排）。
+     *
+     * 取服务端算好的 `entries`（老记录没有这个字段时 `agentEntries()` 会回退）——
+     * 这里**不**再按 `builtin` 猜一遍：那正是 D145 要消灭的分叉。
+     * 平台成员这一格是锁着的（只读），但照样显示它现在的接入点：看得见"它能被谁叫"。
+     */
+    entries: agentEntries(agent),
     // D37：审核标准（只对审核者有意义）
     reviewStandard: agent.reviewStandard ? { ...agent.reviewStandard } : null,
     // ⚠️ 2026-10：这里原来还有行动权限那三个（`allowedActions` / `actionParams` /
@@ -580,6 +594,12 @@
     }
     if (dr.skillIds.slice().sort().join() !== ag.skillIds.slice().sort().join())
       patch['skillIds'] = dr.skillIds
+    /*
+     * ★ 2026-11（D146）：入口。按**集合**比（顺序不算改动）——服务端本来就会规范化
+     *   次序，拿"数组字面量是否相等"去比会让"点了两下勾选顺序变了"也算 dirty。
+     */
+    if (dr.entries.slice().sort().join() !== agentEntries(ag).slice().sort().join())
+      patch['entries'] = dr.entries
     // 标准按值比较（它是对象，直接比引用永远不相等）
     if (JSON.stringify(dr.reviewStandard) !== JSON.stringify(ag.reviewStandard ?? null))
       patch['reviewStandard'] = dr.reviewStandard
@@ -970,12 +990,18 @@
         {/if}
         <button type="button" data-agent-cancel onclick={cancelEdit}>{$t('common.close')}</button>
       {:else}
+        <!--
+          ★ 2026-11（D146）：入口一个都不留也**不给保存**——服务端同样会拒（
+             `parseUserEntries`），这里只是让它在点下去之前就说清楚。
+        -->
         <button
           type="submit"
           class="btn btn--primary"
           data-agent-save
-          disabled={busy || !dirty}
-          title={dirty ? $t('agents.saveTitle') : $t('agents.saveNothing')}
+          disabled={busy || !dirty || !hasAnyEntry(draft.entries ?? [])}
+          title={!hasAnyEntry(draft.entries ?? [])
+            ? $t('agents.entriesEmpty')
+            : dirty ? $t('agents.saveTitle') : $t('agents.saveNothing')}
           >{busy ? $t('common.saving') : $t('common.save')}</button
         >
         <button type="button" data-agent-cancel onclick={cancelEdit}>{$t('common.cancel')}</button>
@@ -1266,6 +1292,38 @@
           </section>
           </div>
         </div>
+
+        <!--
+          ══════════ 入口（2026-11，D146）══════════
+          ★ 位置：「指令 | 技能」那一对之后、记忆之前（整行宽）。理由与记忆那一节同一条
+             ——整行宽的块只能放在**配对之后**，否则两列网格必然留洞
+             （探针 `agents.cardNoHoles` 钉着）。
+          ★ 平台成员这一格**锁着但照样显示**（与「挂载的技能」同一套方案 A）：
+             看得见它现在能被谁叫，也不会去想"怎么少了这一格"。
+          ★ 勾选只改**配置**，不改行为：`chat` / `task` / `workflow` 三处判据各自读它
+             （D145），勾上或取消立刻在下拉 / 候选里生效。
+        -->
+        <section class="cell entry-cell" data-agent-entries>
+          <span class="cell-label">{$t('agents.entriesLabel')}</span>
+          <div class="entry-picker" class:locked={readOnly}>
+            {#each USER_ENTRY_CHOICES as entry (entry)}
+              <label class="entry-option">
+                <input
+                  type="checkbox"
+                  value={entry}
+                  data-entry={entry}
+                  bind:group={draft.entries}
+                  disabled={readOnly}
+                  title={readOnly ? $t('agents.builtinReadOnly') : ''}
+                />
+                <span>{$t(USER_ENTRY_LABEL_KEYS[entry])}</span>
+              </label>
+            {/each}
+          </div>
+          {#if !readOnly && !hasAnyEntry(draft.entries ?? [])}
+            <p class="hint entry-warning" data-entries-empty>{$t('agents.entriesEmpty')}</p>
+          {/if}
+        </section>
 
         <!--
           ══════════ 记忆（分批第 240 批）══════════
@@ -1576,6 +1634,47 @@
   .cell.skills-cell {
     align-self: stretch;
     min-height: 0;
+  }
+
+  /* ★ 2026-11（D146）：入口那一格——整行宽、三个勾选并排一行。
+     只在窄到放不下时才换行（`flex-wrap`），不硬拆成两行去凑两列网格。 */
+  .cell.entry-cell {
+    grid-column: 1 / -1;
+  }
+
+  .entry-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2) var(--sp-4);
+  }
+
+  .entry-option {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    margin: 0;
+    font-size: var(--fs-sm);
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+
+  .entry-option input {
+    width: auto;
+  }
+
+  /* 只读态：与「挂载的技能」同一个做法（锁着，但不变成一行灰字） */
+  .entry-picker.locked .entry-option {
+    cursor: default;
+  }
+
+  .entry-picker.locked .entry-option input {
+    cursor: not-allowed;
+  }
+
+  /* 一个都不留的理由：与其它失败提示同色（它是**拦下来的原因**，不是说明文字） */
+  .entry-warning {
+    margin: 0;
+    color: var(--warn);
   }
   /* ★ 2026-11：共享技能 + 独有技能**共用一个框**（`border` 只在这一个元素上）。
      flex column：共享列表 `flex: 1` 吃掉剩余高度（装不下才滚），独有技能段固定

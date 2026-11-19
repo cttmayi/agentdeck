@@ -22,3 +22,35 @@ export function agentEntries(agent: Agent): string[] {
 export function hasEntry(agent: Agent, entry: 'chat' | 'task' | 'workflow'): boolean {
   return agentEntries(agent).includes(entry)
 }
+
+/**
+ * 使用者能在新建 / 编辑智能体里勾的那三个入口（2026-11，D146）。
+ *
+ * ⚠️ 三项**顺序**是服务端规范化的顺序（`parseUserEntries` 也按这个次序落库），
+ *   所以勾选结果显示的次序、请求发出去的次序、数据里存的次序是同一个。
+ *
+ * ⚠️ 平台动作入口（`action:…`）**不在这里**：那是平台自己发起的流程节点，勾上也没有
+ *   任何东西会叫它。服务端见到就拒（不是静默忽略）。
+ */
+export const USER_ENTRY_CHOICES = ['chat', 'task', 'workflow'] as const
+export type UserEntry = (typeof USER_ENTRY_CHOICES)[number]
+
+/**
+ * 每个入口的**文案键**（字面量写全，`$t()` 的入参是封闭联合类型——拼字符串拼不出来）。
+ *
+ * 与 `USER_ENTRY_CHOICES` 同序，两处改动要一起改：新增一个入口时，这里少写一行就是
+ * 类型错误（不会静默降级成一个空标签）。
+ */
+export const USER_ENTRY_LABEL_KEYS: Record<
+  UserEntry,
+  'agents.entryChat' | 'agents.entryTask' | 'agents.entryWorkflow'
+> = {
+  chat: 'agents.entryChat',
+  task: 'agents.entryTask',
+  workflow: 'agents.entryWorkflow',
+}
+
+/** 一个都没勾 = 哪个入口都叫不动它；界面据此禁掉「创建 / 保存」。 */
+export function hasAnyEntry(picked: readonly string[]): boolean {
+  return USER_ENTRY_CHOICES.some((e) => picked.includes(e))
+}

@@ -354,6 +354,22 @@ export const agentsText = {
     zh: '挂上就会随它一起送过去——技能是干活时的参考与支持文件。',
     en: 'Attached skills go into its context — they are reference and support files for the work.',
   },
+  /*
+   * ★ 2026-11（D146）：**入口**（接入点）。使用者原话：「我新建智能体，怎么没看到选项呢」
+   *   ——`chat` / `task` / `workflow` 这三个名字以前只活在服务端判据里。
+   *
+   * ⚠️ 字要短：新建表单每多一行字，「创建」按钮就可能被挤出视口（探针
+   *    `template.footVisible` 量得到）。所以这里只有三个入口名，没有第二句解释。
+   */
+  'agents.entriesLabel': { zh: '入口', en: 'Entry points' },
+  'agents.entryChat': { zh: '对话', en: 'Chat' },
+  'agents.entryTask': { zh: '任务', en: 'Tasks' },
+  'agents.entryWorkflow': { zh: '编排', en: 'Workflows' },
+  /** 一个都不勾时的提示（这是**拒绝**的理由，不是说明文字——所以它跟着校验走）。 */
+  'agents.entriesEmpty': {
+    zh: '至少要留一个入口：一个都没有的智能体，哪个入口都叫不动它。',
+    en: 'Keep at least one entry point — with none, nothing can reach this agent.',
+  },
   'agents.runtimeFieldLabel': { zh: '用哪个 CLI', en: 'Which CLI' },
   'agents.runtimeUnverified': {
     zh: '（没核对过）',

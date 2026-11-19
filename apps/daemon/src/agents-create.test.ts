@@ -542,3 +542,119 @@ describe('★ 默认智能体：设 / 取消 / 只认执行者', () => {
     })
   })
 })
+
+/**
+ * ★ 2026-11（D146）：**入口**（`entries`）能从接口配置。
+ *
+ * 背景：使用者原话「我新建智能体，怎么没看到选项呢」——D145 把能力拆成 `owner` +
+ * `entries` 之后，`entries` 只由服务端按"是不是内置"推出来，界面/接口都改不了。
+ * 这一组钉四件事：默认值、能改、值域封闭、以及"一个都不留"要拒。
+ */
+describe('★ 入口（entries）：不传 = 三项全开，能改，值域封闭', () => {
+  test('★ 不传 ⇒ 落库为 chat + task + workflow（与回退同一个结果，不改变默认行为）', async () => {
+    await withDaemon(async (url) => {
+      const a = await create(url, { name: '默认入口' })
+      assert.equal(a.status, 201)
+      assert.deepEqual(a.body['entries'], ['chat', 'task', 'workflow'])
+      // 列表与详情都带上它（界面的「入口」那一格读它，不自己按 builtin 猜）
+      const list = (await (await fetch(`${url}/api/agents`)).json()) as {
+        agents: Array<Record<string, unknown>>
+      }
+      const row = list.agents.find((x) => x['name'] === '默认入口')
+      assert.deepEqual(row?.['entries'], ['chat', 'task', 'workflow'])
+      assert.equal(row?.['owner'], 'user')
+      const detail = (await (await fetch(`${url}/api/agents/${String(a.body['id'])}`)).json()) as Record<
+        string,
+        unknown
+      >
+      assert.deepEqual(detail['entries'], ['chat', 'task', 'workflow'])
+    })
+  })
+
+  test('★ 显式给的入口原样落库；次序按 chat → task → workflow 规范化，重复项去掉', async () => {
+    await withDaemon(async (url) => {
+      const a = await create(url, {
+        name: '只接任务',
+        entries: ['task'],
+      })
+      assert.equal(a.status, 201)
+      assert.deepEqual(a.body['entries'], ['task'])
+
+      const b = await create(url, {
+        name: '乱序重复',
+        entries: ['workflow', 'chat', 'workflow'],
+      })
+      assert.deepEqual(b.body['entries'], ['chat', 'workflow'], '次序规范化 + 去重')
+    })
+  })
+
+  test('★★ 取消「任务」入口之后，它就**真的**派不了活（不是只改了一个字段）', async () => {
+    await withDaemon(async (url) => {
+      const a = await create(url, { name: '只在编排里', entries: ['workflow'] })
+      assert.equal(a.status, 201)
+      const agentId = String(a.body['id'])
+
+      // 判据只有一处（`canBeDispatched` = entries 里有 task）⇒ 三条派活路径都要拒
+      const run = await fetch(`${url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ task: '随便一件事', agentId }),
+      })
+      assert.ok(run.status >= 400, `不该派得动（实际 ${run.status}）`)
+
+      const def = await fetch(`${url}/api/agents/default`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agentId }),
+      })
+      assert.equal(def.status, 400, '不能当默认执行者')
+      assert.match(((await def.json()) as { error: string }).error, /接入点|入口/)
+    })
+  })
+
+  test('★ 平台动作入口（action:…）与不认识的值 ⇒ 400，并且说清可用的是什么', async () => {
+    await withDaemon(async (url) => {
+      const action = await create(url, { name: '想接平台动作', entries: ['action:skill-draft'] })
+      assert.equal(action.status, 400)
+      assert.match(String(action.body['error']), /平台动作/)
+
+      const unknown = await create(url, { name: '拼错了', entries: ['chats'] })
+      assert.equal(unknown.status, 400)
+      assert.match(String(unknown.body['error']), /不认识的入口/)
+
+      const notArray = await create(url, { name: '类型错', entries: 'chat' })
+      assert.equal(notArray.status, 400)
+      assert.match(String(notArray.body['error']), /必须是数组/)
+    })
+  })
+
+  test('★★ 一个入口都不留 ⇒ 400（那样造出来的智能体哪个入口都叫不动它）', async () => {
+    await withDaemon(async (url) => {
+      const r = await create(url, { name: '谁也摸不着', entries: [] })
+      assert.equal(r.status, 400)
+      assert.match(String(r.body['error']), /至少要有一个入口/)
+    })
+  })
+
+  test('★ 编辑时能改入口（PATCH 与新建同一份校验）', async () => {
+    await withDaemon(async (url) => {
+      const a = await create(url, { name: '先全开' })
+      const agentId = String(a.body['id'])
+      const patch = (body: unknown) =>
+        fetch(`${url}/api/agents/${agentId}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+
+      const ok = await patch({ entries: ['chat'] })
+      assert.equal(ok.status, 200)
+      assert.deepEqual(((await ok.json()) as Record<string, unknown>)['entries'], ['chat'])
+
+      const bad = await patch({ entries: ['action:agent-commit'] })
+      assert.equal(bad.status, 400, 'PATCH 不能绕过值域')
+      const empty = await patch({ entries: [] })
+      assert.equal(empty.status, 400)
+    })
+  })
+})

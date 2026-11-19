@@ -81,6 +81,68 @@ export function isMemberEntry(value: unknown): value is MemberEntry {
 }
 
 /* ══════════════════════════════════════════════════════════════════
+ * 界面可配的那三个接入点（用户自己造的智能体只在这三项里挑）
+ * ══════════════════════════════════════════════════════════════════ */
+
+/**
+ * 使用者能在「新建 / 编辑智能体」里勾的入口。
+ *
+ * ⚠️ `action:<id>` **不在这里**，而且是刻意不给：那些是**平台发起的动作**（沉淀起草、
+ *    整理记忆、确认采纳…）——它们是平台代码里写死的流程节点，不是"这个智能体能被谁叫"。
+ *    让使用者勾上它只会得到"勾了也永远没人叫"的配置（本仓库最常见的死接口）。
+ *    服务端见到 `action:` 前缀直接拒（见 `parseUserEntries`），不是静默忽略。
+ */
+export const USER_ENTRY_CHOICES = MEMBER_PLAIN_ENTRIES
+
+/**
+ * 校验并规范化请求里的 `entries`（`POST /api/agents` 与 `PATCH` 共用这一处）。
+ *
+ * 三条口径：
+ *   · **不给（`undefined` / `null`）= 三项全开**——与 `entriesOf()` 对用户记录的回退一致，
+ *     所以"老客户端不带这个字段"和"新的默认值"是同一个结果，不会因为上线换行为；
+ *   · **顺序与去重都规范化**（按 `chat, task, workflow` 的次序、去掉重复）——同一份配置
+ *     不该因为勾选先后在数据里长得不一样；
+ *   · **一个都不勾 = 400**：那样造出来的智能体在**每一个**入口里都叫不出来，等于一条
+ *     谁也摸不着的记录。宁可在这里拒绝，也不要让人过几天发现"我建的智能体去哪了"。
+ */
+export function parseUserEntries(
+  raw: unknown,
+): { ok: true; value: MemberEntry[] } | { ok: false; error: string } {
+  const valid = USER_ENTRY_CHOICES.join(', ')
+  if (raw === undefined || raw === null) return { ok: true, value: [...USER_ENTRIES] }
+  if (!Array.isArray(raw)) return { ok: false, error: `entries 必须是数组（可用的：${valid}）` }
+  const picked = new Set<string>()
+  for (const item of raw) {
+    if (typeof item !== 'string' || item.trim() === '') {
+      return {
+        ok: false,
+        error: `entries 里每一项都必须是非空字符串（收到 ${JSON.stringify(item)}）`,
+      }
+    }
+    const entry = item.trim()
+    if (entry.startsWith('action:')) {
+      return {
+        ok: false,
+        error:
+          `「${entry}」是**平台动作**入口，只属于平台成员：自定义智能体只能在 ` +
+          `${valid} 里选（那些动作由平台自己发起，勾上也没有任何东西会叫它）。`,
+      }
+    }
+    if (!(USER_ENTRY_CHOICES as readonly string[]).includes(entry)) {
+      return { ok: false, error: `不认识的入口：${entry}。可用的：${valid}` }
+    }
+    picked.add(entry)
+  }
+  if (picked.size === 0) {
+    return {
+      ok: false,
+      error: `至少要有一个入口（${valid}）：一个都没有的智能体，哪个入口都叫不动它。`,
+    }
+  }
+  return { ok: true, value: USER_ENTRY_CHOICES.filter((e) => picked.has(e)) }
+}
+
+/* ══════════════════════════════════════════════════════════════════
  * 出厂表：每条平台成员的接入点（**唯一声明处**）
  * ══════════════════════════════════════════════════════════════════ */
 

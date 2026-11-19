@@ -491,6 +491,11 @@ export async function createAgent(input: {
   /** 审核标准（D37）——只对审核者有意义；执行者传 null。 */
   reviewStandard?: ReviewStandard | null
   /**
+   * ★ 2026-11（D146）：**接入点**（`chat` / `task` / `workflow`），新建表单那一格勾的。
+   *   不传 = 服务端按三项全开落库（与 `entriesOf()` 对用户记录的回退一致）。
+   */
+  entries?: string[]
+  /**
    * ⚠️ 2026-10：这里原来还有 **`allowedActions` / `actionParams` / `debugActions`**
    *    三个"行动权限"字段（D40 收口时它们是审核者身上的配置）。**整个能力从
    *    agent 上撤掉了**——"判完允许动什么"属于**这条链**（这队人的活判过之后允许
@@ -515,6 +520,7 @@ export async function createAgent(input: {
       skillIds: input.skillIds,
       runtimeKey: input.runtimeKey,
       reviewStandard: input.reviewStandard ?? null,
+      ...(input.entries !== undefined ? { entries: input.entries } : {}),
     }),
   })
   await loadAgents()

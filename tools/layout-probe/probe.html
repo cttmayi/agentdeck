@@ -4180,6 +4180,39 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             return head ? Math.round(box(head).h) : null
           })()
 
+          /**
+           * ★ 2026-11（D146）：**「入口」那一格**（对话 / 任务 / 编排）。
+           *
+           * 这条判据的由来是使用者一句「我新建智能体，怎么没看到选项呢」——D145 把能力
+           * 拆成 `owner` + `entries` 之后，界面上只有平台成员那半边看得见；用户自己造的
+           * 智能体那三个接入点一个字都没露出来，等于"属性在、没有入口让它发生"。
+           *
+           * 量四件（每件都会真的出错过）：
+           *   ① 三项都在，且是**这三个名字**（不是"随便有几个勾选框"）；
+           *   ② **默认全勾**——默认值必须与 `entriesOf()` 对用户记录的回退一致，
+           *      否则"加一格"这件事会顺手改掉新建智能体的行为；
+           *   ③ 都在**卡片里**（不溢出右栏）；
+           *   ④ 三项**同一行**（竖着叠会把它挤出视口——这张表单已经被
+           *      `template.footVisible` 咬过一次）。
+           */
+          facts['template.formEntryOptions'] = (() => {
+            if (!form) return null
+            const cell = form.querySelector('.entry-cell')
+            if (!cell) return null
+            const opts = [...cell.querySelectorAll('.entry-option')]
+            const cellBox = box(cell)
+            const card = form.querySelector('.card.agent-card')
+            const cardBox = card ? box(card) : null
+            const tops = opts.map((o) => Math.round(o.getBoundingClientRect().top))
+            return {
+              labels: opts.map((o) => text(o)),
+              checked: opts.map((o) => o.querySelector('input')?.checked === true),
+              allChecked: opts.length > 0 && opts.every((o) => o.querySelector('input')?.checked === true),
+              withinCard: cardBox === null ? null : cellBox.w <= cardBox.w + 1,
+              sameRow: new Set(tops).size === 1,
+            }
+          })()
+
           // Esc 关掉（抽屉由 Drawer 组件统一处理）——表单在正文里，走自己的「取消」
           const ntCancel = form
             ? [...form.querySelectorAll('.form-actions button')].find((b) => b.type === 'button')

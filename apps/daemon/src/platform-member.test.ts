@@ -16,6 +16,7 @@ import {
   isMemberEntry,
   migratePlatformMemberFields,
   ownerOf,
+  parseUserEntries,
   platformMemberRefsInWorkflows,
   workflowReferenceableNames,
 } from './platform-member.ts'
@@ -164,5 +165,55 @@ describe('上线前的体检：现有编排里引用平台成员的，启动时�
       await store.close()
       await cleanup(dir)
     }
+  })
+})
+
+/**
+ * ★ 2026-11（D146）：`parseUserEntries` —— 新建 / 编辑共用的那一道校验。
+ *
+ * 它是**纯函数**，所以在这里逐条钉住"值域封闭"这件事实；接口层的用例
+ * （`agents-create.test.ts`）另外钉"它真的被接在两条路上"。
+ */
+describe('★ 入口校验：值域封闭、action 不给自定义智能体、一个都不留要拒', () => {
+  test('不传 ⇒ 三项全开（与 entriesOf 对用户记录的回退一致）', () => {
+    for (const raw of [undefined, null]) {
+      const r = parseUserEntries(raw)
+      assert.equal(r.ok, true)
+      assert.deepEqual(r.ok && r.value, ['chat', 'task', 'workflow'])
+    }
+  })
+
+  test('★ 次序规范化 + 去重：同一份配置不该因为勾选先后长得不一样', () => {
+    const r = parseUserEntries(['workflow', 'chat', 'workflow'])
+    assert.deepEqual(r.ok && r.value, ['chat', 'workflow'])
+  })
+
+  test('★ action:* 一律拒（那是平台发起的动作，勾上也没有东西会叫它）', () => {
+    for (const id of MEMBER_ACTION_IDS) {
+      const r = parseUserEntries([`action:${id}`])
+      assert.equal(r.ok, false, `action:${id} 不该被收下`)
+      assert.match(r.ok === false ? r.error : '', /平台动作/)
+    }
+  })
+
+  test('★ 空数组 / 类型不对 / 拼错的名字 ⇒ 各自一句能照做的话', () => {
+    const empty = parseUserEntries([])
+    assert.equal(empty.ok, false)
+    assert.match(empty.ok === false ? empty.error : '', /至少要有一个入口/)
+
+    const notArray = parseUserEntries('chat')
+    assert.match(notArray.ok === false ? notArray.error : '', /必须是数组/)
+
+    const wrong = parseUserEntries(['chats'])
+    assert.match(wrong.ok === false ? wrong.error : '', /不认识的入口：chats/)
+
+    const blank = parseUserEntries([''])
+    assert.match(blank.ok === false ? blank.error : '', /非空字符串/)
+  })
+
+  test('★ 校验通过的值一定过得了 isMemberEntry（两处判据不许分叉）', () => {
+    const r = parseUserEntries(['task', 'chat'])
+    assert.equal(r.ok, true)
+    for (const e of r.ok ? r.value : []) assert.equal(isMemberEntry(e), true)
   })
 })

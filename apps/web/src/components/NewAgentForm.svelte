@@ -3,6 +3,7 @@
   import type { ReviewStandard } from '../lib/api.ts'
   import { showToast } from '../lib/view.ts'
   import PromptField from './PromptField.svelte'
+  import { USER_ENTRY_CHOICES, USER_ENTRY_LABEL_KEYS, hasAnyEntry } from '../lib/members.ts'
   import { t, tx } from '../lib/i18n.ts'
 
   /**
@@ -87,6 +88,17 @@
    */
   let selectedSkills: string[] = []
   /**
+   * ★ 2026-11（D146）：**入口**——它能被谁叫（对话 / 任务 / 编排）。
+   *
+   * 使用者原话：「我新建智能体，怎么没看到选项呢」。`chat` / `task` / `workflow` 这三个
+   * 接入点以前只由服务端按"是不是内置"推出来（`entriesOf()`），界面上一个字都看不到
+   * ——也就是说这一期引入的属性里，只有平台成员那半边是"看得见"的。
+   *
+   * 默认**三项全勾**：与 `entriesOf()` 对用户记录的回退、以及服务端不传 `entries` 时的
+   * 落库值完全一致——所以这一格加进来**不改变任何默认行为**，只是把它变成可改。
+   */
+  let selectedEntries: string[] = [...USER_ENTRY_CHOICES]
+  /**
    * 可选的 runtime —— 从**身份接口**来，不写死两项。
    *
    * 写死的话，新加一个 runtime 之后这个表单里根本选不到它（只有直接调接口
@@ -108,6 +120,7 @@
         skillIds: selectedSkills,
         runtimeKey,
         reviewStandard,
+        entries: selectedEntries,
         // ⚠️ 这里原来还送 `allowedActions` / `actionParams` / `debugActions`。
         //    那三个字段已经从 agent 上撤掉（动作只属于组），再送就是 400
         //    「不认识的字段」——所以整段删掉，而不是送空数组。
@@ -118,6 +131,7 @@
       reviewStandard = null
       // 回到表单的默认值
       selectedSkills = []
+      selectedEntries = [...USER_ENTRY_CHOICES]
       showToast(tx('agents.created'))
       // 关不关由父组件决定（它是"正在新建"这个状态的持有者）
       oncreated()
@@ -229,6 +243,28 @@
       </div>
 
       <!--
+        ══════════ 入口（2026-11，D146）══════════
+        ★ 占整行放卡片最后：它是"这个智能体能被谁叫"，与上面三格（叫什么 / 怎么跑 /
+          干什么）不是同一类问题，挤进半格会把「挂载的技能」压得更窄。
+        ★ 三个勾选框，默认全勾；**一个都不勾**时下方的「创建」按钮置灰并给一句原因
+          （那样造出来的智能体在每一个入口里都叫不出来——服务端同样会拒）。
+      -->
+      <div class="cell entry-cell">
+        <span class="cell-label">{$t('agents.entriesLabel')}</span>
+        <div class="entry-picker">
+          {#each USER_ENTRY_CHOICES as entry (entry)}
+            <label class="entry-option">
+              <input type="checkbox" value={entry} bind:group={selectedEntries} />
+              <span>{$t(USER_ENTRY_LABEL_KEYS[entry])}</span>
+            </label>
+          {/each}
+        </div>
+        {#if !hasAnyEntry(selectedEntries)}
+          <p class="hint entry-warning" data-entries-empty>{$t('agents.entriesEmpty')}</p>
+        {/if}
+      </div>
+
+      <!--
         ⚠️ 2026-11（S4，D127）：那一格「标准已并进指令」原来只在**审核者**形态下出现
         （`{#if role === 'reviewer'}`）。角色退场 ⇒ 新建表单里不再有那一格；老数据的
         `reviewStandard` 仍然在详情页可见、可搬进「指令」。
@@ -237,7 +273,15 @@
 
   <!-- 主操作在底部（与组页同款）：创建 / 取消 -->
   <div class="form-actions">
-    <button type="submit" class="btn btn--primary" disabled={busy || !name.trim()}>
+    <!--
+      ★ 2026-11（D146）：`!hasAnyEntry(...)` 与"名字空"同一档——都只是**挡住提交**，
+         理由分别写在各自那一格下面（不是弹一个笼统的错误）。
+    -->
+    <button
+      type="submit"
+      class="btn btn--primary"
+      disabled={busy || !name.trim() || !hasAnyEntry(selectedEntries)}
+    >
       {busy ? $t('common.creating') : $t('common.create')}
     </button>
     <button type="button" class="btn btn--ghost" onclick={onclose}>{$t('common.cancel')}</button>
@@ -393,6 +437,35 @@
 
   .skill-option { display: flex; align-items: center; gap: var(--sp-2); margin: 0; cursor: pointer; }
   .skill-option input { width: auto; }
+
+  /* ★ 入口：占整行、三个勾选**并排一行**（竖向叠会被挤到下一屏，见上面那条注释） */
+  .entry-cell {
+    grid-column: 1 / -1;
+  }
+
+  .entry-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2) var(--sp-4);
+  }
+
+  .entry-option {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    margin: 0;
+    font-size: var(--fs-sm);
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+
+  .entry-option input { width: auto; }
+
+  /* 一个都不勾的理由：与其它失败提示同色（它是**拦下来的原因**，不是说明文字） */
+  .entry-warning {
+    margin: 0;
+    color: var(--warn);
+  }
 
   /* 补充显示的名字之外的机器名：弱化，不抢主显示的存在感 */
   .skill-slug {

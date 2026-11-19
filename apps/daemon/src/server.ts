@@ -112,6 +112,7 @@ import {
   isHalfBuiltin,
   migratePlatformMemberFields,
   ownerOf,
+  parseUserEntries,
   platformMemberRefsInWorkflows,
   workflowReferenceableNames,
 } from './platform-member.ts'
@@ -3825,6 +3826,14 @@ async function injectedSkillsOf(
         //   ⚠️ 白名单漏了它 ⇒ 带着这个字段的请求会被 400 拒绝（"不认识的字段"），
         //      而界面上看不出原因。这条白名单就是"新建能配什么"的唯一清单。
         'memoryEnabled',
+        /*
+         * ★ 2026-11（D146）：**接入点**（`chat` / `task` / `workflow`）。
+         *   以前它只能由服务端按"是不是内置"推出来，界面上一个字都看不到——
+         *   使用者原话：「我新建智能体，怎么没看到选项呢」。现在新建与编辑都能勾。
+         *   ⚠️ `owner` **仍然不在**这份白名单里：一期只允许造 `owner: 'user'`，
+         *      让请求能声明自己是平台成员等于把只读闸门交给客户端。
+         */
+        'entries',
       ])
       const unknownKeys = Object.keys(body).filter((k) => !allowedKeys.has(k))
       if (unknownKeys.length > 0) {
@@ -3884,6 +3893,17 @@ async function injectedSkillsOf(
        * ⚠️ 2026-11（S4）：这里原来校验 `role`（`validateRole`：已下线岗位不能再建）。
        *   **角色退场** ⇒ 没有要校验的，用户建的 agent 就是 agent。
        */
+
+      /*
+       * ★ 2026-11（D146）：接入点（不传 = 三项全开，与 `entriesOf()` 对用户记录的回退一致）。
+       *   校验规则在 `parseUserEntries` 一处（新建与编辑同一份）：值域封闭、`action:` 拒绝、
+       *   一个都不勾拒绝。
+       */
+      const entriesCheck = parseUserEntries(body['entries'])
+      if (!entriesCheck.ok) {
+        sendJson(res, 400, { error: entriesCheck.error })
+        return
+      }
 
       const runtimeCheck = await resolveRuntimeKey(body['runtimeKey'])
       if (!runtimeCheck.ok) {
@@ -3961,6 +3981,8 @@ async function injectedSkillsOf(
         env: envCheck.value,
         // D37：审核标准内联在 agent 上（校验在上面）
         reviewStandard: standardCheck.value,
+        // ★ 2026-11（D146）：显式落库（不再只靠 `entriesOf()` 的回退把三项还给它）
+        entries: entriesCheck.value,
         /*
          * ⚠️ 2026-11（S3）：这里原来落 `ownerGroupId`（私有归属）。组退场 ⇒ 不落。
          */
@@ -4211,7 +4233,18 @@ async function injectedSkillsOf(
          */
         const memory = await listActiveMemory(store, workspaceId, agentId)
         // ★ 2026-11（D111）：与列表同一口径——详情拿到的指令是**组装后**的最终指令。
-        sendJson(res, 200, { ...agent, instructions: effectiveInstructions(agent), memory })
+        /*
+         * ★ 2026-11（D146）：详情也把**两个属性算好**给界面（与列表同一口径）。
+         *   编辑态的「入口」那一格要显示"现在勾着哪几个"，而老记录没有 `entries`
+         *   字段——界面自己按 `builtin` 去猜就会猜错（这正是 D145 要消灭的那种分叉）。
+         */
+        sendJson(res, 200, {
+          ...agent,
+          instructions: effectiveInstructions(agent),
+          owner: ownerOf(agent),
+          entries: entriesOf(agent),
+          memory,
+        })
         return
       }
 
@@ -4271,6 +4304,12 @@ async function injectedSkillsOf(
           'memory',
           // ★ 分批第 245 批：记忆功能的总开关（关掉之后不带入、不能手写、不能整理）
           'memoryEnabled',
+          /*
+           * ★ 2026-11（D146）：接入点可改。
+           *   ⚠️ 平台成员在**上面那道只读闸**就被拒了，走不到这里——所以"谁能改自己的
+           *      接入点"这件事不需要再单独判一次。
+           */
+          'entries',
         ])
         // ⚠️ 2026-10：`reviewerAgentId` / `allowedActions` / `actionParams` /
         //    `debugActions` 四个键**从这个白名单里拿掉了**——它们已经从 `Agent` 上
@@ -4378,6 +4417,19 @@ async function injectedSkillsOf(
             return
           }
           patch.env = envCheck.value
+        }
+
+        /*
+         * ★ 2026-11（D146）：接入点。校验与新建**同一个函数**（值域封闭 / `action:` 拒绝 /
+         *   一个都不勾拒绝），所以"新建时能选什么"与"编辑时能选什么"不会分叉。
+         */
+        if (body['entries'] !== undefined) {
+          const entriesCheck = parseUserEntries(body['entries'])
+          if (!entriesCheck.ok) {
+            sendJson(res, 400, { error: entriesCheck.error })
+            return
+          }
+          patch.entries = entriesCheck.value
         }
 
 

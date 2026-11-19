@@ -3042,6 +3042,36 @@ const CHECKS = [
   { view: '新建表单 / 设置', key: 'template.footPrimaryLabel', label: '底部主操作是「创建」', ok: (v) => v === '创建' },
   {
     view: '新建表单 / 设置',
+    key: 'template.formEntryOptions',
+    /**
+     * ★★★ 2026-11（D146）：新建表单里的「入口」三项。
+     *
+     * 由来：使用者「我新建智能体，怎么没看到选项呢」。D145 把能力拆成 `owner` +
+     * `entries` 之后，只有平台成员那半边在界面上看得见——用户自己造的智能体的
+     * 三个接入点（对话 / 任务 / 编排）一个字都没露出来，"配置"这件事等于没交付。
+     *
+     * 四条判据，缺一不可：
+     *   ① 三项都在、名字对（不是"有三个勾选框"就算）；
+     *   ② 默认**全勾**（与 `entriesOf()` 的回退同一个默认值，加这一格不改变行为）；
+     *   ③ 在卡片里（不溢出右栏）；
+     *   ④ **同一行**（竖排会把这颗表单再往下撑，`template.footVisible` 已经被咬过一次）。
+     */
+    label:
+      '★★★ 「新建智能体」里有**入口三项**（对话 / 任务 / 编排）、默认**全勾**、'
+      + '在卡片内且同一行——这三个名字以前只活在服务端判据里，界面上一个字都没有',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      Array.isArray(v.labels) &&
+      v.labels.length === 3 &&
+      v.labels.join(',') === '对话,任务,编排' &&
+      v.allChecked === true &&
+      v.withinCard === true &&
+      v.sameRow === true,
+    show: (v) => (v === null ? 'null（没找到 .entry-cell）' : JSON.stringify(v)),
+  },
+  {
+    view: '新建表单 / 设置',
     key: 'template.formGoneAfterEsc',
     label: '★★ 点「取消」能关掉它（正文里的表单没有 Esc 那一层，出口是它自己的「取消」）',
     ok: (v) => v === true,
