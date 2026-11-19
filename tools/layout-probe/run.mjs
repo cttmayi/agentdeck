@@ -601,8 +601,8 @@ const CHECKS = [
      */
     label:
       '★★★ 内置智能体**只读但不缩水**：没有「保存」/「改名」（有「恢复成默认值」+「关闭」），' +
-      '岗位格仍是两张卡但都不是按钮（左边是它真实的内置岗位、右边说"由平台固定"——' +
-      '2026-11（S4/D127）之前这里是「执行 / 审核」两张可选卡，角色退场之后换成岗位），CLI 与指令锁着并带「只读」标，' +
+      '「入口」那一格在、三项勾选框**锁着**、并且**平台动作徽标**摆出来（`action:` 那一半' +
+      '以前界面上一个字都没有），CLI 与指令锁着并带「只读」标，' +
       '技能的勾选框、记忆的开关/写入口/行内改删都还在原位只是锁住；而**自建仍然能改**',
     ok: (v) =>
       v !== null &&
@@ -612,9 +612,22 @@ const CHECKS = [
       v.hasRestore === true &&
       v.hasLeave === true &&
       v.rename === false &&
-      v.roleCards === 2 &&
-      v.roleButtons === 0 &&
-      String(v.roleBadge ?? '').length > 0 &&
+      /**
+       * ★ 2026-11（D153）：「类型 / 岗位」那一格删了 ⇒ 这一段的证据换成**「入口」那一格**：
+       *   三项勾选框都在但**锁着**，并且**平台动作徽标**摆出来了（`action:` 那一半以前
+       *   界面上一个字都没有）。`rolePicker === false` 是"整格真的没了"，不是"藏起来了"
+       *   （⚠️ 那个 fact 是 `querySelector(...) !== null` 的**布尔**，第一版拿 `=== null`
+       *   比，于是这条判据永远红——判据读的字段类型必须自己先看清楚）。
+       */
+      v.rolePicker === false &&
+      v.entriesCell === true &&
+      v.entryBoxes === 3 &&
+      v.entryBoxesDisabled === true &&
+      Array.isArray(v.actionEntries) &&
+      v.actionEntries.length >= 1 &&
+      v.actionEntries.every(
+        (a) => typeof a.label === 'string' && a.label !== '' && a.title.startsWith('action:'),
+      ) &&
       v.cliDisabled === true &&
       v.instructionsReadonly === true &&
       v.lockMarks >= 2 &&
@@ -637,8 +650,8 @@ const CHECKS = [
         ? 'null'
         : `找到 ${String(v.found)}　按钮 ${JSON.stringify(v.headLabels ?? [])}　` +
           `保存 ${String(v.hasSave)}　恢复 ${String(v.hasRestore)}　关闭 ${String(v.hasLeave)}　` +
-          `改名入口 ${String(v.rename)}　岗位卡 ${String(v.roleCards)} 张 / 其中按钮 ${String(v.roleButtons)}　` +
-          `岗位「${String(v.roleBadge)}」　CLI 锁 ${String(v.cliDisabled)}　指令锁 ${String(v.instructionsReadonly)}　` +
+          `改名入口 ${String(v.rename)}　入口格 ${String(v.entriesCell)}（${String(v.entryBoxes)} 个勾选全锁 ${String(v.entryBoxesDisabled)}）　` +
+          `平台动作 ${JSON.stringify((v.actionEntries ?? []).map((a) => a.label))}　CLI 锁 ${String(v.cliDisabled)}　指令锁 ${String(v.instructionsReadonly)}　` +
           `「只读」标 ${String(v.lockMarks)} 处　记忆开关 ${String(v.memorySwitch)}（开着 ${String(v.memoryOn)} / 锁 ${String(v.memorySwitchDisabled)}）　` +
           `写入口 ${String(v.memoryAdd)}（锁 ${String(v.memoryAddDisabled)}）　记忆 ${String(v.memRows)} 条　` +
           `行内动作 ${String(v.memRowActions)}（锁 ${String(v.memRowActionsDisabled)}）　` +
@@ -656,19 +669,17 @@ const CHECKS = [
      *   数据，拿它们比会把"数据不同"当"骨架不同"）。
      */
     label:
-      '★★ 内置 / 自建**同一套骨架**：岗位那一格都在、都是静态的（没有按钮）、首卡一样高，' +
-      'CLI、指令、记忆节、记忆开关四处结构一致' +
-      '（方案 A 的定义——不同只体现在"锁着"与"内置有第二张说明卡"，不体现在"少一块"或"长得不一样"）',
+      '★★ 内置 / 自建**同一套骨架**：「入口」那一格两边都在，CLI、指令、记忆节、记忆开关' +
+      '四处结构一致（方案 A 的定义——不同只体现在"锁着"，不体现在"少一块"）' +
+      '；⚠️ 高度**不比**：平台成员那一格多一行「平台动作」徽标，那是设计（D153），不是不一致',
     ok: (v) =>
       v !== null &&
       typeof v === 'object' &&
       v.found === true &&
       Array.isArray(v.differs) &&
       v.differs.length === 0 &&
-      v.builtin?.roleCell === true &&
-      v.builtin?.roleStatic === true &&
-      v.own?.roleCell === true &&
-      v.own?.roleStatic === true,
+      v.builtin?.entriesCell === true &&
+      v.own?.entriesCell === true,
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'

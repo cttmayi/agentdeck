@@ -488,7 +488,8 @@
         )
         facts['agents.detailEditableInPlace'] = need('卡片里就是可编辑的控件', () =>
           !!d().querySelector('.detail-pane #agent-instructions') &&
-          !!d().querySelector('.detail-pane .role-picker .role-card'),
+          // ★ 2026-11（D153）：「类型 / 岗位」那一格删了 ⇒ 用「入口」那一格当"卡片里就是控件"的证据
+          !!d().querySelector('.detail-pane [data-agent-entries]'),
         )
         // 2026-11（使用者："智能体指令可能写很长"）：指令框的「⛶ 展开」按钮要能
         // 弹大编辑器（选中的是自建 agent，非内置 → 不是只读，按钮应在）
@@ -761,7 +762,6 @@
           const ta = d().querySelector('#agent-instructions')
           const memRows = [...d().querySelectorAll('[data-mem-row]')]
           const skillBoxes = [...d().querySelectorAll('.card.agent-card .skill-picker input')]
-          const roleCards = [...d().querySelectorAll('.card.agent-card .role-picker > *')]
           const out = {
             found: true,
             headLabels: labels,
@@ -771,11 +771,24 @@
             hasLeave: labels.some((l) => l.includes('取消') || l.includes('关闭')),
             hasDelete: labels.some((l) => l.includes('删除')),
             rename: d().querySelector('[data-agent-rename]') !== null,
-            // ③ 角色：两张卡还在（骨架对齐），但**没有一个是按钮**
-            roleCards: roleCards.length,
-            roleButtons: roleCards.filter((el) => el.tagName === 'BUTTON').length,
+            /**
+             * ③ ★ 2026-11（D153）：「类型 / 岗位」那一格**整格删掉**了（使用者："感觉不需要
+             *   显示『类型』，把『入口』、把 entries：Action 显示出来"）。现在这一段的证据换成
+             *   「入口」那一格：
+             *     · 三个勾选框都在、都**锁着**（`disabled`）；
+             *     · **平台动作徽标**摆出来了（`action:<id>` 那一半以前界面上一个字都没有）。
+             */
+            entriesCell: d().querySelector('.card.agent-card [data-agent-entries]') !== null,
+            entryBoxes: [...d().querySelectorAll('.card.agent-card [data-agent-entries] input')].length,
+            entryBoxesDisabled: [
+              ...d().querySelectorAll('.card.agent-card [data-agent-entries] input'),
+            ].every((el) => el.disabled === true),
+            actionEntries: [...d().querySelectorAll('[data-agent-action-entry]')].map((el) => ({
+              id: el.getAttribute('data-agent-action-entry'),
+              label: (text(el) ?? '').trim(),
+              title: (el.getAttribute('title') ?? '').trim(),
+            })),
             rolePicker: d().querySelector('.card.agent-card .role-picker') !== null,
-            roleBadge: (text(d().querySelector('[data-agent-role-badge]')) ?? '').trim(),
             // ④ 两个文本控件
             cliDisabled: cli === null ? null : cli.disabled === true,
             instructionsReadonly: ta === null ? null : ta.hasAttribute('readonly') === true,
@@ -818,14 +831,17 @@
           const ownLabels = [...(ownHead?.querySelectorAll('.detail-actions button') ?? [])].map(
             (b) => (text(b) ?? '').trim(),
           )
-          const ownRoleCards = [...d().querySelectorAll('.card.agent-card .role-picker > *')]
+          const ownEntryBoxes = [...d().querySelectorAll('.card.agent-card [data-agent-entries] input')]
           out.ownEditable =
             own === true &&
-            // ⚠️ 2026-11（S4，D127）：角色退场 ⇒ 自建那一侧现在是**一张静态卡**
-            //    （「普通智能体」），没有按钮可选。判据随界面走；意图没变——
-            //    "自建仍然能改"。
-            ownRoleCards.length === 1 &&
-            ownRoleCards.filter((el) => el.tagName === 'BUTTON').length === 0 &&
+            /**
+             * ★ 2026-11（D153）：自建那一侧的骨架证据从"一张静态角色卡"换成**「入口」三项
+             *   都能勾**（它本来就可配）。意图没变——"自建仍然能改"。
+             */
+            ownEntryBoxes.length === 3 &&
+            ownEntryBoxes.every((el) => el.disabled !== true) &&
+            // 平台动作徽标**不该出现在自建用户智能体上**（它没有 action: 接入点）
+            d().querySelector('[data-agent-entry-actions]') === null &&
             ownCli !== null &&
             ownCli.disabled === false &&
             ownTa !== null &&
@@ -849,35 +865,16 @@
             text(d().querySelector('.detail-pane [data-agent-head-name]')) ?? '',
           )
           const shape = () => {
-            const rc = d().querySelector('.card.agent-card .role-picker > *')
+            const entriesBox = d().querySelector('.card.agent-card [data-agent-entries]')
             return {
               /**
-               * ⚠️ 2026-11（S4，D127）：角色退场之后，**内置那张是两张静态卡**
-               *   （真实岗位 + 「平台固定」），**自建那张只有一张**（普通智能体）。
-               *   所以"张数"不能再拿来比（2 vs 1 是设计，不是不一致）；能比的是
-               *   骨架的三件事：这一格在不在、是不是静态的（没有按钮）、首卡一样高。
+               * ★ 2026-11（D153）：「类型 / 岗位」那一格删掉之后，两边能比的骨架是：
+               *   「入口」那一格在不在（**两边都在**——它现在是这一页唯一的"身份"视图）、
+               *   CLI、指令、记忆节、记忆开关。
+               * ⚠️ 勾选框**数量**不能比：内置那三个锁着，自建那三个能勾，数量都是 3 但
+               *   状态不同（状态在 `agents.builtinReadOnly` 那条里分开量）。
                */
-              roleCell: d().querySelector('.card.agent-card .role-picker') !== null,
-              roleStatic: rc !== null && rc.tagName !== 'BUTTON',
-              roleButtons: d().querySelectorAll('.card.agent-card .role-picker button').length,
-              // 角色卡的高度：两边不一样高，"同一套骨架"就是空话
-              roleCardH: rc === null ? null : Math.round(rc.getBoundingClientRect().height),
-              /**
-               * 形状：**圆角、边框、底色**。
-               * 为什么要单独量：`<button>` 与 `<div>` 吃的规矩不一样——全局那条
-               * `button { border-radius: var(--radius) }` 只对按钮生效。274 批把内置那两张
-               * 卡从 `<button>` 换成 `<div>`（不可点），于是**一个圆角一个直角**，而两类
-               * 元素的行高、内外距都对得上，光看数字看不出来（使用者一眼就看出来了）。
-               */
-              roleCardShape:
-                rc === null
-                  ? null
-                  : [
-                      cs(rc).borderRadius,
-                      cs(rc).borderTopStyle,
-                      cs(rc).borderTopWidth,
-                      cs(rc).backgroundColor,
-                    ].join('|'),
+              entriesCell: entriesBox !== null,
               cli: d().querySelector('#agent-runtime') !== null,
               instructions: d().querySelector('#agent-instructions') !== null,
               memoryCell: d().querySelector('[data-agent-memory]') !== null,
@@ -891,10 +888,7 @@
           if (prevName !== '' && prevName !== '助手') await selectAgentByName(prevName)
           const keys = Object.keys(builtin)
           // 高度按 ±2px 比（亚像素取整不该让这条变红）
-          const same = (k) =>
-            k === 'roleCardH'
-              ? Math.abs((builtin[k] ?? 0) - (own[k] ?? 0)) <= 2
-              : builtin[k] === own[k]
+          const same = (k) => builtin[k] === own[k]
           return {
             found: true,
             builtin,

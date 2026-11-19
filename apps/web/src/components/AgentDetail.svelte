@@ -26,6 +26,7 @@
   import {
     USER_ENTRY_CHOICES,
     USER_ENTRY_LABEL_KEYS,
+    actionEntriesOf,
     agentEntries,
     hasAnyEntry,
     isPlatformMember,
@@ -550,35 +551,6 @@
    */
   $: dirty = isDirty(draft, agent, memRows)
 
-  /**
-   * 内置 agent 的**岗位**名。
-   *
-   * ⚠️ 2026-11（S4，D127）：原来这里读 `role`（executor / reviewer / …）。**角色退场**
-   *   ⇒ 用户建的 agent 统一叫「智能体」，只有平台内置的那几种按岗位显示。
-   */
-  function roleLabelOf(a: Agent): string {
-    if (a.builtinKind === 'drafter') return $t('agents.roleDrafter')
-    if (a.builtinKind === 'memory-tidy') return $t('agents.roleMemoryTidy')
-    if (a.builtinKind === 'skill-reviewer') return $t('agents.roleSkillReviewer')
-    if (a.builtinKind === 'agent-maker') return $t('agents.roleAgentMaker')
-    return $t('agents.rolePlain')
-  }
-  /**
-    * 只读态那张角色卡的第二行：这个角色**干什么**。
-    *
-    * 与自建那两张卡的结构对齐（都是"名字 + 一句说明"）——但内置这三个角色的语义
-    * 不是"派活给它/别人产出交给它判"，所以文案也得说它们自己的事（起草 = 把经验
-    * 写成 skill；整理记忆 = 把对话里的话整理成候选；沉淀审核 = 审起草出来的 skill；
-    * 生成者 = 在聊天里把岗位问清楚并写出岗位卡）。
-    */
-  function roleDescOf(a: Agent): string {
-    if (a.builtinKind === 'drafter') return $t('agents.roleDescDrafter')
-    if (a.builtinKind === 'memory-tidy') return $t('agents.roleDescMemoryTidy')
-    if (a.builtinKind === 'skill-reviewer') return $t('agents.roleDescSkillReviewer')
-    if (a.builtinKind === 'agent-maker') return $t('agents.roleDescAgentMaker')
-    return $t('agents.rolePlainHint')
-  }
-
   function cancelEdit(): void {
     // ★ 2026-10：没有查看态了（选中即编辑，与组页同款）——「取消」= 放弃草稿、
     //   退出这一栏（回到空态）。改动直接丢，不逐个字段回滚。
@@ -891,6 +863,14 @@
     }
   }
 
+  /**
+   * ★ 2026-11（D153）：这个成员被**平台动作**叫着的那些接入点（`action:<id>`）。
+   *
+   * 以前它们只活在服务端判据里，界面上一个字都没有——"这条平台成员到底被什么叫着"
+   * 只能靠猜。现在直接摆出来（徽标，不可勾：平台自己发起，勾了也没有东西会用到）。
+   */
+  $: actionEntries = actionEntriesOf(agent)
+
   $: attached = $skills.filter((s) => agent.skillIds.includes(s.id))
   /**
    * 能挂上去的 skill。
@@ -1130,47 +1110,18 @@
 
   <section class="card agent-card">
     <!-- ★ 第 269 批：内置徽标移到**标题栏**（名字旁边），卡片里不再画一遍 -->
-    <!-- ★ 角色是智能体比「新建私有」多出的一维（私有表单由槽位决定角色），
-         占一整行。 -->
-    <div class="cell role-cell">
-          <span class="cell-label">{$t('agents.roleLabel')}</span>
-          {#if readOnly}
-            <!--
-              ★ 分批第 273/274 批：内置 agent 的角色是 `drafter` / `memory-tidy` /
-              `skill-reviewer`，**不是**执行/审核二选一 ⇒ 那个两按钮选择器对它两边都不亮，
-              看起来"没被选中"（使用者第一眼就发现了这一点）。
-              ★ 274 批的修法（方案 A，"同一套骨架、锁住"）：**仍然占两张卡的位置**，
-              但两张都不可点——左边是它真实角色的那张（静态、加亮，等价于"选中"），
-              右边用同样大小的卡说清"这一维由平台固定、为什么"。这样它与自建逐格对齐，
-              又不会摆出一个点了没反应的按钮。
-            -->
-            <div class="role-picker" data-agent-role-static>
-              <!-- ⚠️ 每张卡**只留一行字**（副说明进 `title`）——与自建那两张完全同款
-                   （269 批就是这么精简的）。两行字会让内置那张比自建高出一行，而"同一套
-                   骨架"在探针 `agents.builtinParity` 里是拿角色卡高度量的（实测 69 vs 58）。 -->
-              <div
-                class="role-card static active"
-                data-agent-role-badge
-                title={roleDescOf(agent)}
-              >
-                <strong>{roleLabelOf(agent)}</strong>
-              </div>
-              <div class="role-card static" title={$t('agents.roleFixedHint')}>
-                <strong>{$t('agents.roleFixed')}</strong>
-              </div>
-            </div>
-          {:else}
-          <!--
-            ⚠️ 2026-11（S4，D127）：这里原来是「执行 / 审核」两张可选卡（角色选择器）。
-            **角色退场** ⇒ 用户建的 agent 没有角色可选；这一格只说明"它是一个智能体"。
-          -->
-          <div class="role-picker" data-agent-role-static>
-            <div class="role-card static active" title={$t('agents.rolePlainHint')}>
-              <strong>{$t('agents.rolePlain')}</strong>
-            </div>
-          </div>
-          {/if}
-        </div>
+    <!--
+      ★ 2026-11（D153）：**「类型 / 岗位」那一格整格删掉了**。
+      使用者："还是觉得这个显示不好，感觉不需要显示『类型』，把『入口』、把 entries：Action
+      显示出来如何"——两层理由都成立：
+        · 「类型」这个说法让人以为它是个**能力开关**（D145 已经把那层拆掉了），
+          而它实际只回答"我是哪一条出厂成员"，这件事**名字里就有**（「沉淀起草者（内置）」）
+          加上标题栏的「平台内置」徽标、再加上下面「入口」那一格里的动作名，已经说全了；
+        · 而真正说不全的是另一半：「入口」原来只画 `chat / task / workflow` 三个勾选框，
+          `action:` 那一半（起草技能、整理记忆、写岗位卡…）在界面上一个字都没有。
+      所以这一格的信息**搬进「入口」**：勾选框（用户可配的三项）+ 平台动作徽标（不可勾，
+      只显示它被什么叫着）。
+    -->
 
         <!--
           ★ 分批第 272 批（使用者："整体布局有变化（指令被挤到右边了）"）：
@@ -1432,6 +1383,22 @@
               </label>
             {/each}
           </div>
+          {#if actionEntries.length > 0}
+            <!--
+              ★ 2026-11（D153）：**平台动作**那一半的接入点。渲染成徽标而不是勾选框：
+                 它们是平台自己发起的那几件事（起草技能 / 整理记忆 / 写岗位卡 / 确认
+                 生成 / 确认采纳），使用者**勾不动**——画成勾选框会让人以为"取消勾选
+                 就能让它不干这件事"。`title` 里挂原始值，机器名仍然查得到。
+            -->
+            <div class="entry-actions" data-agent-entry-actions>
+              <span class="entry-actions-label">{$t('agents.entriesActionsLabel')}</span>
+              {#each actionEntries as a (a.raw)}
+                <span class="badge" data-agent-action-entry={a.id} title={a.raw}
+                  >{a.labelKey === '' ? a.raw : $t(a.labelKey as never)}</span
+                >
+              {/each}
+            </div>
+          {/if}
           {#if !readOnly && !hasAnyEntry(draft.entries ?? [])}
             <p class="hint entry-warning" data-entries-empty>{$t('agents.entriesEmpty')}</p>
           {/if}
@@ -1783,6 +1750,19 @@
     cursor: not-allowed;
   }
 
+  /* 平台动作徽标那一排（D153）：与勾选框同一格，一行放得下就一行 */
+  .entry-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+
+  .entry-actions-label {
+    font-size: var(--fs-sm);
+    color: var(--text-faint);
+  }
+
   /* 一个都不留的理由：与其它失败提示同色（它是**拦下来的原因**，不是说明文字） */
   .entry-warning {
     margin: 0;
@@ -1940,13 +1920,12 @@
    *
    * 现在的规矩：
    *   · 「名称 | CLI」「指令 | 挂载的技能」保持**相邻的配对**（这就是"一半一半"）；
-   *   · **整行宽**的那些（角色 / 记忆 / 内置徽标）只能放在**配对的后面**，
+   *   · **整行宽**的那些（CLI / 入口 / 记忆）只能放在**配对的后面**，
    *     不许插进任意两格之间——插进去就必然留洞（探针 `agents.cardNoHoles` 会红）。
    *
    * ⚠️ 2026-11（D123）：`.cell.actions-cell` 与它的两条样式（「行动权限占整行」、
    *    展开/收起分段轨）随动作能力退场删掉了。
    */
-  .cell.role-cell,
   .cell.runtime-cell {
     grid-column: 1 / -1;
   }
@@ -2076,66 +2055,9 @@
      详情里那个「可挂载的工具组」勾选栏用。整段撤掉之后一并删了——留着就是给
      不存在的 DOM 写样式。 */
 
-  /* 角色选择：两个等宽卡片。这是"选边"的决定，值得占视觉重量 */
-  .role-picker {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--sp-2);
-  }
-
-  /**
-   * ★ 分批第 274 批（方案 A）：只读态的角色卡——**与自建那两张同尺寸**，只是不可点。
-   *   第一张是它真实角色的那张（`.active` 的样子 = "选中的就是它"），第二张说清
-   *   "这一维由平台固定、为什么"。这样两栏逐格对齐，也不会摆出点了没反应的按钮。
-   */
-  .role-card.static {
-    cursor: default;
-    background: var(--surface-2);
-  }
-
-
-  .role-card {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    align-items: flex-start;
-    justify-content: center;
-    text-align: left;
-    padding: var(--sp-3);
-    background: var(--bg);
-    border: 1px solid var(--line-strong);
-    color: var(--text-dim);
-    /**
-     * ★ 分批第 275/276 批（使用者："角色的风格显示也不一样，一个圆角，一个直角"）：
-     *   这一条**必须自己写**。原来它靠全局那条 `button { border-radius: var(--radius) }`
-     *   ——而 274 批把内置那两张卡从 `<button>` 换成了 `<div>`（它们不可点）⇒ 同一个
-     *   class，按钮那侧 8px 圆角、div 那侧 0px 直角。两边的行高、内外距、底色全都一样，
-     *   所以探针的高度判定是绿的，**只有形状不同**（探针现在连形状一起量：
-     *   `agents.builtinParity` 的 `roleCardShape`）。
-     */
-    border-radius: var(--radius);
-    /**
-     * ★ 分批第 274 批：**固定最小高度**，否则"同一套骨架"是空话。
-     *   自建那两张卡只有一行字（269 批把副说明挪进 `title`），而内置的角色卡是
-     *   "名字 + 一句它在干什么"两行 ⇒ 不加这一条，内置那张会高出一行，两栏在角色格
-     *   这一行就对不齐了（这正是使用者说的"呈现方式不同一"）。
-     */
-    min-height: 3.6rem;
-  }
-
-  .role-card strong {
-    color: var(--text);
-    font-size: var(--fs-md);
-  }
-
-  .role-card.active {
-    border-color: var(--accent);
-    background: var(--surface-2);
-  }
-
-  .role-card.active strong {
-    color: var(--accent);
-  }
+  /* ⚠️ 2026-11（D153）：这里原来有一组 `.role-picker` / `.role-card` 规则，给「类型 /
+     岗位」那一格用。整格删掉之后样式一并删——给不存在的 DOM 写样式，下一个读代码的人
+     会以为那一格还在。 */
 
   /* ══════════ 记忆（分批第 240 批）══════════ */
   .memory-cell {

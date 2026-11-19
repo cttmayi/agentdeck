@@ -38,17 +38,9 @@ export const agentsText = {
    *   只读的就锁住）。只读控件右上角那枚小字与其余只读文案都从这里来。
    */
   'agents.lockReadOnly': { zh: '只读', en: 'read-only' },
-  /** 角色格右边那张卡：告诉人这一维为什么不能被选（内置角色不在这条业务链上）。 */
-  'agents.roleFixed': { zh: '平台固定', en: 'Set by the platform' },
-  'agents.roleFixedHint': {
-    zh: '平台成员只干平台自己发起的那几件事（起草沉淀技能 / 整理记忆 / 出岗位卡 / 出编排），派活与进编排都轮不到它；哪些入口能叫它，看下面「入口」那一格。',
-    en: 'Platform members only run what the platform starts (drafting a skill, tidying memory, writing a job card or a workflow); which entry points reach them is the “Entry points” field below.',
-  },
-  'agents.roleDescDrafter': { zh: '把一段经验写成 skill', en: 'Turns an experience into a skill' },
-  'agents.roleDescMemoryTidy': { zh: '把对话里的话整理成记忆', en: 'Turns a conversation into memories' },
-  // ★ 2026-11 设计定稿：生成者 = 在聊天里把岗位问清楚、自己描述规则、写出岗位卡。
-  'agents.roleDescAgentMaker': { zh: '在聊天里把岗位问清楚并写出岗位卡', en: 'Asks about a job in chat and writes its job card' },
-  'agents.roleDescSkillReviewer': { zh: '审起草出来的 skill（已下线）', en: 'Audits drafted skills (retired)' },
+  /* ⚠️ 2026-11（D153）：「类型 / 岗位」那一格删掉之后，它专用的五条词条
+       （`roleLabel` / `roleFixed` / `roleFixedHint` / `roleDesc*` / `rolePlainHint`）
+       一并删了——留着就是给不存在的界面写文案。 */
   /** 只读态的写入口：输入框里那句占位说明它不是坏了，是不能写。 */
   'agents.memoryAddLocked': { zh: '内置智能体不能手写记忆（由平台维护）', en: 'Built-in agents take no hand-written memories' },
   'agents.saveTitle': { zh: '保存改动（记忆也在这里一起提交）', en: 'Save changes (memory is submitted here too)' },
@@ -109,7 +101,6 @@ export const agentsText = {
    * 而"岗位"这个词会让人以为它是个**能力开关**（正是 D145 要拆掉的那层）。
    * 「类型」两种情形都读得通，也不会与「指令 = 第一句话的 ② 身份」撞词。
    */
-  'agents.roleLabel': { zh: '类型', en: 'Kind' },
   'agents.nameLabel': { zh: '名称', en: 'Name' },
   // ── 记忆（分批第 240 批）──
   // ★ 位置在「指令」下面：人设是人定的、记忆是长出来的，两者挨着放才分得清。
@@ -322,10 +313,6 @@ export const agentsText = {
    * ⚠️ 2026-11（S4，D127）：`agents.roleFieldLabel`（"它是做什么的"）、
    *   `agents.roleExecutorHint` / `agents.roleReviewerHint` 与两条件式占位符都随角色退场删。
    */
-  'agents.rolePlainHint': {
-    zh: '它干什么是你在「指令」里写的——平台不再替你分类。',
-    en: 'What it does is whatever you write in Instructions — the platform no longer sorts agents for you.',
-  },
   'agents.instructionsPlaceholderPlain': {
     zh: '它是谁、怎么干活、按什么标准判断——都写在这里。这段会进它的上下文。',
     en: 'Who it is, how it works, and what it judges by — all here. This goes into its context.',
@@ -434,6 +421,19 @@ export const agentsText = {
     en: 'This record is flagged as platform-builtin but matches no known platform member. Treat it as your own agent: editable and deletable.',
   },
   'agents.entryChat': { zh: '对话', en: 'Chat' },
+  /*
+   * ★ 2026-11（D153）：**平台动作**接入点的名字（`action:<id>`）。
+   *
+   * 这五个名字以前只活在服务端判据里，界面上一个字都没有。文案按"人按哪一下"起名
+   * （与动作注册表的 `startFrom` 说同一件事），而不是按内部 id 直译——`action:skill-draft`
+   * 那个原始值挂在 `title` 里，要查机器名时鼠标一停就有。
+   */
+  'agents.entriesActionsLabel': { zh: '平台动作', en: 'Platform actions' },
+  'agents.actionSkillDraft': { zh: '起草技能', en: 'Draft a skill' },
+  'agents.actionMemoryTidy': { zh: '整理记忆', en: 'Tidy memory' },
+  'agents.actionAgentDraft': { zh: '写岗位卡', en: 'Write a job card' },
+  'agents.actionAgentCommit': { zh: '确认生成智能体', en: 'Confirm new agent' },
+  'agents.actionWorkflowCommit': { zh: '确认采纳编排', en: 'Confirm workflow' },
   'agents.entryTask': { zh: '任务', en: 'Tasks' },
   'agents.entryWorkflow': { zh: '编排', en: 'Workflows' },
   /** 一个都不勾时的提示（这是**拒绝**的理由，不是说明文字——所以它跟着校验走）。 */

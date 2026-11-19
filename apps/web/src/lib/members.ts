@@ -47,6 +47,51 @@ export const USER_ENTRY_LABEL_KEYS: Record<
   workflow: 'agents.entryWorkflow',
 }
 
+/**
+ * 平台动作接入点的**展示名**（2026-11，D153）。
+ *
+ * 为什么要显示它们：`action:<id>` 这一半的接入点以前**只在服务端判据里**，界面上
+ * 一个字都看不到——于是"这条平台成员到底被什么叫着"这件事只能靠猜。使用者原话：
+ * 「把 entries：Action 显示出来」。
+ *
+ * ⚠️ 与 `USER_ENTRY_CHOICES` 不同，这几项**不可勾**（平台自己发起），所以界面把它们
+ *    渲染成徽标而不是勾选框；`title` 里挂上原始值（`action:skill-draft`），机器名
+ *    仍然查得到。
+ * ⚠️ 键是**封闭**的：新增一个动作必须在 `apps/daemon/src/platform-actions.ts` 加一行，
+ *    同时在这里加一行文案——少加一处就是类型错误（不会静默显示成空徽标）。
+ */
+export const ACTION_ENTRY_LABEL_KEYS: Record<
+  'skill-draft' | 'memory-tidy' | 'agent-draft' | 'agent-commit' | 'workflow-commit',
+  | 'agents.actionSkillDraft'
+  | 'agents.actionMemoryTidy'
+  | 'agents.actionAgentDraft'
+  | 'agents.actionAgentCommit'
+  | 'agents.actionWorkflowCommit'
+> = {
+  'skill-draft': 'agents.actionSkillDraft',
+  'memory-tidy': 'agents.actionMemoryTidy',
+  'agent-draft': 'agents.actionAgentDraft',
+  'agent-commit': 'agents.actionAgentCommit',
+  'workflow-commit': 'agents.actionWorkflowCommit',
+}
+
+/** 一个平台成员身上的**动作接入点**（服务端给的 entries 里 `action:` 那些，保持原顺序）。 */
+export function actionEntriesOf(agent: Agent): Array<{ raw: string; id: string; labelKey: string }> {
+  return agentEntries(agent)
+    .filter((e) => e.startsWith('action:'))
+    .map((raw) => {
+      const id = raw.slice('action:'.length)
+      const labelKey = ACTION_ENTRY_LABEL_KEYS[id as keyof typeof ACTION_ENTRY_LABEL_KEYS]
+      return {
+        raw,
+        id,
+        // 认不出的 id（比如以后加的、这条界面还没跟上）**照样显示机器名**：
+        // 少一行文案不该让"它被什么叫着"这件事在界面上消失。
+        labelKey: labelKey ?? '',
+      }
+    })
+}
+
 /** 一个都没勾 = 哪个入口都叫不动它；界面据此禁掉「创建 / 保存」。 */
 export function hasAnyEntry(picked: readonly string[]): boolean {
   return USER_ENTRY_CHOICES.some((e) => picked.includes(e))

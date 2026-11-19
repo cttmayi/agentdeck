@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import type { Agent } from './api.ts'
-import { agentEntries, hasEntry, isHalfBuiltinAgent, isPlatformMember } from './members.ts'
+import {
+  actionEntriesOf,
+  agentEntries,
+  hasEntry,
+  isHalfBuiltinAgent,
+  isPlatformMember,
+} from './members.ts'
 
 /**
  * 界面侧的**平台成员判据**（2026-11，D147）。
@@ -85,5 +91,45 @@ describe('★ 接入点兜底：与上面的判据同一份口径', () => {
     const a = agent({ owner: 'user', entries: ['workflow'] })
     assert.equal(hasEntry(a, 'workflow'), true)
     assert.equal(hasEntry(a, 'task'), false, '「能不能派活」与「能不能被编排引用」是两件事')
+  })
+})
+
+/**
+ * ★ 2026-11（D153）：**平台动作接入点的展示行**。
+ *
+ * 由来：使用者看着「类型」那一格说"这个显示不好，把『入口』、把 entries：Action 显示出来"。
+ * `action:<id>` 那一半接入点以前只在服务端判据里，界面上一个字都没有——"这条平台成员
+ * 到底被什么叫着"只能靠猜。
+ */
+describe('★ 平台动作接入点：显示出来，且认不出的也照样显示机器名', () => {
+  test('服务端给的 entries 里 action 那些按原顺序出来，各带一条文案键', () => {
+    const maker = agent({
+      owner: 'platform',
+      entries: ['chat', 'action:agent-draft', 'action:agent-commit'],
+    })
+    const rows = actionEntriesOf(maker)
+    assert.deepEqual(
+      rows.map((r) => r.id),
+      ['agent-draft', 'agent-commit'],
+      '只挑 action: 那几条，顺序照服务端给的',
+    )
+    assert.deepEqual(
+      rows.map((r) => r.labelKey),
+      ['agents.actionAgentDraft', 'agents.actionAgentCommit'],
+    )
+    assert.equal(rows[0]!.raw, 'action:agent-draft', '原始值要留着（界面挂在 title 上）')
+  })
+
+  test('★ 认不出的 action id 也照样列出来（文案键为空 ⇒ 界面显示机器名，而不是消失）', () => {
+    const future = agent({ owner: 'platform', entries: ['action:brand-new-thing'] })
+    const rows = actionEntriesOf(future)
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0]!.id, 'brand-new-thing')
+    assert.equal(rows[0]!.labelKey, '', '没有文案就空着，由界面回退到原始值')
+  })
+
+  test('自建的智能体没有动作接入点 ⇒ 一个徽标都不该有', () => {
+    assert.deepEqual(actionEntriesOf(agent({ owner: 'user' })), [])
+    assert.deepEqual(actionEntriesOf(agent({ owner: 'user', entries: ['chat', 'task'] })), [])
   })
 })
