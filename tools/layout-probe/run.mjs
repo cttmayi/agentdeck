@@ -1467,6 +1467,42 @@ const CHECKS = [
     show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
   },
   { view: '任务', key: 'tasks.layoutPresent', label: '任务页也是主从（左右两栏都在）', ok: (v) => v === true },
+  {
+    view: '任务',
+    key: 'tasks.wfRunScrolling',
+    /**
+     * ★★★ 2026-11（D166）：使用者报的真 bug——「编排任务的卡片 多个卡片导致很高，
+     * 也没有显示出滚动条来」。
+     *
+     * 根因：`.wf-run-main` 是 `overflow: hidden` 的网格，三栏里只有左右两栏写了
+     * `overflow-y: auto`，**中栏（卡片树）一条样式都没有** ⇒ 卡片越多它越高，外层把它
+     * 裁掉：下半截看不到、也没有滚动条（"内容被悄悄吃掉"是最难查的一种）。
+     * 判据钉中栏必须是**滚动容器**（`overflow-y: auto` + `min-height: 0`），且它的实际
+     * 高度不超过容器、三栏底边都在容器内、页面没有横向溢出。
+     */
+    label:
+      '★★★ 编排运行画面（三栏）三栏都能自己滚：中栏 `overflow-y: auto` + `min-height: 0`、' +
+      '高度不超过容器、三栏底边都在容器内——卡片一多不会把画面撑高，也不会被裁掉',
+    ok: (v) =>
+      !!v &&
+      typeof v === 'object' &&
+      v.error === undefined &&
+      v.overflowY === 'auto' &&
+      v.minHeight === '0px' &&
+      v.logH <= v.mainH + 1 &&
+      v.logBottomInside === true &&
+      v.stepsBottomInside !== false &&
+      v.workdirBottomInside !== false &&
+      v.pageOverflowX === 0,
+    show: (v) =>
+      v === null
+        ? 'null'
+        : v.error !== undefined
+          ? `夹具失败：${String(v.error)}`
+          : `中栏 overflow-y ${String(v.overflowY)} / min-height ${String(v.minHeight)}　` +
+            `高度 中${String(v.logH)} ≤ 容${String(v.mainH)}　底边在内 ${String(v.logBottomInside)}　` +
+            `横向溢出 ${String(v.pageOverflowX)}px`,
+  },
   { view: '任务', key: 'tasks.listGripPresent', label: '列表拖动把手在页面上（2026-11）', ok: (v) => v === true },
   {
     view: '任务',

@@ -1893,6 +1893,102 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
           !!d().querySelector('.split-layout .list-pane') &&
           !!d().querySelector('.split-layout .detail-pane'),
         )
+        /**
+         * ★★★ 2026-11（D166）：**编排运行画面（三栏）的三栏都要能自己滚**。
+         *
+         * 使用者报的：「编排任务的卡片 多个卡片导致很高，也没有显示出滚动条来」。
+         * 根因：`.wf-run-main` 是 `overflow: hidden` 的网格，而三栏里只有左右两栏写了
+         * `overflow-y: auto`——**中栏 `.wf-run-log` 一条样式都没有** ⇒ 卡片越多它越高，
+         * 外层把它裁掉（既看不到下半截，也没有滚动条）。叠加上 grid 子项默认
+         * `min-height: auto`（内容再高也不肯缩），即使给了 `overflow-y` 也照样顶出去。
+         *
+         * 量五件（每件都是那次故障的一个侧面）：
+         *   ① `.wf-run-log` 的 `overflow-y` 是 `auto`（它得是滚动容器）；
+         *   ② 它的 `min-height` 是 `0`（这条不写，内容会把格子顶出去）；
+         *   ③ 它的**实际高度**不超过容器（`logH <= mainH + 1`）——旧版这里是内容高度；
+         *   ④ 三栏底边都在容器内（没有"被裁掉的下半截"）；
+         *   ⑤ 页面整体没有横向溢出。
+         * ⚠️ 夹具：现造一条编排（引用自建的 `短名`）并跑一次——探针的 PATH 上有假 CLI，
+         *    不会碰真模型。
+         */
+        facts['tasks.wfRunScrolling'] = await (async () => {
+          const api = (path, init) =>
+            f.contentWindow.fetch(path, init).then((r) => (r.status === 204 ? null : r.json()))
+          const created = await api('/api/workflows', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              name: '探针编排：卡片滚动',
+              code: "await flow([agent('短名')], '{{task}}')",
+            }),
+          })
+          const wfId = created?.workflow?.id ?? created?.id ?? null
+          if (wfId === null) return { error: '造编排失败', created }
+          const started = await api(`/api/workflows/${wfId}/run`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ prompt: '探针：量编排运行画面的三栏滚动' }),
+          })
+          // ⚠️ 接口回的是 `{run, issueId}`（不是 issue 本身）——第一版按 `started.issue` 取，
+          //    于是永远失败。标题去 issue 列表里查。
+          const runId = started?.run?.id ?? null
+          const issueId = started?.issueId ?? started?.run?.issueId ?? null
+          if (runId === null) return { error: '起编排失败', started }
+
+          /*
+           * ⚠️ 直接**按路由打开那个运行画面**（`#/workflow-runs/<id>` ⇒ 解析成编排视图的
+           *   运行画面，见 `apps/web/src/lib/route.test.ts`），不走"任务列表里找那一行"。
+           *   第一版走的是列表：先造一条编排运行、再回任务页点开它——那条 issue 却**不在**
+           *   列表里（列表接口只回了探针自己的两条夹具），整条夹具一直"找不到"，量不到。
+           *   路由直达只依赖"这个 run 存在"，与列表的过滤/分组/刷新全部解耦。
+           */
+          f.contentWindow.location.hash = `#/workflow-runs/${runId}`
+          const opened = await until(() => !!d().querySelector('.wf-run-main'), 120)
+          if (!opened) return { error: '路由打开了但没有运行画面（.wf-run-main）', runId }
+
+          const mainEl = d().querySelector('.wf-run-main')
+          const logEl = d().querySelector('.wf-run-log')
+          const stepsEl = d().querySelector('.wf-steps')
+          const workdirEl = d().querySelector('.wf-workdir')
+          if (!mainEl || !logEl) return { error: '运行画面没渲染出三栏' }
+          const R = (el) => (el ? el.getBoundingClientRect() : null)
+          const mainBox = R(mainEl)
+          const logBox = R(logEl)
+          /*
+           * ⚠️ 样式必须在**切走之前**读：下面为了后面那些判据要把地址切回 `#/tasks`，
+           *   切走之后这些元素已经脱离文档，`getComputedStyle` 读出来是空的
+           *   （第一版就是这么在报告里看到 `overflow-y ` 和 `min-height ` 两个空值）。
+           */
+          const logStyle = { overflowY: cs(logEl).overflowY, minHeight: cs(logEl).minHeight }
+          /*
+           * ⚠️ 量完把这条件务删掉：它会留在任务列表里，而后面 `skeleton.rowMinH`
+           * 要求"页内行高差 ≤1px"——这条编排运行行的高度与普通任务不同，留着就把那条判据
+           * 带红（第一版就是这么红的）。删任务会连带删它上面的 run，这正是我们想要的清理。
+           */
+          await api(`/api/issues/${issueId}`, { method: 'DELETE' }).catch(() => {})
+          /*
+           * ⚠️ **回到任务页**：这一段是把地址切到 `#/workflow-runs/<id>` 去量的，
+           *   不切回来的话后面整段判据都是在"那个视图"上量的——第一版漏了这步，
+           *   49 条判据一起变红（而界面本身没问题）。
+           */
+          f.contentWindow.location.hash = '#/tasks'
+          await until(() => !!d().querySelector('.list-pane .list-row-main'), 120)
+          return {
+            overflowY: logStyle.overflowY,
+            minHeight: logStyle.minHeight,
+            logH: Math.round(logBox.height),
+            mainH: Math.round(mainBox.height),
+            logBottomInside: Math.round(logBox.bottom) <= Math.round(mainBox.bottom) + 1,
+            stepsBottomInside: stepsEl
+              ? Math.round(R(stepsEl).bottom) <= Math.round(mainBox.bottom) + 1
+              : null,
+            workdirBottomInside: workdirEl
+              ? Math.round(R(workdirEl).bottom) <= Math.round(mainBox.bottom) + 1
+              : null,
+            pageOverflowX: d().documentElement.scrollWidth - d().documentElement.clientWidth,
+          }
+        })()
+
         facts['tasks.listGripPresent'] = !!d().querySelector('.split-layout .split-grip')
         facts['tasks.mainOverflowY'] = need('任务页 main overflow-y', () => cs(main()).overflowY)
         // 使用者点名要去掉的那句「等待审核」：整份渲染结果里一次都不该出现。

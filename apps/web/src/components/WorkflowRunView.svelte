@@ -377,6 +377,8 @@
   }
   .wf-run-main {
     flex: 1;
+    /* ★ 2026-11（D166）：同一条原因——不写这条，网格内容一多就顶出可视区 */
+    min-height: 0;
     display: grid;
     grid-template-columns: minmax(16rem, 22rem) 1fr minmax(16rem, 22rem);
     gap: var(--sp-3);
@@ -393,8 +395,32 @@
   }
   .wf-steps {
     overflow-y: auto;
+    /* flex/grid 子项默认 `min-height: auto` ⇒ 内容一多就不肯缩，把容器顶出可视区
+       （那就变成"外面没有滚动条、里面内容被裁掉"）。三栏都要显式给 0。 */
+    min-height: 0;
     padding-right: var(--sp-2);
   }
+
+  /*
+   * ⚠️⚠️ 2026-11（D166）：**中栏原来是唯一没有滚动条的那一栏**——使用者报的
+   *   「编排任务的卡片 多个卡片导致很高，也没有显示出滚动条来」。
+   *
+   *   根因两层：
+   *     ① `.wf-run-main` 是 `overflow: hidden` 的网格，三栏里只有 `.wf-steps` 与
+   *        `.wf-workdir` 写了 `overflow-y: auto`，**中栏 `.wf-run-log` 一条样式都没有**
+   *        ⇒ 卡片越多它越高，而外层 `overflow: hidden` 把它**裁掉**：既看不到下半截，
+   *        也没有滚动条（"内容被悄悄吃掉"是最糟的一种，比报错难查得多）；
+   *     ② grid/flex 子项默认 `min-height: auto` ⇒ 内容再高也**不肯缩**，
+   *        所以即使给了 `overflow-y: auto` 也要一起给 `min-height: 0`，否则照样顶出去。
+   *
+   *   ⇒ 中栏自己滚；卡片本身的样子仍在 `components/workflow/*Card.svelte`。
+   */
+  .wf-run-log {
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: var(--sp-2);
+  }
+
   /* 卡片本身的样子与状态在 `components/workflow/*Card.svelte`（各管各的）；
      这里只管"一串卡片之间的间距"。 */
   .wf-outputs {
@@ -406,6 +432,8 @@
   .wf-workdir {
     border-left: 1px solid var(--line);
     padding-left: var(--sp-4);
+    /* ★ 2026-11（D166）：与中栏同一条原因（grid 子项默认 min-height: auto） */
+    min-height: 0;
     overflow-y: auto;
   }
   .wf-workdir h4 {
