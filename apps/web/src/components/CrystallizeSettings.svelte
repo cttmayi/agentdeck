@@ -133,7 +133,7 @@
   <section class="drawer-section">
     <h3>{$t('crystallize.settingsProxy')}</h3>
     <p class="faint fs-xs">{$t('crystallize.settingsProxyHint')}</p>
-    <div class="proxy-row">
+    <div class="field-row">
       <input type="text" bind:value={proxyUrl} placeholder={DEFAULT_PROXY} spellcheck="false" />
       <button type="button" class="btn btn--ghost btn--sm" disabled={proxyBusy} onclick={() => void saveProxy()}>
         {$t('crystallize.settingsProxySave')}
@@ -154,15 +154,6 @@
 </SettingsPanel>
 
 <style>
-  .proxy-row {
-    display: flex;
-    gap: var(--sp-1);
-    align-items: center;
-  }
-
-  .proxy-row input {
-    flex: 1;
-    min-width: 0;
-    font-size: var(--fs-sm);
-  }
+  /* ★ D174：`.proxy-row` 已删（改用全局 `.field-row`：一行 = 控件 + 按钮）。
+     这一段只剩**本面板自己的**样式。 */
 </style>

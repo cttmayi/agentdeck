@@ -467,9 +467,9 @@
     </div>
     <div class="field">
       <label for="wf-run-workdir">{$t('workflows.workDirLabel')}</label>
-      <!-- 与「新建任务」「定时任务」同一个控件（.workdir-row + 浏览… + DirPicker）：
+      <!-- 与「新建任务」「定时任务」同一个控件（.field-row + 浏览… + DirPicker）：
            输入框始终留着（手打永远可用），选择框是"看见目录里有什么"的入口。 -->
-      <div class="workdir-row">
+      <div class="field-row">
         <input
           id="wf-run-workdir"
           type="text"

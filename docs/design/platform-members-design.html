@@ -1520,20 +1520,6 @@ hr {
 .form-advanced {
   margin: var(--sp-2) 0;
 }
-.workdir-row {
-  display: flex;
-  gap: var(--sp-2);
-}
-.workdir-row input {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-/* ★ 分批第 230 批：「浏览…」不许被挤窄（中文最小内容宽度 = 一个字，
-   一挤就折成两行）。收缩全推给输入框。 */
-.workdir-row > button {
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
 
 /* 窄屏的返回按钮独占第一行。
    ⚠️ D139：`justify-self: start` + 不拉满——拉满时窄屏栏头会变成"一条整宽横条 +
@@ -1923,7 +1909,52 @@ label > select { margin-top: var(--sp-1); }
   font-size: var(--fs-sm);
   color: var(--text-faint);
 }
-.field > input { width: 100%; }
+/* ★ 2026-11（D174）：三个控件都拉满——原来只写了 `> input`，`select` / `textarea`
+   在 `.field` 里要靠各处自己补（`ChatSettings` 就补了一句 `.voice-field select`）。 */
+.field > input,
+.field > select,
+.field > textarea { width: 100%; }
+
+/* ★ 2026-11（D174）：**紧凑档**——设置面板里一行挨一行地堆，标签小一档、间距 2px。
+   原来这是 `ChatSettings` 自己 scoped 的 `.voice-field`（`gap: 2px` + `font-size: --fs-xs`
+   + `flex: 1 1 8rem`），也就是"同一件事在组件里又写了一遍"。 */
+.field--compact {
+  gap: 2px;
+  margin-bottom: var(--sp-2);
+}
+.field--compact > label {
+  font-size: var(--fs-xs);
+}
+
+/* ★ 2026-11（D174）：**一行并排**——控件 + 按钮、两个字段并排，都走这一条。
+   替代了三处各写一遍/两处内联样式：
+     · `.voice-row`（`ChatSettings` scoped）
+     · `.proxy-row`（`CrystallizeSettings` scoped）
+     · `.workdir-row`（这条本来是全局的，但只有 4 处用）
+     · 设置页远端那两处 `style="display:flex;gap:var(--sp-2)"`
+   对齐用 `flex-end`（**底对齐**）：短控件（勾选框）与长控件（标签+下拉）混排时，
+   `center` 会让勾选框"浮在中间"、`stretch` 会把它拉高——批 308 的使用者报过这个。
+   ⚠️ `> input/select` 必须 `width: auto`：全局 `input,select` 写的是 `width: 100%`，
+   在 flex 行里不重置就会把旁边的按钮挤没。 */
+.field-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-2);
+}
+.field-row > input,
+.field-row > select {
+  flex: 1 1 8rem;
+  min-width: 0;
+  width: auto;
+}
+/* ★ 分批第 230 批：「浏览…」不许被挤窄（中文最小内容宽度 = 一个字，
+   一挤就折成两行）。收缩全推给输入框。 */
+.field-row > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 
 /* ══════════════ 表格 ══════════════ */
 

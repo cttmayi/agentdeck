@@ -1241,7 +1241,7 @@
         <label for="chat-draft-workdir" class="draft-workdir-label">
           {$t('chat.draftWorkDirLabel')}
         </label>
-        <div class="workdir-row">
+        <div class="field-row">
           <input
             id="chat-draft-workdir"
             class="draft-workdir-input"

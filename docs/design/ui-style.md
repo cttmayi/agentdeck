@@ -74,7 +74,14 @@
 ### 2.2 输入 / 表单
 
 - 单个控件：`input, textarea, select` 已经有全局样式（底色、描边、圆角、focus），**不要重写**。
-- 标签 + 控件 + 说明：用 `.field`（内含 `> label`、`> input`），一行一个。
+- 标签 + 控件 + 说明：用 `.field`（内含 `> label`，`> input` / `> select` / `> textarea`
+  都拉到满宽），一行一个。**不要再写包裹式 `<label>文字 + <select></label>`**（标签与控件
+  是两个元素，用 `for` / `id` 关联；D174 把设置页那 5 处、ChatSettings 那 4 处都收了过来）。
+  - 紧凑档 `.field--compact`：设置面板里一行挨一行地堆（标签 `--fs-xs`、间距 2px）。
+  - 一行并排 `.field-row`：控件 + 按钮（「浏览…」「保存地址」）、两个字段并排、短控件与
+    长控件混排，都走这一条（**`align-items: flex-end` 底对齐**，理由见 §2.4「混排行」）。
+    D174 之前这是三处各写一遍（`.voice-row` / `.proxy-row` / `.workdir-row`）+ 两处内联
+    `style="display:flex;gap:…"`。
 - 只读/不可用：`disabled` 属性（浏览器默认样式已配好），**不要**自己画一个灰框冒充。
 - 输入框旁的动作（浏览…/发送）：动作本身是 `btn btn--ghost` 或 `btn btn--primary`，
   容器负责对齐，**不要在按钮上写 `height`**。
@@ -104,7 +111,7 @@
 | 三栏壳 | `.shell` + `.topbar` / `.sidebar` / `.main` | 顶栏高度 `--topbar-h`、侧栏宽 `--sidebar-w` |
 | 列表 + 详情 | `.split-layout`（`.board` 看板 / `.with-detail` / `.with-artifact`） | 窄屏自动退成"列表 → 详情"两层 |
 | 列表栏 | `.pane`, `.pane-head`, `.pane-body`, `.pane-foot`, `.pane-actions` | 栏头不放标题（D64） |
-| 主区面板（设置这类） | `.main-panel` + `.main-panel-head`（`h2` + `.panel-back`）+ `.main-panel-body` + `.main-panel-foot` | **所有"整块换掉右栏"的面板都长这样** |
+| 主区面板（设置这类） | `.main-panel` + `.main-panel-head`（`h2` + `.panel-back`）+ `.main-panel-body` + `.main-panel-foot`（分段用 `.drawer-section`） | **所有"整块换掉右栏"的面板都长这样**；设置**页**（`views/Settings.svelte`）的三张卡也是同一个壳（D174：原来是页面私有的 `.set-card` / `.set-block`，边框还误用填充档 `--surface-2`） |
 | 目录选择 | 组件 `DirPicker`（「浏览…」打开它，`bind:open` + `bind:value` 与表单输入框同一个值） | 路径行 + 导航行 + 列表（目录可进、文件只作佐证）+ 底部「选这个目录」；输入框始终留着，手打永远可用。**不要**自己再搭一个目录弹层 |
 | 详情头 | `.detail-head` + `.detail-sub` + `.detail-actions` | 动作按钮 ≥2 个时自动画分组轨道。所有「标题 + 元信息 + 动作」的头都用它（聊天栏头 313 批已并入，不要再自己写 flex 补丁） |
 | 空态 | `.empty`（可带 `strong` + `p`） | 别自己拼居中的灰字 |
@@ -114,7 +121,7 @@
 | 行分界 | 行与行之间**一条 1px 的 `--line` 发丝线**（`app.css` 的 `.list-row + .list-row`），`ul` 不再靠空隙分段（`gap: 0`）；第一行不画（列表顶部不凭空多一条线） | D141：使用者"列表的内容只有选中才有框，没选择的时候，看不清楚分界"——原来靠 `gap: 4px` 分段，而空隙在静止状态（不 hover、不选中）什么都读不出来。⚠️ 这条规则**只能写在 `app.css`**：放进 `ListRow.svelte` 的 scoped 样式会被 Svelte 剪掉（`.list-row + .list-row` 实测没进构建产物） |
 | 副行基线 | 行的第二行（辅助信息）统一 `class="list-row-sub …"`（`app.css`：`display:flex` + **`align-items: baseline`** + 字号/字色显式写 + `> * { min-width: 0 }`） | D142：六个列表页原来各写一份、其中五处是 `align-items: center`——而这一行常把文字与徽标混着放，徽标的盒子比文字高，`center` 对齐的是**盒子**：于是"最近 15 小时前"比前面几段**低 3px**（实测 center 3px / baseline 0px）。页面只写"这一页多出来的形状"（任务要 `flex-wrap: wrap`、智能体要 `width: 100%`） |
 | 单行省略 | 列表标题一类要"一行 + 省略号"的元素必须 **`display: block` + `max-width: 100%` + `overflow: hidden` + `text-overflow: ellipsis` + `white-space: nowrap`** 五件套 | 310 批：行内元素上 `overflow`/`text-overflow` 不生效，`nowrap` 只挡换行*算法*，中文长标题在窄栏里仍会被顶成两行、末尾却还挂着省略号（使用者报的） |
-| 混排行 | 短控件（勾选）+ 长控件（标签+输入）同排时 **`align-items: flex-end`** | 308 批：`center` 会让勾选浮在中间、`flex-start` 贴着顶边——两者高度差大时都不像同一行。新写这类行照这条来 |
+| 混排行 | `.field-row`（`display:flex` + **`align-items: flex-end`** + `flex-wrap`；`> input/select` 收缩、`> button` 不许被挤窄） | 308 批：`center` 会让勾选浮在中间、`flex-start` 贴着顶边——两者高度差大时都不像同一行。**D174 起这条有了类名**：新写这类行直接用 `.field-row`，不要再造一个 `.xxx-row` |
 | 提示条 | `.notice` + `.bad` / `.warn` / `.good` | 一句话；更长的进 body |
 | 浮层 | `.drawer*` / `.modal*` / `.page-menu` / `.toast` | 遮罩 + 描边 + `--shadow-2` 三层一起给 |
 | 表格 | `.table-wrap`（壳）+ `<table class="table">` | 307 批：表头/单元格内距等规则挂**元素选择器与 `.table` 两条**，所以"长得像表格但不是 `<table>` 元素"的东西加 `class="table"` 就同款 |
@@ -124,6 +131,12 @@
 
 `SettingsPanel.svelte` 是"主区面板"的共享外壳（`section.main-panel` + 头部返回 + body + foot），
 新加一个设置页 = **用它 + 写内容**，不要自己再拼一遍头部和返回按钮。
+
+D174 归位的三件（代码里还看到就是没迁移完）：
+- 设置项的**分段**一律 `.drawer-section`（不要再写 `.set-block`）；
+- 设置卡 / 面板的**外壳**一律 `.main-panel`（不要再写 `.set-card`）；
+- 一行并排的**控件行**一律 `.field-row`（不要再写 `.voice-row` / `.proxy-row` / `.workdir-row`，
+  也不要内联 `display:flex;gap`）。
 
 ### 2.6 列表页范例：照抄这一份，不要自己发明
 

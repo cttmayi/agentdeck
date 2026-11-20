@@ -407,20 +407,21 @@
       {/if}
     </p>
 
-    <div class="voice-row">
-      <label class="voice-field">
-        <span>{$t('chat.voiceSettingsModel')}</span>
-        <select data-voice-model onchange={(e) => void saveSettings({ model: pick(e) })}>
+    <div class="field-row">
+      <div class="field field--compact">
+        <label for="set-voice-model">{$t('chat.voiceSettingsModel')}</label>
+        <select id="set-voice-model" data-voice-model onchange={(e) => void saveSettings({ model: pick(e) })}>
           {#each models as m (m.id)}
             <option value={m.id} selected={settings?.model === m.id}>
               {m.label} · {m.approxMb} MiB
             </option>
           {/each}
         </select>
-      </label>
-      <label class="voice-field">
-        <span>{$t('chat.voiceSettingsLanguage')}</span>
+      </div>
+      <div class="field field--compact">
+        <label for="set-voice-language">{$t('chat.voiceSettingsLanguage')}</label>
         <select
+          id="set-voice-language"
           data-voice-language
           onchange={(e) => void saveSettings({ language: pick(e) as VoiceSettings['language'] })}
         >
@@ -430,13 +431,14 @@
             >{$t('chat.voiceLanguageAuto')}</option
           >
         </select>
-      </label>
+      </div>
     </div>
 
-    <div class="voice-row">
-      <label class="voice-field">
-        <span>{$t('chat.voiceSettingsSensitivity')}</span>
+    <div class="field-row">
+      <div class="field field--compact">
+        <label for="set-voice-sensitivity">{$t('chat.voiceSettingsSensitivity')}</label>
         <select
+          id="set-voice-sensitivity"
           data-voice-sensitivity
           onchange={(e) =>
             void saveSettings({ sensitivity: pick(e) as VoiceSettings['sensitivity'] })}
@@ -451,7 +453,7 @@
             >{$t('chat.voiceSensitivityQuick')}</option
           >
         </select>
-      </label>
+      </div>
       <!-- ★ 286 批：用对话里的标识符辅助识别（默认开；关掉之后手动词表照旧生效） -->
       <label class="voice-check" title={$t('chat.voiceSettingsContextHint')}>
         <input
@@ -475,9 +477,10 @@
     </div>
 
     <!-- ★ 分批第 281 批：识别完之后走哪条路（回填输入框 / 先替你发一条消息） -->
-    <label class="voice-field voice-output" title={$t('chat.voiceSettingsOutputHint')}>
-      <span>{$t('chat.voiceSettingsOutput')}</span>
+    <div class="field field--compact" title={$t('chat.voiceSettingsOutputHint')}>
+      <label for="set-voice-output">{$t('chat.voiceSettingsOutput')}</label>
       <select
+        id="set-voice-output"
         data-voice-output
         onchange={(e) => void saveSettings({ outputMode: pick(e) as VoiceSettings['outputMode'] })}
       >
@@ -488,10 +491,10 @@
           >{$t('chat.voiceOutputViaSkill')}</option
         >
       </select>
-    </label>
+    </div>
 
     <!-- 模型没下时给一颗按钮；下的时候说"在下"（进度条是后面的事，现在只有一个状态） -->
-    <div class="voice-row">
+    <div class="field-row">
       {#if capability !== null && !capability.model.present}
         <button
           type="button"
@@ -787,29 +790,9 @@
   .bad-dot {
     background: var(--bad);
   }
-  /* ★ 308 批：这一行是**短控件（勾选）+ 长控件（标签+下拉/输入）混排**。
-     `align-items: center` 在两者高度差大时会让勾选"浮在中间"，`flex-start` 更糟
-     （贴着顶边，使用者报的就是这个）。混排的统一做法是**底对齐**：短控件压在这行
-     控件的底边上，看起来才像同一行的东西。 */
-  .voice-row {
-    display: flex;
-    align-items: flex-end;
-    gap: var(--sp-2);
-    margin-bottom: var(--sp-2);
-    flex-wrap: wrap;
-  }
-  .voice-field {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    font-size: var(--fs-xs);
-    color: var(--text-faint);
-    flex: 1 1 8rem;
-    min-width: 0;
-  }
-  .voice-field select {
-    width: 100%;
-  }
+  /* ★ D174：`.voice-row` / `.voice-field` 两套自写样式已删——行改用全局 `.field-row`
+     （底对齐的理由写在 app.css 那一条里，批 308 的注释随定义一起搬过去了），
+     字段改用全局 `.field.field--compact`（`.field > select { width: 100% }` 也在那里）。 */
   .voice-check {
     display: inline-flex;
     align-items: center;
@@ -857,9 +840,6 @@
   }
 
   /* 输出方式那一行：整行给下拉（它有三档、字也长，挤在并排里会折行） */
-  .voice-output {
-    flex: 1 1 100%;
-  }
   .voice-path {
     overflow: hidden;
     text-overflow: ellipsis;

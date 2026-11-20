@@ -833,7 +833,7 @@ import type { WebTextId } from '@agentdeck/i18n'
             <label for="sched-workdir" style="margin-top:var(--sp-3)">
               {$t('newtask.workDirLabel')}
             </label>
-            <div class="workdir-row">
+            <div class="field-row">
               <input
                 id="sched-workdir"
                 bind:value={formWorkDir}

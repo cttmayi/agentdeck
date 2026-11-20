@@ -90,11 +90,16 @@
 
 <div class="set-grid">
   <!-- ══════════ 通用 ══════════ -->
-  <section class="set-card" data-set-general>
-    <h2>{$t('settings.general')}</h2>
+  <!-- ★ D174：外壳用 `.main-panel`（与三个设置面板同一个壳，见 ui-style.md §2 "主区面板"），
+       原来是页面私有的 `.set-card`（边框还误用了填充档 `--surface-2`）。 -->
+  <section class="main-panel" data-set-general>
+    <header class="main-panel-head">
+      <h2>{$t('settings.general')}</h2>
+    </header>
+    <div class="main-panel-body">
 
     <!-- 主题三档：跟随系统 / 手动定死 -->
-    <div class="set-block">
+    <section class="drawer-section">
       <h3>{$t('settings.theme')}</h3>
       <div class="theme-picker" role="radiogroup" aria-label={$t('settings.theme')}>
         {#each THEME_CHOICES as c (c.value)}
@@ -110,10 +115,10 @@
         {/each}
       </div>
       <p class="hint">{$t('settings.themeHint')}</p>
-    </div>
+    </section>
 
     <!-- Markdown 里 HTML 的三档（默认关，可开白名单/原始） -->
-    <div class="set-block">
+    <section class="drawer-section">
       <h3>{$t('settings.markdownHtml')}</h3>
       <div class="theme-picker" role="radiogroup" aria-label={$t('settings.markdownHtml')}>
         {#each MARKDOWN_HTML_CHOICES as c (c.value)}
@@ -132,14 +137,15 @@
       {#if $markdownHtmlMode === 'raw'}
         <p class="hint warn">{$t('settings.markdownHtmlRawWarn')}</p>
       {/if}
-    </div>
+    </section>
 
     <!-- 界面语言（唯一入口） -->
-    <div class="set-block">
+    <section class="drawer-section">
       <h3>{$t('settings.language')}</h3>
-      <label>
-        {$t('settings.languageLabel')}
+      <div class="field">
+        <label for="set-language">{$t('settings.languageLabel')}</label>
         <select
+          id="set-language"
           value={$locale}
           onchange={(e) => {
             const v = (e.currentTarget as HTMLSelectElement).value
@@ -150,16 +156,17 @@
             <option value={l}>{LOCALE_LABEL[l]}</option>
           {/each}
         </select>
-      </label>
+      </div>
       <p class="hint">{$t('settings.languageHint')}</p>
-    </div>
+    </section>
 
     <!-- 全局 runtime 默认值（agent 记 'default' 时用它；三级解析） -->
-    <div class="set-block" data-default-runtime>
+    <section class="drawer-section" data-default-runtime>
       <h3>{$t('settings.defaultRuntime')}</h3>
-      <label>
-        {$t('settings.defaultRuntimeLabel')}
+      <div class="field">
+        <label for="set-default-runtime">{$t('settings.defaultRuntimeLabel')}</label>
         <select
+          id="set-default-runtime"
           value={$identity?.defaultRuntimeKey ?? ''}
           onchange={(e) => {
             const v = (e.currentTarget as HTMLSelectElement).value
@@ -178,14 +185,18 @@
             <option value={key}>{key}</option>
           {/each}
         </select>
-      </label>
+      </div>
       <p class="hint">{$t('settings.defaultRuntimeHint')}</p>
+    </section>
     </div>
   </section>
 
   <!-- ══════════ 成本 ══════════ -->
-  <section class="set-card" data-set-costs>
-    <h2>{$t('settings.costs')}</h2>
+  <section class="main-panel" data-set-costs>
+    <header class="main-panel-head">
+      <h2>{$t('settings.costs')}</h2>
+    </header>
+    <div class="main-panel-body">
     {#if costsError}
       <div class="notice bad">{costsError}</div>
     {:else if !costs}
@@ -229,47 +240,49 @@
     <p class="hint">
       {$t('settings.exportHintBefore')}<strong>{$t('settings.exportHintStrong')}</strong>{$t('settings.exportHintAfter')}
     </p>
+    </div>
   </section>
 
   <!-- ══════════ 远端能力 ══════════ -->
-  <section class="set-card" data-set-remote>
-    <h2>
-      {$t('settings.remoteSection')}
+  <section class="main-panel" data-set-remote>
+    <header class="main-panel-head">
+      <h2>{$t('settings.remoteSection')}</h2>
       {#if $remoteError}
         <span class="bad fs-xs">{$remoteError}</span>
       {:else if $remoteCatalog}
         <span class="faint fs-xs">{$t('settings.connected', { url: getRemoteUrl() })}</span>
       {/if}
-    </h2>
+    </header>
+    <div class="main-panel-body">
 
     {#if !$remoteLoggedIn}
       <p class="hint">
         {$t('settings.remoteProcessBefore')}<strong>{$t('settings.remoteProcessStrong')}</strong>{$t('settings.remoteProcessAfter')}
       </p>
       <form onsubmit={(e) => { e.preventDefault(); void submitLogin(false) }}>
-        <label>
-          {$t('settings.email')}
-          <input bind:value={email} type="email" required autocomplete="username" />
-        </label>
-        <label>
-          {$t('settings.password')}
-          <input bind:value={password} type="password" required autocomplete="current-password" />
-        </label>
-        <div style="display:flex;gap:var(--sp-2)">
+        <div class="field">
+          <label for="set-email">{$t('settings.email')}</label>
+          <input id="set-email" bind:value={email} type="email" required autocomplete="username" />
+        </div>
+        <div class="field">
+          <label for="set-password">{$t('settings.password')}</label>
+          <input id="set-password" bind:value={password} type="password" required autocomplete="current-password" />
+        </div>
+        <div class="field-row">
           <button type="submit">{$t('settings.signIn')}</button>
           <button type="button" class="btn btn--secondary" onclick={() => void submitLogin(true)}>{$t('settings.register')}</button>
         </div>
       </form>
       <!-- 保存按钮与地址输入框同排（原抽屉 2026-10 紧凑性） -->
-      <label style="margin-top:var(--sp-3)">
-        {$t('settings.remoteUrl')}
-        <div style="display:flex;gap:var(--sp-2)">
-          <input bind:value={$remoteUrlValue} style="flex:1;min-width:0" />
-          <button type="button" class="btn btn--secondary" style="flex:none" onclick={saveRemoteUrl}>
+      <div class="field">
+        <label for="set-remote-url">{$t('settings.remoteUrl')}</label>
+        <div class="field-row">
+          <input id="set-remote-url" bind:value={$remoteUrlValue} />
+          <button type="button" class="btn btn--secondary" onclick={saveRemoteUrl}>
             {$t('settings.saveUrl')}
           </button>
         </div>
-      </label>
+      </div>
     {:else}
       <p>{$t('settings.signedInAs')}<strong>{$remoteAccount?.displayName}</strong> <span class="faint">{$remoteAccount?.email}</span></p>
       <button type="button" class="btn btn--secondary" onclick={doLogout}>{$t('settings.signOut')}</button>
@@ -296,6 +309,7 @@
       <strong>{$t('settings.reportingStrong1')}</strong>{$t('settings.reportingAfter1')}<strong>{$t('settings.reportingStrong2')}</strong>{$t('settings.reportingMid1')}<strong>{$t('settings.reportingStrong3')}</strong>{$t('settings.reportingMid2')}<strong>{$t('settings.reportingStrong4')}</strong>{$t('settings.reportingMid3')}<br />
       {$t('settings.reportingBefore2')}{$t('settings.reportingAfter2')}<strong>{$t('settings.reportingStrong5')}</strong>{$t('settings.reportingEnd')}
     </p>
+    </div>
   </section>
 </div>
 
@@ -309,26 +323,10 @@
     gap: var(--sp-4);
     align-items: start;
   }
-  .set-card {
-    background: var(--surface);
-    border: 1px solid var(--surface-2);
-    border-radius: var(--radius);
-    padding: var(--sp-4) var(--sp-5);
-  }
+  /* ★ D174：`.set-card` / `.set-block` 两套页面私有的样式已删——卡片改用全局 `.main-panel`
+     （与三个设置面板同一个壳），分段改用全局 `.drawer-section`（面板里那 9 段同一个定义）。
+     这里只剩**页面布局**（两列网格 + 远端卡跨行），符合"页面只决定放什么、放在哪"。 */
   [data-set-remote] {
     grid-column: 1 / -1;
-  }
-  .set-card > h2 {
-    font-size: var(--fs-md);
-    margin-bottom: var(--sp-3);
-  }
-  .set-block {
-    padding: var(--sp-2) 0;
-    border-top: 1px solid var(--surface-2);
-  }
-  .set-block:first-child { border-top: 0; }
-  .set-block h3 {
-    font-size: var(--fs-sm);
-    margin-bottom: var(--sp-2);
   }
 </style>
