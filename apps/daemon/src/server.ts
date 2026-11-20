@@ -1002,6 +1002,31 @@ function parseInstallSource(
  * 执行器读的是**同一个函数**——"界面上显示的那份"与"真的投递出去的那份"
  * 必须是同一份，否则这个功能最该防的错觉（看到的不是生效的）就成立了。
  */
+/**
+ * ★★ 2026-11（D164）：**名字唯一**这一关的唯一实现（新建与改名共用）。
+ *
+ * 返回"撞上的那条"的可读说明（`平台成员（id）` / `你自己的（id）`），没撞就是 `null`。
+ *
+ * 三条口径：
+ *   · 判据是**去掉首尾空白后逐字相等**——不转小写：对中文没意义，对英文名却会让
+ *     `Writer` 与 `writer` 互相打架，那不符合直觉；
+ *   · `selfId` 传"正在改的那条"，改名时它当然会撞上自己（那是 no-op，不是冲突）；
+ *   · 撞上时**点名是哪一条**：只说"名字重复了"会让人把列表翻一遍。
+ */
+async function duplicateNameOf(
+  store: Store,
+  workspaceId: WorkspaceId,
+  name: string,
+  selfId: string | null,
+): Promise<string | null> {
+  const wanted = name.trim()
+  if (wanted === '') return null
+  const all = await store.listAgents(workspaceId)
+  const hit = all.find((a) => (a.name as string) === wanted && (a.id as string) !== selfId)
+  if (hit === undefined) return null
+  return `${ownerOf(hit) === 'platform' ? '平台成员' : '你自己的'}（${hit.id as string}）`
+}
+
 async function readWorkspaceSettings(
   store: Store,
   workspaceId: WorkspaceId,
@@ -3711,6 +3736,25 @@ async function injectedSkillsOf(
         sendJson(res, 400, { error: 'name 太长了（上限 100 字符）' })
         return
       }
+      /*
+       * ★★ 2026-11（D164）：**重名在保存时就拒**（使用者："保存时，检查重名"）。
+       *
+       * 为什么这一关必须在这一层：编排代码按**名字**引用智能体（`agent('撰稿员')`），
+       * 而 D163 给重名定了性——运行时是**歧义**，只能报错。与其让人配出一份重名的数据、
+       * 等到跑编排时才发现"有两条同名"，不如在落库这一步就说清。
+       * 判据是**去掉首尾空白后逐字相等**（不区分大小写对中文没有意义，对英文名则会
+       * 让 `Writer` 与 `writer` 互相打架——那反而不符合直觉）。
+       */
+      const taken = await duplicateNameOf(store, workspaceId, name, null)
+      if (taken !== null) {
+        sendJson(res, 400, {
+          error:
+            `已经有同名的智能体「${name}」（${taken}）。名字要唯一——编排按名字引用智能体，` +
+            '重名会让它不知道找哪一条。换一个名字吧。',
+          code: 'agent_name_taken',
+        })
+        return
+      }
 
       // ★ 私有归属（第二轮）：`ownerGroupId` 有值 = 这个 agent 属于某个组。
       /*
@@ -3853,74 +3897,15 @@ async function injectedSkillsOf(
       return
     }
 
-    /**
-     * ★★ 2026-11（D160）：**复制智能体**（`POST /api/agents/:id/copy`）。
+    /*
+     * ⚠️ 2026-11（D164）：这里原来有一条 `POST /api/agents/:id/copy`（D160 加的）。
+     *   **删掉了**（使用者定："复制智能体，属于新建状态，点保存才保存"）——复制不是一个
+     *   立即落库的动作，而是"用那条的配置**预填**一张新建表单"。于是它根本不需要服务端
+     *   接口：预填在前端做，落库走 `POST /api/agents`（连同它自己的校验与重名检查）。
      *
-     * 它是「想改一下这条智能体」的**正路**，替掉了原来的两颗按钮（「恢复成默认值」与
-     * 「改为普通智能体」）：
-     *   · 平台成员原样不动 ⇒ 平台自己的流程一点不受影响，也不会"多出厂一条"；
-     *   · 想改口吻就改**副本**，原件永远干净；
-     *   · 自建智能体也能复制（开个"试试另一套指令"的分支，不用从零写）。
-     *
-     * **复制什么**（一条一条都有理由）：
-     *   · 名字（`原名（副本）`，重名时补序号）——不然列表里两条一模一样，谁是谁分不清；
-     *   · 指令 / CLI / 模型 / 环境变量 / 审核标准 / 工作目录——"它怎么干活"的配置；
-     *   · 挂载的**共享技能**（只留库里还在的那些——复制一条已卸载的技能 id 等于造一条
-     *     悬空引用，而它要到运行时才炸）；
-     *   · 记忆开关（偏好，跟着配置走）。
-     * **不复制**：
-     *   · **记忆条目**——那是它自己的经验，跟着历史走；抄过去会让副本"记得没发生过的事"；
-     *   · **独有技能**（`agents/<id>/SKILL/`）——文件资产，复制过去就是两份各自维护；
-     *   · **归属/入口**：副本一律 `owner: 'user'` + 三项入口全开。它就是一个普通智能体，
-     *     不继承 `action:<id>` 那种"平台会来叫它"的入口（那些由槽位表决定）。
+     *   这一改还顺手消掉一个隐患：原来 copy 一按就多一条记录，而**取消**这个念头不存在
+     *   （想反悔只能删）。现在它和其它新建一样，点「保存」才写库。
      */
-    const agentCopyMatch = /^\/api\/agents\/([^/]+)\/copy$/.exec(path)
-    if (req.method === 'POST' && agentCopyMatch) {
-      const agentId = decodeURIComponent(agentCopyMatch[1]!) as Agent['id']
-      const source = await store.getAgent(agentId)
-      if (!source) {
-        sendJson(res, 404, { error: `agent 不存在：${agentId}` })
-        return
-      }
-      const all = await store.listAgents(workspaceId)
-      // 重名时补序号：`原名（副本）`、`原名（副本） 2`……
-      const taken = new Set(all.map((a) => a.name as string))
-      const base = `${String(source.name)}（副本）`
-      let name = base
-      for (let n = 2; taken.has(name); n += 1) name = `${base} ${n}`
-
-      // 只保留库里还在的共享技能（悬空 id 要到运行时才炸）
-      const known = new Set((await store.listSkills(workspaceId)).map((sk) => sk.id as string))
-      const skillIds = source.skillIds.filter((id) => known.has(id as string))
-
-      const now = Date.now()
-      const copy: Agent = {
-        id: ulid() as Agent['id'],
-        workspaceId,
-        name,
-        /*
-         * ⚠️ 抄的是**原文**（`source.instructions`），不是 `effectiveInstructions()`——
-         *   后者给平台成员拼过平台守则；抄进副本会让那段守则变成"使用者写的"，
-         *   第二次组装就会拼两遍。
-         */
-        instructions: source.instructions,
-        memoryEnabled: source.memoryEnabled === true,
-        model: source.model,
-        runtimeKey: source.runtimeKey,
-        workDir: source.workDir,
-        skillIds: skillIds as Agent['skillIds'],
-        env: source.env,
-        reviewStandard: source.reviewStandard,
-        owner: 'user',
-        entries: [...USER_ENTRIES],
-        createdAt: now,
-        updatedAt: now,
-      }
-      await store.insertAgent(copy)
-      info(`已复制智能体：「${String(source.name)}」→「${name}」`)
-      sendJson(res, 201, { agent: { ...copy, slot: null, halfBuiltin: false }, source: { id: source.id, name: source.name } })
-      return
-    }
 
     // ── 改 agent（FR-AGENT-19：可点开看细节并编辑）──
     //
@@ -4107,6 +4092,12 @@ async function injectedSkillsOf(
         sendJson(res, 200, {
           ...agent,
           instructions: effectiveInstructions(agent),
+          /*
+           * ★ 2026-11（D164）：**原文**（库里存的那份，不含平台守则）。
+           *   复制（= 预填一张新建表单）要用它：拿组装后的全文去预填，会把平台守则
+           *   变成"使用者写的"文本，而副本作为自建智能体不会再组装一次。
+           */
+          rawInstructions: agent.instructions,
           owner: ownerOf(agent),
           entries: entriesOf(agent),
           // ★ 2026-11（D154）：与列表同一口径（详情页要显示"这是哪一条"）
@@ -4198,6 +4189,19 @@ async function injectedSkillsOf(
           const name = typeof body['name'] === 'string' ? body['name'].trim() : ''
           if (name === '') {
             sendJson(res, 400, { error: 'name 不能为空' })
+            return
+          }
+          /*
+           * ★ 2026-11（D164）：改名也查重（与新建**同一个函数**）。`selfId` 传自己——
+           *   改成同名是 no-op，不该被当成冲突（"我什么都没改却报重复"最让人困惑）。
+           */
+          const taken = await duplicateNameOf(store, workspaceId, name, current.id as string)
+          if (taken !== null) {
+            sendJson(res, 400, {
+              error:
+                `已经有同名的智能体「${name}」（${taken}）。名字要唯一——编排按名字引用智能体。`,
+              code: 'agent_name_taken',
+            })
             return
           }
           patch.name = name

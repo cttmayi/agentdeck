@@ -432,14 +432,27 @@ const CHECKS = [
      *   "复制"的行为由 `agent-copy.test.ts` 在接口层钉着（这里只守"入口在、旧的不复活"）。
      */
     label:
-      '★★ 平台成员栏头里有「复制」；**没有**「恢复成默认值」也没有「改为普通智能体」' +
-      '（那两颗被复制取代：想改口吻就改副本，平台那条原样不动）',
+      '★★★ 平台成员栏头里有「复制」；**没有**「恢复成默认值」也没有「改为普通智能体」。' +
+      '**点复制 ⇒ 带预填的新建表单**（名字是「原名（副本）」、指令也带过来了），' +
+      '而且**点取消之后列表一条都没多**——"点保存才保存"（D164）',
     ok: (v) =>
-      !!v && v.present === true && String(v.label ?? '') === '复制' && v.hasRestore === false && v.hasDetach === false,
+      !!v &&
+      v.present === true &&
+      String(v.label ?? '') === '复制' &&
+      v.hasRestore === false &&
+      v.hasDetach === false &&
+      /* ★ 2026-11（D164）：点下去是**带预填的新建表单**，而且点取消之后一条都没多 */
+      v.formOpened === true &&
+      v.name === v.expected &&
+      v.instructionsFilled === true &&
+      v.rowsAfter === v.rowsBefore,
     show: (v) =>
       v === null
         ? 'null'
-        : `按钮「${String(v.label)}」　恢复默认 ${String(v.hasRestore)}　改为普通智能体 ${String(v.hasDetach)}`,
+        : `按钮「${String(v.label)}」　新建表单 ${String(v.formOpened)}　` +
+          `名字「${String(v.name)}」（应为「${String(v.expected)}」）　指令预填 ${String(v.instructionsFilled)}　` +
+          `行数 ${String(v.rowsBefore)}→${String(v.rowsAfter)}　` +
+          `恢复默认 ${String(v.hasRestore)}　改为普通智能体 ${String(v.hasDetach)}`,
   },
   {
     view: '智能体',

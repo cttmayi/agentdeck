@@ -58,12 +58,20 @@
   export let onclose: () => void
   export let onchanged: () => void
   /**
-   * ★ 2026-11（D160）：**切到另一条**（复制完成后选中副本）。
+   * ★ 2026-11（D164）：**复制 → 预填一张新建表单**（不是立即落库）。
    *
-   * 组件自己不认识列表（`selectedId` 在 `Agents.svelte` 手里），所以这里只把新 id
-   * 交出去；不传就退化成"只刷新列表"（其它复用这个组件的地方不受影响）。
+   * 组件自己不认识"新建"这个状态（它在 `Agents.svelte` 手里），所以这里只把**预填数据**
+   * 交出去，由页面切到 `creating` 并把它交给 `NewAgentForm`。
    */
-  export let onselect: ((id: string) => void) | undefined = undefined
+  export let oncopy:
+    | ((prefill: {
+        name: string
+        instructions: string
+        skillIds: string[]
+        runtimeKey: string
+        entries: string[]
+      }) => void)
+    | undefined = undefined
 
   let busy = false
   let error = ''
@@ -823,12 +831,31 @@
     error = ''
     busy = true
     try {
-      const res = await api<{ agent: Agent }>(`/api/agents/${encodeURIComponent(agent.id)}/copy`, {
-        method: 'POST',
+      /*
+       * ★★ 2026-11（D164）：复制**不再是一个立即落库的动作**（使用者："复制智能体，
+       *   属于新建状态，点保存才保存"）。它现在只是"把这条的配置**预填**进一张新建表单"：
+       *     · 拉一次详情拿 `rawInstructions`（**原文**——列表接口给的是组装后全文，
+       *       用它预填会把平台守则变成"使用者写的"文本）；
+       *     · 把预填数据交给页面（`oncopy`），由页面切到"正在新建"。
+       *   ⇒ 换言之：**想反悔就点取消**，一条记录都不会多。落库仍然走 `POST /api/agents`
+       *     （连同它自己的校验与重名检查）。
+       */
+      const detail = await api<{
+        name: string
+        rawInstructions?: string
+        instructions: string
+        skillIds: string[]
+        runtimeKey: string
+        entries?: string[]
+      }>(`/api/agents/${encodeURIComponent(agent.id)}`)
+      oncopy?.({
+        name: detail.name,
+        instructions: detail.rawInstructions ?? detail.instructions,
+        skillIds: detail.skillIds ?? [],
+        runtimeKey: detail.runtimeKey,
+        // 副本是普通智能体：入口只取它**能配**的那三项（`action:` 不属于它）
+        entries: (detail.entries ?? []).filter((e) => ['chat', 'task', 'workflow'].includes(e)),
       })
-      await loadAgents()
-      showToast($t('agents.copyDone', { name: res.agent.name }))
-      onselect?.(res.agent.id)
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
     } finally {

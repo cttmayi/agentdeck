@@ -4488,17 +4488,70 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
            * ⚠️ 这里**不点它**：复制会往列表里加一条，后面所有"条数/顺序"的判据都会受
            *    影响（e2e 由 `agent-copy.test.ts` 在接口层跑真的复制）。
            */
-          facts['agents.copy'] = (() => {
+          facts['agents.copy'] = await (async () => {
             const btn = d().querySelector('.detail-actions [data-agent-copy]')
             const labels = [...d().querySelectorAll('.detail-actions button')].map((b) =>
               (text(b) ?? '').trim(),
             )
-            return {
+            const base = {
               present: btn !== null,
               label: btn ? (text(btn) ?? '').trim() : null,
-              // 它旁边不该再有那两颗（这一条同时守着"没有复活"）
               hasRestore: labels.some((l) => l.includes('恢复成默认值')),
               hasDetach: labels.some((l) => l.includes('改为普通智能体')),
+            }
+            /*
+             * ★★ 2026-11（D164）：**复制 = 带预填的新建表单**（使用者："复制智能体，属于
+             *   新建状态，点保存才保存"）。所以这里真的要**点一下**，量三件事：
+             *     ① 右栏变成**新建表单**（`#new-agent-form`）；
+             *     ② 名字**预填**成「原名（副本）」，指令/技能/CLI 也带过来了；
+             *     ③ 点「取消」之后**列表条数不变**（一条记录都没多）——这条才是"点保存才保存"。
+             *   ⚠️ 不点「创建」：那会真的多一条，后面按条数/顺序量的判据全会跟着变
+             *     （落库这条路由 `agent-copy.test.ts` 的接口层用例覆盖）。
+             */
+            if (!btn) return base
+            const rowsBefore = d().querySelectorAll('.agent-list .agent-row').length
+            const headName = (text(d().querySelector('[data-agent-head-name]')) ?? '').trim()
+            click(btn)
+            await until(() => !!d().querySelector('#new-agent-form'), 80)
+            const form = d().querySelector('#new-agent-form')
+            const nameInput = form ? form.querySelector('input[type=text], input:not([type])') : null
+            const prefill = {
+              formOpened: form !== null,
+              name: (nameInput?.value ?? '').trim(),
+              expected: `${headName}（副本）`,
+              instructionsFilled: (() => {
+                const ta = form?.querySelector('textarea.instructions, textarea')
+                return typeof ta?.value === 'string' && ta.value.trim() !== ''
+              })(),
+            }
+            const cancel = form
+              ? [...form.querySelectorAll('.form-actions button')].find((b) => b.type === 'button')
+              : null
+            if (cancel) click(cancel)
+            await until(() => !d().querySelector('#new-agent-form'), 60)
+            /*
+             * ⚠️ 取消之后**要把选中项恢复回来**：复制这一步把右栏切成了"正在新建"（选中清空），
+             *   后面还有判据要量原来那条的详情（技能挂载 / 只读态…）。第一版漏了这一步，
+             *   下一条 `agents.builtinSkillsText` 当场变空——而界面本身是对的。
+             */
+            if (headName !== '') {
+              const back = [...d().querySelectorAll('.agent-list .agent-row')].find(
+                (r) => (text(r.querySelector('.agent-line strong')) ?? '').includes(headName),
+              )
+              if (back) {
+                click(back.querySelector('.list-row-main') ?? back)
+                await until(
+                  () =>
+                    (text(d().querySelector('[data-agent-head-name]')) ?? '').trim() === headName,
+                  60,
+                )
+              }
+            }
+            return {
+              ...base,
+              ...prefill,
+              rowsBefore,
+              rowsAfter: d().querySelectorAll('.agent-list .agent-row').length,
             }
           })()
 

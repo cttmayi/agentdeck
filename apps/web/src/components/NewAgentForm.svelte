@@ -45,8 +45,27 @@
    */
   export let onclose: () => void = () => {}
   export let oncreated: () => void = () => {}
+  /**
+   * ★★ 2026-11（D164）：**预填**（复制智能体时用）。
+   *
+   * 使用者："复制智能体，属于新建状态，点保存才保存"——所以复制不是一条立刻落库的接口，
+   * 而是"拿那条的配置预填这张表单"。于是它与手写新建完全同一条路：能改、能取消、
+   * 点「创建」才写库（连同服务端的校验与**重名检查**）。
+   *
+   * ⚠️ 传进来的是 `rawInstructions`（库里存的**原文**）：拿组装后的全文预填，会把平台
+   *    守则变成"使用者写的"文本，而副本作为自建智能体不会再组装一次。
+   */
+  export let prefill:
+    | {
+        name: string
+        instructions: string
+        skillIds: string[]
+        runtimeKey: string
+        entries: string[]
+      }
+    | undefined = undefined
 
-  let name = ''
+  let name = prefill?.name ?? ''
   /*
    * ⚠️ 2026-11（S4，D127）：这里原来是 `let role: AgentRole = 'executor'`——新建
    *   agent 时选「执行 / 审核」。**角色退场** ⇒ 新建的 agent 就是 agent，没有角色可问。
@@ -58,7 +77,7 @@
    * 服务端 `POST /api/agents` 确实也会在"指令为空"时预填（那是给别的客户端兜底），
    * 但界面上必须**先看见**，才能改、才能删。
    */
-  let instructions = $identity?.defaultAgentConduct ?? ''
+  let instructions = prefill?.instructions ?? $identity?.defaultAgentConduct ?? ''
 
   /**
    * 审核标准（D37）——只对审核者有意义。
@@ -86,7 +105,7 @@
    *    ⚠️ 也别把它加回来"做兼容"：服务端会把这三个键当成**不认识的字段**拒掉
    *      （400），留在这里只会变成一个必然失败的提交。
    */
-  let selectedSkills: string[] = []
+  let selectedSkills: string[] = [...(prefill?.skillIds ?? [])]
   /**
    * ★ 2026-11（D146）：**入口**——它能被谁叫（对话 / 任务 / 编排）。
    *
@@ -97,7 +116,9 @@
    * 默认**三项全勾**：与 `entriesOf()` 对用户记录的回退、以及服务端不传 `entries` 时的
    * 落库值完全一致——所以这一格加进来**不改变任何默认行为**，只是把它变成可改。
    */
-  let selectedEntries: string[] = [...USER_ENTRY_CHOICES]
+  let selectedEntries: string[] = prefill?.entries?.length
+    ? [...prefill.entries]
+    : [...USER_ENTRY_CHOICES]
   /**
    * 可选的 runtime —— 从**身份接口**来，不写死两项。
    *
@@ -105,7 +126,7 @@
    * 才行）。初始化取第一个可用项，而不是硬编码 'claude'。
    */
   $: runtimeOptions = $identity?.runtimes.map((r) => r.key) ?? []
-  let runtimeKey = 'claude'
+  let runtimeKey = prefill?.runtimeKey ?? 'claude'
   let busy = false
   let error = ''
 

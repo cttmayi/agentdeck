@@ -318,6 +318,13 @@ export interface Agent {
    * 界面判断"能不能聊天/派活/被编排引用"只读它，不再按 `builtinKind` 猜。
    */
   entries?: string[]
+  /**
+   * ★ 2026-11（D164）：详情接口额外给的**原文指令**（库里存的那份，不含平台守则）。
+   *
+   * 只有 `GET /api/agents/:id` 有它。用途只有一个：**复制**（= 预填一张新建表单）——
+   * `instructions` 那一份是"组装后"的全文，拿它预填会把平台守则当成使用者写的文本。
+   */
+  rawInstructions?: string
   /** 配置残缺（老字段只剩一半）：界面据此标"配置损坏"，不要当成正常智能体。 */
   halfBuiltin?: boolean
   /**

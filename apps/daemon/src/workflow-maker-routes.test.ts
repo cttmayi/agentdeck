@@ -359,26 +359,9 @@ await flow([agent('${AGENT_NAME}')], '{{task}}')
   })
 })
 
-/**
- * ★★★ 2026-11（D163）：使用者问「当前自建和内置都有叫『助手』，这个编排是找的哪个？」
- *   —— 改之前**静默取列表里第一个**（≈ 更早创建的那条），界面、采纳校验、运行日志
- *   一个字都不说。现在：**重名就是错**，并在采纳这一步就拦住（别等跑到一半）。
+/*
+ * ⚠️ 2026-11（D164）：这里原来有一条"造两条同名智能体 ⇒ 采纳时 400 `workflow_code_ambiguous`"。
+ *   **D164 起新建/改名都会查重**，所以"两条同名"再也造不出来了——这条用例的对象消失了。
+ *   检测本身（重名 ⇒ 歧义）仍由 `workflow-agents.test.ts` 的单元用例钉着；老数据里的重名
+ *   （升级之前就有的）仍会在采纳与运行时被拦，走的是同一条 `resolveWorkflowAgent()`。
  */
-describe('★ 编排按名字找人：重名必须在采纳前就报错', () => {
-  test('★★★ 两条同名 ⇒ 400 workflow_code_ambiguous + 点名是哪几条', async () => {
-    // 造两条同名的（自建 + 另一条自建；平台成员那条是现成的「助手」）
-    for (let i = 0; i < 2; i += 1) {
-      const made = await postJson('/api/agents', { name: '同名的家伙', instructions: '' })
-      assert.equal(made.status, 201, JSON.stringify(made.body))
-    }
-    const { convId } = await openConversation(makerId)
-    const res = await postJson(`/api/conversations/${convId}/workflow-commit`, {
-      workflowDraft: `---\nname: 重名\n---\nawait flow([agent('同名的家伙')], '{{task}}')`,
-    })
-    assert.equal(res.status, 400)
-    const body = res.body as { code?: string; error?: string; ambiguousAgents?: string[] }
-    assert.equal(body.code, 'workflow_code_ambiguous')
-    assert.match(String(body.error), /有 2 条同名智能体/)
-    assert.deepEqual(body.ambiguousAgents, ['同名的家伙'])
-  })
-})

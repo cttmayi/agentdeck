@@ -262,10 +262,9 @@ export const agentsText = {
   /** ★ 2026-11（D160）：**复制**——替掉了「恢复成默认值」与「改为普通智能体」两颗按钮。 */
   'agents.copy': { zh: '复制', en: 'Duplicate' },
   'agents.copyTitle': {
-    zh: '复制成一份自建智能体（指令 / CLI / 技能 / 记忆开关都抄过来；记忆条目与独有技能不抄）',
-    en: 'Duplicate as your own agent (instructions, CLI, skills and the memory switch are copied; memory entries and exclusive skills are not)',
+    zh: '复制成一份自建智能体：填进新建表单（指令 / CLI / 技能 / 入口都带过来），点「创建」才保存——想反悔点取消即可',
+    en: 'Duplicate into a new draft: instructions, CLI, skills and entry points are filled in; nothing is saved until you press “Create”.',
   },
-  'agents.copyDone': { zh: '已复制成「{name}」', en: 'Duplicated as “{name}”' },
   'agents.setDefaultDone': { zh: '新建任务默认交给「{name}」', en: 'New tasks now default to “{name}”' },
   /** ★ 2026-11（D156）：窄屏详情栏头那颗「← 返回列表」（`.back-to-list`，宽屏自动隐藏）。 */
   'agents.backToList': { zh: '← 返回列表', en: '← Back to list' },

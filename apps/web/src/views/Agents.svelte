@@ -58,6 +58,26 @@ import ListRow from '../components/ListRow.svelte'
    */
   /** 当前点开查看的 agent。null = 还没有选（右栏显示占位）。 */
   let selectedId: string | null = null
+  /**
+   * ★ 2026-11（D164）：**复制来的预填**（复制 = 带配置的新建，不是立即落库）。
+   * 新建表单读它来初始化；用户点「新建智能体」时清空。
+   */
+  let createPrefill: {
+    name: string
+    instructions: string
+    skillIds: string[]
+    runtimeKey: string
+    entries: string[]
+  } | null = null
+
+  /** `原名（副本）`，撞了就补序号——名字必须唯一（D164 起服务端会拒重名）。 */
+  function uniqueAgentName(source: string): string {
+    const taken = new Set($agents.map((a) => a.name))
+    const base = `${source}（副本）`
+    let name = base
+    for (let n = 2; taken.has(name); n += 1) name = `${base} ${n}`
+    return name
+  }
   /*
    * ⚠️ 2026-11（D159）：这里原来有一个 `actionError`（「设为默认」失败的提示）。
    *   那颗按钮搬进右栏栏头（`AgentDetail`）之后，错误提示也归那边——它有自己的
@@ -203,6 +223,8 @@ import ListRow from '../components/ListRow.svelte'
       icon: 'plus',
       disabled: creating,
       onActivate: () => {
+        // ★ 2026-11（D164）：从"新建"进来就是**空表单**（复制来的预填要清掉）
+        createPrefill = null
         creating = true
         settingsOpen = false
         selectedId = null
@@ -473,9 +495,11 @@ import ListRow from '../components/ListRow.svelte'
         <WorkspaceSettings onclose={() => (settingsOpen = false)} />
       {:else if creating}
         <NewAgentForm
+          prefill={createPrefill ?? undefined}
           onclose={() => (creating = false)}
           oncreated={() => {
             creating = false
+            createPrefill = null
             void loadAgents()
           }}
         />
@@ -484,10 +508,17 @@ import ListRow from '../components/ListRow.svelte'
           agent={selected}
           onclose={() => (selectedId = null)}
           onchanged={() => void loadAgents()}
-          onselect={(id) => {
-            // ★ 2026-11（D160）：复制完成后直接选中副本（意图是"去改那份抄本"）
-            selectedId = id
-            creating = false
+          oncopy={(prefill) => {
+            /*
+             * ★★ 2026-11（D164）：**复制 = 用那条的配置预填一张新建表单**
+             * （使用者："复制智能体，属于新建状态，点保存才保存"）。
+             * 名字在客户端就算成**唯一**的（`原名（副本）`、撞了就补序号）——服务端也会
+             * 查重（`agent_name_taken`），但让人先看到一个能直接用的名字比"点保存才被告知
+             * 重名"顺手得多。
+             */
+            createPrefill = { ...prefill, name: uniqueAgentName(prefill.name) }
+            creating = true
+            selectedId = null
           }}
         />
       {/if}
