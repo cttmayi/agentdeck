@@ -40,7 +40,7 @@
 </div>
 
 {#if !$identity}
-  <div class="skeleton" style="width:60%"></div>
+  <div class="skeleton"></div>
 {:else}
   {@const id = $identity}
 

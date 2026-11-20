@@ -235,7 +235,7 @@
     {#if costsError}
       <div class="notice bad">{costsError}</div>
     {:else if !costs}
-      <div class="skeleton" style="width:40%"></div>
+      <div class="skeleton"></div>
     {:else}
       <p>
         {$t('settings.costsTotalBefore')}<strong>${(costs.total.costUsdMicros / 1e6).toFixed(4)}</strong>

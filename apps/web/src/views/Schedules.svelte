@@ -891,7 +891,7 @@ import type { WebTextId } from '@agentdeck/i18n'
             <span class="faint fs-xs">{$t('schedules.recordsHint', { n: s.records.length })}</span>
           </h3>
           {#if s.records.length === 0}
-            <p class="empty" style="text-align:left;padding:.5rem 0">
+            <p class="empty empty--flush">
               {$t('schedules.empty')}
             </p>
           {:else}

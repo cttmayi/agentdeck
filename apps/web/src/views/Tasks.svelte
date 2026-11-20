@@ -804,8 +804,8 @@ import ListRow from '../components/ListRow.svelte'
 
       <div class="pane-body">
         {#if $loading['issues'] && $issues.length === 0}
-          <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
-          <div class="skeleton" style="width:70%"></div>
+          <div class="skeleton"></div>
+          <div class="skeleton"></div>
         {:else if $loadError['issues']}
           <div class="notice bad">{$loadError['issues']}</div>
         {:else if visible.length === 0}
@@ -916,8 +916,8 @@ import ListRow from '../components/ListRow.svelte'
         </div>
       {/snippet}
       {#snippet loadingSkeleton()}
-        <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
-        <div class="skeleton" style="width:70%"></div>
+        <div class="skeleton"></div>
+        <div class="skeleton"></div>
       {/snippet}
       {#snippet rows()}
         {#if viewMode === 'group'}
@@ -1154,7 +1154,7 @@ import ListRow from '../components/ListRow.svelte'
                 {$t('tasks.noTextOutputHint')}
               </div>
             {:else}
-              <div class="skeleton"></div>
+              <div class="skeleton skeleton--block"></div>
             {/if}
           </div>
 

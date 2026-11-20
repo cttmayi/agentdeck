@@ -660,7 +660,7 @@
                "这几个目录里没有 skill"，而其实是这一趟没扫到。 -->
           <div class="notice bad">{$loadError['localSkillScan']}</div>
         {:else if $loading['localSkillScan'] && $localSkillScan.dirs.length === 0}
-          <div class="skeleton" style="width:60%"></div>
+          <div class="skeleton"></div>
         {:else}
           <Table
             columns={[
@@ -897,7 +897,7 @@
             {$t('skills.listLoadFailed', { error: skillListError })}
           </div>
         {:else if skillListLoading && skillList === null}
-          <div class="skeleton" style="width:60%"></div>
+          <div class="skeleton"></div>
         {:else if skillList}
           {#if skillList.entries.length > 0}
             <Table
@@ -1091,8 +1091,8 @@
 {:else}
 
 {#if $loading['skills'] && $skills.length === 0}
-  <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
-  <div class="skeleton" style="width:55%"></div>
+  <div class="skeleton"></div>
+  <div class="skeleton"></div>
 {:else if $loadError['skills']}
   <div class="notice bad">{$loadError['skills']}</div>
 {:else if $skills.length === 0}

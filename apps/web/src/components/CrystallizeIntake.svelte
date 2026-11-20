@@ -218,7 +218,7 @@
 
 <div class="intake">
   {#if targets === null && !blank}
-    <div class="skeleton" style="height:1.1rem"></div>
+    <div class="skeleton"></div>
   {:else}
     <!-- ★ 分批第 165 批：空白起也有第一问（新建 / 改一份已有的），只是不问"从哪来" -->
     {#if stage !== 'start'}

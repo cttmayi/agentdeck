@@ -1847,6 +1847,24 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
         // ── D69.15.2 风格一致：空态=纯空态提示，**不该有栏头**（D69.15 一度把
         //    返回按钮/空标题挂在空态上方——backLabel 无条件传、sub snippet 恒真，
         //    空态头顶一条边框线 + 窄屏一枚没用的返回按钮）。
+        /**
+         * ★★ D178：**状态长在哪一层**（空 / 加载 / 错误 三件里的"位置"部分）。
+         *
+         * 规则（`ui-style.md` §2.8）：三种状态一律在**正文**里（`.pane-body` / 卡片 body），
+         * **不许**出现在栏头（`.detail-head` / `.pane-head`）——栏头是"我在哪 + 怎么回去"，
+         * 状态是"这一块现在什么都没有"，两者混在一起时，使用者分不清"界面坏了"还是"确实没有"。
+         * 量的是**这一次跑得到的两个真实空态**（任务右栏没选中 + 智能体右栏没选中）：
+         * 每个 `.empty` 都必须在某个 `.pane-body` 里，且栏头里一个都没有。
+         */
+        facts['states.emptyInBody'] = (() => {
+          const empties = [...d().querySelectorAll('.empty')]
+          const inBody = empties.every((el) => el.closest('.pane-body') !== null)
+          const inHead = empties.filter(
+            (el) => el.closest('.detail-head') !== null || el.closest('.pane-head') !== null,
+          ).length
+          return { total: empties.length, inBody, inHead }
+        })()
+
         facts['heads.tasksEmptyNoHead'] = need('任务空态没有栏头', () => {
           const pane = d().querySelector('.detail-pane')
           if (!pane) return 'NO-PANE'

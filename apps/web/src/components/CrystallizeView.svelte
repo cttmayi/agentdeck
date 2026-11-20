@@ -1523,7 +1523,7 @@
           <button class="btn btn--ghost btn--sm" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
         </div>
       {:else if draftFinalState === 'loading'}
-        <div class="skeleton"></div>
+        <div class="skeleton skeleton--block"></div>
       {:else if draftFinalState === 'empty'}
         <p class="empty">
           <strong>{$t('tasks.noTextOutput')}</strong>
@@ -1814,7 +1814,7 @@
             <div class="proc-block">
               <div class="proc-head">{$t('crystallize.materialTitle')}</div>
               {#if material === null}
-                <div class="skeleton"></div>
+                <div class="skeleton skeleton--block"></div>
               {:else}
                 <div class="file-pane">
                   {@render materialPane()}

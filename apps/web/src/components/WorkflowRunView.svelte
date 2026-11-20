@@ -299,7 +299,7 @@
   {#if error && !run}
     <div class="notice bad">{error}</div>
   {:else if !run}
-    <div class="skeleton"></div>
+    <div class="skeleton skeleton--block"></div>
   {:else}
     <div class="wf-run-main">
       <!-- ══════════ 左：步骤链 ══════════ -->

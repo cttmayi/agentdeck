@@ -2260,6 +2260,20 @@ tbody tr:last-child td,
   border-radius: var(--radius);
 }
 
+/**
+ * ★ D178：空态只有一种形状（居中 + 虚线框），**但有两档语境**：
+ *   · 整块内容为空（列表、右栏、详情）⇒ `.empty`；
+ *   · 内容区里的**一小格**为空（一次执行没有记录、一段没有产出）⇒ `.empty.empty--flush`
+ *     （左对齐、不要虚线框、内距只留上下）。
+ * 这一档原来是在 `Schedules.svelte` 里用内联 `style="text-align:left;padding:.5rem 0"`
+ * **掰**全局样式掰出来的——同一个类在两个语境下长得不一样，却没人说得出为什么。
+ */
+.empty.empty--flush {
+  text-align: left;
+  border: 0;
+  padding: var(--sp-2) 0;
+}
+
 .empty strong {
   display: block;
   color: var(--text-dim);
@@ -2281,12 +2295,26 @@ tbody tr:last-child td,
   margin-top: var(--sp-2);
 }
 
+/* ★ D178：**骨架只有两档形状**（单行 / 一块），宽度一律 100%。
+   两档之前是"每处自己写内联 `height`/`width`/`margin`"：24 处 `.skeleton` 里有 20 处
+   带随手值（4rem / 1.1rem / 40% / 55% / 60% / 70% / 80%…），"这一处为什么是 60%"
+   谁都答不上来。骨架的意义是"这里有东西、马上填上"，不是"假装内容有多长"。 */
 .skeleton {
-  height: 1rem;
+  height: 1.1rem; /* 单行：约一行字 */
   border-radius: var(--radius-sm);
   background: linear-gradient(90deg, var(--surface-2), var(--surface-hover), var(--surface-2));
   background-size: 200% 100%;
   animation: shimmer 1.4s infinite linear;
+}
+
+/* 一块：列表 / 卡片 / 正文段落的占位（原来那几处内联 `height:4rem`） */
+.skeleton.skeleton--block {
+  height: 4rem;
+}
+
+/* 两行骨架之间自动留距（原来每处写内联 `margin-bottom`） */
+.skeleton + .skeleton {
+  margin-top: var(--sp-2);
 }
 
 @keyframes shimmer {

@@ -1269,6 +1269,19 @@ const CHECKS = [
   },
   {
     view: '任务',
+    key: 'states.emptyInBody',
+    /**
+     * ★★ D178（三种状态的位置）：空态在**正文**里（`.pane-body`），**栏头里一个都没有**。
+     * 栏头是"我在哪 + 怎么回去"，空态是"这一块现在什么都没有"——混在一起时，
+     * 使用者分不清"界面坏了"还是"确实没有"。加载态与错误态的**形状**由
+     * `tests/ui-state.test.ts` 判（瞬时/要造故障才出现，探针抓不到），这里补"位置"。
+     */
+    label: '★★ 空态在正文里（`.pane-body` 内），**栏头里没有任何空态**',
+    ok: (v) => !!v && v.total > 0 && v.inBody === true && v.inHead === 0,
+    show: (v) => `空态 ${v.total} 处，都在正文 ${String(v.inBody)}，栏头里 ${v.inHead} 处`,
+  },
+  {
+    view: '任务',
     key: 'heads.tasksEmptyNoHead',
     label: '★ 任务空态没有栏头（D69.15.2：空态=纯提示，不再挂返回按钮/空标题/边框线）',
     ok: (v) => v === true,

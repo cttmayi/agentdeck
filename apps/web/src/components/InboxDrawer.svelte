@@ -49,8 +49,8 @@
       <div class="notice bad" style="margin-bottom:var(--sp-2)">{actionError}</div>
     {/if}
     {#if $loading['inbox']}
-      <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
-      <div class="skeleton" style="width:70%"></div>
+      <div class="skeleton"></div>
+      <div class="skeleton"></div>
     {:else if $loadError['inbox']}
       <div class="notice bad">{$loadError['inbox']}</div>
     {:else if $inbox.length === 0}

@@ -281,8 +281,8 @@
     emptyFilteredHint={$t('crystallize.listEmptyHint')}
   >
     {#snippet loadingSkeleton()}
-      <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
-      <div class="skeleton" style="width:70%"></div>
+      <div class="skeleton"></div>
+      <div class="skeleton"></div>
     {/snippet}
     {#snippet rows()}
       <ul class="list-stack crystal-list">

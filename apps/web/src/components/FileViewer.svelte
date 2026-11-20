@@ -402,7 +402,7 @@
         <p class="faint fs-xs" style="margin:var(--sp-2) 0 0">{error}</p>
       </div>
     {:else if loading}
-      <div class="skeleton" style="width:80%"></div>
+      <div class="skeleton"></div>
     {:else if face === 'raw' && rawFaceIsHex(kind, entry.path)}
       <!--
         原文面是十六进制：二进制文件，以及位图（.png/.jpg/…）——按字节看没有

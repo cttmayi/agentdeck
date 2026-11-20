@@ -79,7 +79,7 @@
       {#if loadingSkeleton}
         {@render loadingSkeleton()}
       {:else}
-        <div class="skeleton" style="height:4rem"></div>
+        <div class="skeleton skeleton--block"></div>
       {/if}
     {:else if loadError}
       <p class="notice bad">{loadError}</p>

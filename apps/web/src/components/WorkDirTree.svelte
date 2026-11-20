@@ -175,7 +175,7 @@
     <p class="faint fs-xs" style="margin:var(--sp-2) 0 0">{$t('files.errorHint')}</p>
   </div>
 {:else if !ready}
-  <div class="skeleton" style="width:70%"></div>
+  <div class="skeleton"></div>
 {:else if rows.length === 0}
   <!--
     ★ 「还不存在」与「存在但是空的」分开说：两句给出的下一步不同。

@@ -339,8 +339,8 @@ import ListRow from '../components/ListRow.svelte'
       {/if}
     {/snippet}
     {#snippet loadingSkeleton()}
-      <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
-      <div class="skeleton" style="width:60%"></div>
+      <div class="skeleton"></div>
+      <div class="skeleton"></div>
     {/snippet}
     {#snippet readyTop()}
       <!-- ⚠️ 2026-11（D159）：这里原来显示「设为默认」的失败信息——那颗按钮搬进右栏栏头了，
