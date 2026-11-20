@@ -304,7 +304,13 @@ hr {
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
   align-items: center;
-  background: var(--surface);
+  /* ★ 2026-11（D172）：顶栏跟侧栏同一个页面底（`--bg`）——**"边框"归灰，"内容"归白**。
+     D171 只把侧栏退了一层，顶栏还是白的，于是灰的侧栏从白带子底下开始，"退一层"
+     只退了一半：顶栏左格（品牌 + 页名）压在侧栏正上方却比它亮，看着像贴错了一层。
+     现在顶栏 + 侧栏连成一条 L 形外框（同一个 `--bg`），白只留给内容那一片
+     （`.split-layout` 的两栏 / 技能工具等页面的主区面板）。
+     ⚠️ 底边那条 `--line` 留着：外框与白面之间仍然有这 1px 的声明（对白 1.43）。 */
+  background: var(--bg);
   border-bottom: 1px solid var(--line);
   /* 整条带子一条基线：页面动作换页时会整排换字，`nowrap` 保证它不会挤成两行
      （顶栏高度是 `calc(100vh - ...)` 算出来的，一旦换行整个布局就错位） */
