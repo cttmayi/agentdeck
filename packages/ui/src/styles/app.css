@@ -123,6 +123,20 @@
   --line: #d2d8e1; /* 对页面底 1.34、对面板 1.43（旧 1.18 / 1.26） */
   --line-strong: #bfc7d2; /* 强分隔/把手：对页面底 1.59、对面板 1.71（旧 1.46 / 1.57） */
 
+  /* ★ 2026-11（D173）：**外框（顶栏 + 侧栏）再退一层**，并带上它自己的两档填充。
+     来由：D170 之后主区与顶栏都白了，D171/D172 把外框退到页面底（`--bg`）——
+     使用者说对了，"导航"还能再退一层。但外框一退到比 `--bg` 还深的位置，**填充的
+     方向就翻了**：`--surface-2`（#e2e7ee）与 `--surface-hover`（#e6e9ef）在这块
+     外框上只有 1.02 / 1.03 —— 也就是"hover 没有反应"。
+     所以外框不能借用内容面的那两档，它要**自己的一对**：hover 往白面方向提半档，
+     选中就是一整颗白药丸（对 `--rail` 1.13 / 1.24）。这也正是导航该有的样子：
+     选中项"浮"在外框上，而不是"陷"进去。
+     ⚠️ 暗色的方向本来就是反的（越亮越靠前），所以暗色这两个值等于 `--surface-hover`
+     / `--surface-2` —— 值一样不代表角色一样，规则引用的是**角色**（"外框上的填充"）。 */
+  --rail: #e2e7ee; /* 对白面 1.24、对页面底 1.16 */
+  --rail-hover: #f2f4f7; /* 对 --rail 1.13 */
+  --rail-selected: #ffffff; /* 对 --rail 1.24（选中项是一颗白药丸） */
+
   --text: #1d232c;
   --text-dim: #5a6472;
   --text-faint: #8a93a2;
@@ -167,6 +181,14 @@
      加深到 1.47 / 1.90，两边（亮/暗）的"线有多重"才落在同一个可读区间。 */
   --line: #2b3240; /* 对页面底 1.47、对面板 1.37（旧 1.33 / 1.24） */
   --line-strong: #3b4354; /* 对页面底 1.90、对面板 1.77（旧 1.66 / 1.54） */
+
+  /* ★ 2026-11（D173）：暗色的外框**比页面底再暗一档**（与亮色同一个方向：外框退后）。
+     两档填充在暗色里天然是"提亮"（暗色越亮越靠前），所以值正好等于
+     `--surface-hover` / `--surface-2`；名字单列是因为**角色**不同（外框上的填充），
+     亮色那两个值不一样（那边必须往白面方向提），规则只认角色。 */
+  --rail: #0a0c10; /* 对内容面（--surface）1.11 */
+  --rail-hover: #222733; /* 对 --rail 1.31 */
+  --rail-selected: #232936; /* 对 --rail 1.35（选中比 hover 再亮一档） */
 
   --text: #e6e9ef;
   --text-dim: #a2abbb;
@@ -307,11 +329,13 @@ hr {
   /* ★ 2026-11（D172）：顶栏跟侧栏同一个页面底（`--bg`）——**"边框"归灰，"内容"归白**。
      D171 只把侧栏退了一层，顶栏还是白的，于是灰的侧栏从白带子底下开始，"退一层"
      只退了一半：顶栏左格（品牌 + 页名）压在侧栏正上方却比它亮，看着像贴错了一层。
-     现在顶栏 + 侧栏连成一条 L 形外框（同一个 `--bg`），白只留给内容那一片
+     现在顶栏 + 侧栏连成一条 L 形外框（同一个外框底色），白只留给内容那一片
      （`.split-layout` 的两栏 / 技能工具等页面的主区面板）。
-     ⚠️ 底边那条 `--line` 留着：外框与白面之间仍然有这 1px 的声明（对白 1.43）。 */
-  background: var(--bg);
-  border-bottom: 1px solid var(--line);
+     ★ D173：底色从 `--bg` 换成 `--rail`（再退一层）；底边那条线也从 `--line`
+     换成 `--line-strong`——外框深了一档之后，原来那条线在它上面只剩 1.15，
+     会被吃掉（线的职责是"分开"，它在哪个底上就得按哪个底的读数算）。 */
+  background: var(--rail);
+  border-bottom: 1px solid var(--line-strong);
   /* 整条带子一条基线：页面动作换页时会整排换字，`nowrap` 保证它不会挤成两行
      （顶栏高度是 `calc(100vh - ...)` 算出来的，一旦换行整个布局就错位） */
   white-space: nowrap;
@@ -353,11 +377,12 @@ hr {
   display: none;
 }
 
-/* 品牌与页名之间那条细竖线：两者都是文字，不隔开会被读成一句话 */
+/* 品牌与页名之间那条细竖线：两者都是文字，不隔开会被读成一句话
+   ★ D173：它画在外框（`--rail`）上，`--line` 在那种底色上只有 1.15 ⇒ 用强一档。 */
 .page-sep {
   width: 1px;
   height: 1.25rem;
-  background: var(--line);
+  background: var(--line-strong);
   flex: none;
 }
 
@@ -426,7 +451,12 @@ hr {
   box-sizing: border-box;
   padding: 0 var(--sp-1);
   gap: 2px;
-  background: var(--line);
+  /* ★ D173：**四条轨道共用同一个值**（探针钉着：栏头那排与顶栏"是同一条工具条"，
+     比的就是底色的字面值）。顶栏底色换成 `--rail` 之后 `--line` 在它上面只剩 1.15
+     （会糊成一片），而 `--line` / `--line-strong` 只能选一个 ⇒ 四条一起抬到
+     `--line-strong`（对 `--rail` 1.37、对白面 1.71）。这不是"顶栏更重"，是
+     "工具条这条轨道只有一种重量"。 */
+  background: var(--line-strong);
   border-radius: var(--radius);
 }
 
@@ -624,10 +654,13 @@ hr {
      那条 `--line` 竖线退成补一道声明（对页面底 1.34）。
      ⚠️ 与 D169 的区别一句话：灰只能放在**最左边**（它是"导航"，边缘），
      不能夹在主区两栏中间（那样读成两道白之间挖了个槽，见 D170）。
-     ⚠️ 侧栏内部的选中/悬停正好也对：`--surface-2`（选中底）对页面底 1.16、
-     `--surface-hover` 1.13——这两档本来就是把"贴在页面底上"当基准调的。 */
-  background: var(--bg);
-  border-right: 1px solid var(--line);
+     ★ D173：再退一层到 `--rail`（比 `--bg` 还深一档），因此**侧栏里的填充方向也翻了**
+     ——`--surface-2` / `--surface-hover` 在这块底色上只剩 1.02 / 1.03（hover 等于
+     没反应）。导航自己的两档是 `--rail-hover`（提半档）与 `--rail-selected`
+     （一整颗白药丸）：选中项"浮"在外框上，而不是"陷"进去——这本来就是导航该有的样子。
+     ⚠️ 右缘那条线也换成 `--line-strong`（`--line` 在 `--rail` 上只剩 1.15）。 */
+  background: var(--rail);
+  border-right: 1px solid var(--line-strong);
   padding: var(--sp-3) var(--sp-2);
   display: flex;
   flex-direction: column;
@@ -653,12 +686,16 @@ hr {
 }
 
 .nav-item:hover {
-  background: var(--surface-hover);
+  /* D173：外框上的 hover 是"提亮半档"——`--surface-hover` 是"在白面上压暗"那一档，
+     在这块更深的底色上只剩 1.02，等于 hover 没有反应。 */
+  background: var(--rail-hover);
   color: var(--text);
 }
 
 .nav-item.active {
-  background: var(--surface-2);
+  /* 选中项是一整颗白药丸（外框上的最高一档，对底色 1.24，比 hover 再亮一档）：
+     外框里的选中态要"浮起来"，不是"陷下去" */
+  background: var(--rail-selected);
   color: var(--text);
   border-left-color: var(--accent);
 }
@@ -1183,7 +1220,8 @@ hr {
   box-sizing: border-box;
   padding: 0 var(--sp-1);
   gap: 2px;
-  background: var(--line);
+  /* D173：与顶栏那条轨道**同一个值**（"同一条工具条"，探针比字面值）。 */
+  background: var(--line-strong);
   border-radius: var(--radius);
 }
 .pane-actions button {
@@ -1368,7 +1406,8 @@ hr {
   box-sizing: border-box;
   padding: 0 var(--sp-1);
   gap: 2px;
-  background: var(--line);
+  /* D173：与顶栏那条轨道**同一个值**（"同一条工具条"，探针比字面值）。 */
+  background: var(--line-strong);
   border-radius: var(--radius);
 }
 .detail-head .detail-actions > button {
@@ -1418,7 +1457,8 @@ hr {
   box-sizing: border-box;
   padding: 0 var(--sp-1);
   gap: 2px;
-  background: var(--line);
+  /* D173：同一条工具条的第四个用法，同一个值。 */
+  background: var(--line-strong);
   border-radius: var(--radius);
 }
 .source-toggle button {
@@ -1696,6 +1736,14 @@ button:disabled,
 .btn--ghost:hover:not(:disabled) {
   background: var(--surface-hover);
   color: var(--text);
+}
+
+/* ★ D173：**外框上的幽灵按钮**单独一档。`--surface-hover` 是"在白面上压暗"，
+   而外框（`--rail`）已经比它深——hover 在那种底色上只有 1.02，按下去看不出反应。
+   外框上的 hover 一律用外框自己的那一档（`--rail-hover`，1.13）。 */
+.topbar .btn--ghost:hover:not(:disabled),
+.sidebar .btn--ghost:hover:not(:disabled) {
+  background: var(--rail-hover);
 }
 
 .btn--danger {
