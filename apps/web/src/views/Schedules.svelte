@@ -20,7 +20,7 @@ import type { WebTextId } from '@agentdeck/i18n'
   import { executorCandidates } from '../lib/newtask-chain.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { relativeTime } from '../lib/time.ts'
-  import { listGrip } from '../lib/list-grip.ts'
+  import { paneResize } from '../lib/pane-resize.ts'
   import DirPicker from '../components/DirPicker.svelte'
   import {
     defaultScheduleForm,
@@ -488,7 +488,7 @@ import type { WebTextId } from '@agentdeck/i18n'
   class:with-detail={detailOpen}
   data-list-key="schedules"
   data-list-label={$t('shell.resizeList')}
-  use:listGrip
+  use:paneResize
 >
   <!-- ══════════ 左栏：列表（标准控件 ListPane：计数 + 搜索 + 五态）══════════ -->
   <!--

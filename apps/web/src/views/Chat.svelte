@@ -10,7 +10,7 @@
   import VoiceButton from '../components/VoiceButton.svelte'
   import { suggestRule } from '../lib/dictation.ts'
   import { AUTO_SEND_SECONDS, shouldAutoSend, type VoiceOutputMode } from '../lib/auto-send.ts'
-  import { listGrip } from '../lib/list-grip.ts'
+  import { paneResize } from '../lib/pane-resize.ts'
   import WorkDirTree from '../components/WorkDirTree.svelte'
   import DirPicker from '../components/DirPicker.svelte'
   import ChatMemoryTidy from '../components/ChatMemoryTidy.svelte'
@@ -995,7 +995,7 @@
   class="split-layout"
   data-list-key="chat"
   data-list-label={$t('shell.resizeList')}
-  use:listGrip
+  use:paneResize
 >
   <!-- ══════════ 左：对话列表（D66：栏头带 + 五态壳在 ListPane 里）══════════ -->
   <ListPane

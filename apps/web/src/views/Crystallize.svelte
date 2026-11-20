@@ -32,7 +32,7 @@
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { showToast } from '../lib/view.ts'
-  import { listGrip } from '../lib/list-grip.ts'
+  import { paneResize } from '../lib/pane-resize.ts'
   import ListPane from '../components/ListPane.svelte'
   import ListRow from '../components/ListRow.svelte'
   import MainArea from '../components/MainArea.svelte'
@@ -177,45 +177,12 @@
    * "多宽才够"取决于这一刻在干什么——改 SKILL.md 时要宽，看日志时要窄。试过写死 26–32rem，
    * 中间那栏被挤到 352px，结论条从 y=704 掉到 1397（探针当场红）。所以给别人一个把手。
    *
-   * 存 `localStorage`（键固定）：它是"我的窗口多大、我习惯多宽"，换条草稿不该重置。
+   * ★ D175：拖动的实现**搬进了 `lib/pane-resize.ts`**（与六个列表栏同一个动作）——
+   *   原来这里是列表栏那套的**第二份**（自己的 clamp、自己的 window 监听、自己那句
+   *   "存不上不影响用"）。现在这里只剩"这一栏的特殊之处"（在下面 `use:paneResize` 里
+   *   写成参数）：把手在标记里、贴在自己左缘所以方向相反、范围 320–760。
+   *   默认宽度仍是 `var(--artifact-w, 28rem)`（= 448px，与原来那个默认值同一个数）。
    */
-  const ARTIFACT_W_KEY = 'agentdeck.crystallize.artifactW'
-  const ARTIFACT_W_MIN = 320
-  const ARTIFACT_W_MAX = 760
-  const clampW = (px: number): number => Math.min(ARTIFACT_W_MAX, Math.max(ARTIFACT_W_MIN, px))
-  let artifactW = (() => {
-    try {
-      const raw = Number(localStorage.getItem(ARTIFACT_W_KEY))
-      return Number.isFinite(raw) && raw >= ARTIFACT_W_MIN ? clampW(raw) : 448
-    } catch {
-      return 448
-    }
-  })()
-
-  /**
-   * 拖动把手：`pointerdown` 记起点，`pointermove` 换算成宽度（**反向**：鼠标左移 ⇒ 栏变宽），
-   * `pointerup` 收尾并存档。⚠️ 监听挂在 `window` 上：拖动时鼠标很快离开那个 8px 的把手，
-   * 挂在把手上会"拖一下就断"。
-   */
-  function startResize(event: PointerEvent): void {
-    event.preventDefault()
-    const startX = event.clientX
-    const startW = artifactW
-    const move = (ev: PointerEvent): void => {
-      artifactW = clampW(startW - (ev.clientX - startX))
-    }
-    const up = (): void => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      try {
-        localStorage.setItem(ARTIFACT_W_KEY, String(artifactW))
-      } catch {
-        // 存不上不影响用（下次开是默认值）
-      }
-    }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-  }
   const bumpMaterial = (): void => {
     materialRev += 1
   }
@@ -279,13 +246,25 @@
   $: selectedRow = filtered.find((r) => r.versionRunIds.includes($crystallize?.runId ?? '')) ?? null
 </script>
 
+<!-- ★ D175：一个节点上挂两条拖宽——列表栏那套（`use:paneResize` 无参数：插入网格里的
+     `.split-grip`）与产物栏那套（带参数：接管标记里那个 `.pane-resizer`、方向相反）。
+     两条都来自 `lib/pane-resize.ts`，不再有两份实现。 -->
 <div
   class="split-layout with-detail"
   class:with-artifact={$crystallize !== null}
-  style="--artifact-w:{artifactW}px"
   data-list-key="crystallize"
   data-list-label={$t('shell.resizeList')}
-  use:listGrip
+  use:paneResize
+  use:paneResize={{
+    name: 'artifact',
+    legacy: ['agentdeck.crystallize.artifactW'],
+    min: 320,
+    max: 760,
+    cssVar: '--artifact-w',
+    measure: '.artifact-pane',
+    rightWidens: false,
+    handle: '.pane-resizer',
+  }}
 >
   <!-- ══════════════════ 左栏：沉淀任务列表 ══════════════════ -->
   <ListPane
@@ -375,7 +354,6 @@
       class="pane-resizer"
       aria-label={$t('crystallize.artifactResize')}
       title={$t('crystallize.artifactResize')}
-      onpointerdown={startResize}
     ></button>
     <CrystallizeArtifactPane draftRunId={$crystallize.runId} />
   {:else}

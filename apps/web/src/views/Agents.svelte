@@ -20,7 +20,7 @@ import ListRow from '../components/ListRow.svelte'
   import { hasEntry, isHalfBuiltinAgent, isPlatformMember } from '../lib/members.ts'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { t } from '../lib/i18n.ts'
-  import { listGrip } from '../lib/list-grip.ts'
+  import { paneResize } from '../lib/pane-resize.ts'
 
   /**
    * 智能体视图 = agent 配置 + runtime 状态。
@@ -292,7 +292,7 @@ import ListRow from '../components/ListRow.svelte'
   class:with-detail={creating || selected !== null}
   data-list-key="agents"
   data-list-label={$t('shell.resizeList')}
-  use:listGrip
+  use:paneResize
 >
   <!-- ══════════════════ 左栏：智能体清单 + Runtime ══════════════════ -->
   <!--

@@ -32,7 +32,7 @@
    *   而 legacy 的 `$:` 与 runes 混用会被编译器拒——Tasks.svelte 同款约束）。
    */
   import { onDestroy, onMount } from 'svelte'
-  import { listGrip } from '../lib/list-grip.ts'
+  import { paneResize } from '../lib/pane-resize.ts'
   import { t, tx } from '../lib/i18n.ts'
   import type { WebTextId } from '@agentdeck/i18n'
   import { api, type Workflow, type WorkflowRun, type WorkflowTemplate } from '../lib/api.ts'
@@ -310,7 +310,7 @@
     class:with-detail={detailOpen}
     data-list-key="workflows"
     data-list-label={$t('shell.resizeList')}
-    use:listGrip
+    use:paneResize
   >
     <!-- ══════════ 左栏：编排定义列表（标准控件 ListPane：计数 + 搜索 + 五态）══════════ -->
     <ListPane

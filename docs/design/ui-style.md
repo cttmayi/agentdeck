@@ -121,6 +121,7 @@
 | 行分界 | 行与行之间**一条 1px 的 `--line` 发丝线**（`app.css` 的 `.list-row + .list-row`），`ul` 不再靠空隙分段（`gap: 0`）；第一行不画（列表顶部不凭空多一条线） | D141：使用者"列表的内容只有选中才有框，没选择的时候，看不清楚分界"——原来靠 `gap: 4px` 分段，而空隙在静止状态（不 hover、不选中）什么都读不出来。⚠️ 这条规则**只能写在 `app.css`**：放进 `ListRow.svelte` 的 scoped 样式会被 Svelte 剪掉（`.list-row + .list-row` 实测没进构建产物） |
 | 副行基线 | 行的第二行（辅助信息）统一 `class="list-row-sub …"`（`app.css`：`display:flex` + **`align-items: baseline`** + 字号/字色显式写 + `> * { min-width: 0 }`） | D142：六个列表页原来各写一份、其中五处是 `align-items: center`——而这一行常把文字与徽标混着放，徽标的盒子比文字高，`center` 对齐的是**盒子**：于是"最近 15 小时前"比前面几段**低 3px**（实测 center 3px / baseline 0px）。页面只写"这一页多出来的形状"（任务要 `flex-wrap: wrap`、智能体要 `width: 100%`） |
 | 单行省略 | 列表标题一类要"一行 + 省略号"的元素必须 **`display: block` + `max-width: 100%` + `overflow: hidden` + `text-overflow: ellipsis` + `white-space: nowrap`** 五件套 | 310 批：行内元素上 `overflow`/`text-overflow` 不生效，`nowrap` 只挡换行*算法*，中文长标题在窄栏里仍会被顶成两行、末尾却还挂着省略号（使用者报的） |
+| 可拖的栏宽 | `use:paneResize`（`lib/pane-resize.ts`）：插入或接管 `.split-grip` / `.pane-resizer`，宽度写进 CSS 变量，存档 `agentdeck.pane.<name>`（老键照读并搬迁） | D175：列表栏与产物栏原来是两套实现（各自 clamp、各自 window 监听、各自键名），收成一份。**改宽度范围就改调用处的 `min/max`**，不要在下游再造一套 |
 | 混排行 | `.field-row`（`display:flex` + **`align-items: flex-end`** + `flex-wrap`；`> input/select` 收缩、`> button` 不许被挤窄） | 308 批：`center` 会让勾选浮在中间、`flex-start` 贴着顶边——两者高度差大时都不像同一行。**D174 起这条有了类名**：新写这类行直接用 `.field-row`，不要再造一个 `.xxx-row` |
 | 提示条 | `.notice` + `.bad` / `.warn` / `.good` | 一句话；更长的进 body |
 | 浮层 | `.drawer*` / `.modal*` / `.page-menu` / `.toast` | 遮罩 + 描边 + `--shadow-2` 三层一起给 |
@@ -156,15 +157,21 @@ D174 归位的三件（代码里还看到就是没迁移完）：
 #### 2.6.0 外层网格：三列，中间那个把手不手写
 
 ```svelte
-<div class="split-layout" data-list-key="xxx" data-list-label={$t('shell.resizeList')} use:listGrip>
+<div class="split-layout" data-list-key="xxx" data-list-label={$t('shell.resizeList')} use:paneResize>
   <!-- 列表栏（ListPane） -->
-  <!-- ★ 这里的位置是**把手**：由 `use:listGrip` 动作自己插进来，模板里不要手写 -->
+  <!-- ★ 这里的位置是**把手**：由 `use:paneResize` 动作自己插进来，模板里不要手写 -->
   <!-- 详情栏（MainArea） -->
 </div>
 ```
 
 `.split-layout` 是**三列**：`列表 | 把手 | 详情`（`var(--list-w) var(--grip-w) minmax(0,1fr)`）。
-`.split-grip` **不要手写**——`lib/list-grip.ts` 会插一个，手写第二个会叠在同一格里。
+`.split-grip` **不要手写**——`lib/pane-resize.ts` 会插一个，手写第二个会叠在同一格里。
+
+**所有"拖出来的宽度"走同一个动作**（D175）：列表栏（无参数，宽度进 `--list-w`、存档
+`agentdeck.pane.list.<视图>`）与沉淀页的产物栏（带参数：`cssVar: '--artifact-w'`、
+`rightWidens: false`、`handle: '.pane-resizer'`——把手在标记里、贴在自己左缘所以方向相反）。
+**不要再写第二份 clamp / window 监听 / localStorage 键**；要加一处可拖的栏，就给它一个
+`name` 与 `min/max`。
 
 ⚠️ **漏掉把手 = 详情栏掉进第 2 列（6px 宽）**，整块主区看着像空的（2026-11 这份范例的
 第一版就是这么错的，而且"两栏并排"还量得对——因为只比了左沿坐标，没比宽度）。

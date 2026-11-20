@@ -8759,7 +8759,8 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           fire(f.contentWindow, 'pointermove', cx)
           fire(f.contentWindow, 'pointerup', cx)
           try {
-            f.contentWindow.localStorage.removeItem('agentdeck.listW.chat')
+            f.contentWindow.localStorage.removeItem('agentdeck.pane.list.chat') /* D175 新键 */
+            f.contentWindow.localStorage.removeItem('agentdeck.listW.chat') /* D175 老键（迁移前存下的） */
           } catch {
             // 清不掉也无所谓，下一趟按默认量
           }

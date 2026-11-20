@@ -813,7 +813,8 @@ hr {
   /* 清单那一栏默认固定一个阅读宽度（跟着它的表格内容走），详情拿走剩下的。
      固定而不是按比例：按比例时窗口一变宽，列表里那几列就被拉得很散。
      ★ 2026-11：列表宽度**可拖**——`--list-w` 由把手写入（localStorage 存档，
-     见 `apps/web/src/lib/list-grip.ts`），没拖过就是下面的默认。把手占第 2 列
+     见 `apps/web/src/lib/pane-resize.ts`；D175 起列表栏与沉淀页产物栏用同一个动作），
+     没拖过就是下面的默认。把手占第 2 列
      （`--grip-w`），详情从第 3 列开始。 */
   grid-template-columns: var(--list-w, minmax(20rem, 26rem)) var(--grip-w, 0.375rem) minmax(0, 1fr);
 }
