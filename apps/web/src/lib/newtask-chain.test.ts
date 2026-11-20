@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { blockedAssignees, executorCandidates } from './newtask-chain.ts'
+import { executorCandidates } from './newtask-chain.ts'
+import { memberLabel } from './members.ts'
 import type { Agent } from './api.ts'
 
 /*
@@ -52,13 +53,50 @@ describe('执行者候选', () => {
      *   `builtin` + `builtinKind`）仍然被正确排除——`entriesOf()` 会从老字段回退。
      *   另外新增一条：**不可选的也要列出来**（"显示出来，只是置灰"）。
      */
-    assert.deepEqual(
-      blockedAssignees(all).map((b) => b.agentId),
-      ['r1'],
-      '平台成员要出现在"显示但置灰"那一组里',
-    )
+          /*
+       * ⚠️ 2026-11（D165）：这里原来断言"没有 task 入口的平台成员**显示出来但置灰**"
+       *   （D145 的口径）。使用者改了口径（"任务在选择交给谁，如上类似逻辑"）⇒ 它们
+       *   **根本不出现**，那份清单也就不存在了。
+       */
     // 显式 entries 优先于老字段：把起草者改成能派活，它就该进候选
     const promoted = agent({ id: 'r2', entries: ['chat', 'task'] })
     assert.deepEqual(executorCandidates([promoted]).map((a) => a.id), ['r2'])
+  })
+})
+
+
+/**
+ * ★★ 2026-11（D165）：**下拉里只出现"真能接这个活"的那些**，且内置成员名带「（内置）」。
+ *
+ * 由来：使用者两句话——「沉淀起草者不应该显示出来（入口没有勾对话）」与「显示名称，
+ * 如果是内置智能体，后面括号增加『（内置）』的标识」。这推翻了 D145 的"显示但置灰"：
+ * 现在每个成员接了哪些入口，详情页的「入口」那一格写得很清楚，所以下拉里不必再留
+ * 一个永远选不了的选项。
+ */
+describe('★ 任务执行者候选：只留能接活的，内置的带标识', () => {
+  const user = (id: string, name: string, entries: string[]): Agent =>
+    ({ id, name, owner: 'user', entries }) as unknown as Agent
+  const platform = (id: string, name: string, entries: string[]): Agent =>
+    ({ id, name, owner: 'platform', entries }) as unknown as Agent
+
+  test('★★ 没有 task 入口的平台成员**不出现**（起草者 / 整理者 / 两个生成者）', () => {
+    const all = [
+      user('u1', '我的执行者', ['chat', 'task', 'workflow']),
+      platform('a1', '助手', ['chat', 'task', 'workflow']),
+      platform('d1', '沉淀起草者', ['action:skill-draft']),
+      platform('m1', '记忆整理者', ['action:memory-tidy']),
+      platform('k1', '智能体生成者', ['chat', 'action:agent-commit']),
+    ]
+    assert.deepEqual(
+      executorCandidates(all).map((a) => a.name),
+      ['我的执行者', '助手'],
+      '只有真接了 task 的两条（自建 + 助手）',
+    )
+  })
+
+  test('★★ 显示名：内置成员后面补「（内置）」，自建的不加', () => {
+    const suffix = '（内置）'
+    assert.equal(memberLabel(platform('a1', '助手', ['task']), suffix), '助手（内置）')
+    assert.equal(memberLabel(user('u1', '我的执行者', ['task']), suffix), '我的执行者')
   })
 })

@@ -224,25 +224,29 @@ const CHECKS = [
     view: '新建任务',
     key: 'newtask.agentOptions',
     /**
-     * ★ 2026-11（D145，D161 修）：下拉里**平台成员照常出现**，能选/不能选只由接入点决定。
+     * ★★★ 2026-11（D165）：**下拉里只出现"真能接这个活"的**，且内置成员名带「（内置）」。
      *
-     * 原来的判据是"名字带「（内置）」的都必须 disabled"——D161 之后有两件事变了：
-     *   · 名字里的「（内置）」后缀去掉了；
-     *   · **内置「助手」是可选的**（它有 `task` 接入点，而且它就是默认智能体）。
-     * 所以判据改成量**因果**而不是量名字：
-     *   ① 可选项 ≥2（不然"选谁"量不出来）；
-     *   ② 每个 disabled 项都带**原因**（`平台成员，不接业务任务`）——只灰不说就是坏了；
-     *   ③ 内置「助手」**可选**（它是唯一一个接了任务的平台成员，且是默认）。
+     * 这一条推翻了自己上一版（D145 "显示但置灰"）：使用者说「沉淀起草者不应该显示出来
+     * （入口没有勾对话）」+「显示名称，如果是内置智能体，后面括号增加『（内置）』的标识」。
+     * 判据四条：
+     *   ① **一个 disabled 都没有**（不再有"永远选不了"的选项）；
+     *   ② 「助手（内置）」在（它接了 task，而且就是默认）；
+     *   ③ 没接 task 的平台成员（起草者 / 整理者 / 两个生成者）**一个都不在**；
+     *   ④ 可选项 ≥2（不然"选谁"量不出来）。
      */
     label:
-      '★★★ 「交给谁」里：可选项 ≥2、**平台成员照常出现**——没接任务的置灰**并带原因**，' +
-      '接了任务的「助手」可以选（它还是默认）',
+      '★★★ 「交给谁」里只有能接活的：**没有置灰项**、内置「助手」带「（内置）」标识、' +
+      '没接 task 的平台成员一个都不出现',
     ok: (v) => {
       if (!v || !Array.isArray(v.enabled) || !Array.isArray(v.disabled)) return false
+      const enabled = v.enabled.map(String)
       return (
-        v.enabled.length >= 2 &&
-        v.disabled.every((x) => String(x).includes('平台成员')) &&
-        v.enabled.some((x) => String(x).includes('助手'))
+        v.disabled.length === 0 &&
+        enabled.length >= 2 &&
+        enabled.some((x) => x.includes('助手（内置）')) &&
+        ['沉淀起草者', '记忆整理者', '智能体生成者', '编排生成者'].every(
+          (n) => !enabled.some((x) => x.includes(n)),
+        )
       )
     },
     show: (v) =>
@@ -1308,6 +1312,37 @@ const CHECKS = [
     key: 'heads.chatHeadTitleFs',
     label: '★ 聊天栏头标题字号 fs-lg 17px（D69.15 标题统一）',
     ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.executorOptions',
+    /**
+     * ★★★ 2026-11（D165）：聊天「执行者」下拉的两条规矩（使用者原话）：
+     *   「沉淀起草者不应该显示出来（入口没有勾对话）」与「显示名称，如果是内置智能体，
+     *     后面括号增加『（内置）』的标识」。
+     * 量四件：**没有置灰项**；接了 chat 的三个（助手 / 智能体生成者 / 编排生成者）
+     * 都在且**名字带「（内置）」**；没接 chat 的两个（起草者 / 整理者）**一个都不在**。
+     */
+    label:
+      '★★★ 聊天「执行者」下拉：**只有能聊的**——没接 chat 的平台成员（起草者 / 整理者）' +
+      '一个都不出现、也没有置灰项；接了的三个名字都带「（内置）」',
+    ok: (v) => {
+      if (!v) return false
+      const has = (x) => typeof x === 'string' && x.includes('（内置）')
+      return (
+        v.disabled === 0 &&
+        has(v.assistant) &&
+        has(v.maker) &&
+        has(v.wfMaker) &&
+        v.drafter === null &&
+        v.tidy === null
+      )
+    },
+    show: (v) =>
+      v === null
+        ? 'null'
+        : `置灰 ${String(v.disabled)} 个　助手「${String(v.assistant)}」　生成者「${String(v.maker)}」　` +
+          `编排生成者「${String(v.wfMaker)}」　起草者 ${String(v.drafter)}　整理者 ${String(v.tidy)}`,
   },
   {
     view: '聊天',

@@ -90,6 +90,20 @@ export function actionEntriesOf(agent: Agent): Array<{ raw: string; id: string; 
     })
 }
 
+/**
+ * ★★ 2026-11（D165）：**下拉里的显示名**——平台成员后面补一个「（内置）」。
+ *
+ * 使用者原话："显示名称，如果是内置智能体，后面括号增加『（内置）』的标识。"
+ *
+ * ⚠️ 这是**显示**，不是数据：记录上的名字不再带后缀（D161 去掉的），所以这里只在
+ *    渲染时补。后缀由调用方从 i18n 传进来（`$t('agents.builtinNameSuffix')`）——
+ *    本函数在 `lib/` 里，不直接依赖界面词表。
+ */
+export function memberLabel(agent: Agent, builtinSuffix: string): string {
+  const name = agent.name
+  return isPlatformMember(agent) ? `${name}${builtinSuffix}` : name
+}
+
 /** 一个都没勾 = 哪个入口都叫不动它；界面据此禁掉「创建 / 保存」。 */
 export function hasAnyEntry(picked: readonly string[]): boolean {
   return USER_ENTRY_CHOICES.some((e) => picked.includes(e))

@@ -2,7 +2,8 @@
   import { onDestroy } from 'svelte'
   import { api, newRunId, type Issue } from '../lib/api.ts'
   import { agents, effectiveDefaultAgentId, loadIssues, loadRuns } from '../lib/stores.ts'
-  import { blockedAssignees, executorCandidates } from '../lib/newtask-chain.ts'
+  import { executorCandidates } from '../lib/newtask-chain.ts'
+  import { memberLabel } from '../lib/members.ts'
   import PromptField from './PromptField.svelte'
   import { splitRequest } from '../lib/request-text.ts'
   import { createDirty } from '../lib/create-draft.ts'
@@ -50,7 +51,11 @@
    * ★ 2026-11（D145）：平台成员**显示出来、只是置灰**（"显示 + 置灰 + 原因"，不悄悄滤掉）
    *   —— 列表长度稳定，人才不会以为"我的智能体少了"。
    */
-  $: blockedAssigneesList = blockedAssignees($agents)
+  /*
+   * ⚠️ 2026-11（D165）：这里原来有一组「不能选、但显示出来并置灰」的平台成员（D145 定的）。
+   *   使用者改了口径（"任务在选择交给谁，如上类似逻辑"）⇒ 下拉里**只出现能接这个活的**，
+   *   不再有 disabled 选项。
+   */
   // 没选过执行者时，初值 = 生效中的默认（没有就用列表第一个）。
   $: if (!agentId && executorAgents.length > 0) {
     agentId = $effectiveDefaultAgentId ?? executorAgents[0]!.id
@@ -245,14 +250,17 @@
         {:else}
           <select bind:value={agentId}>
             {#each executorAgents as a (a.id)}
+              <!--
+                ★ 2026-11（D165）：内置成员的名字后面补「（内置）」（使用者："显示名称，
+                  如果是内置智能体，后面括号增加『（内置）』的标识"）；默认那个再补「（默认）」。
+              -->
               <option value={a.id}>
-                {a.name}{a.id === $effectiveDefaultAgentId ? $t('newtask.defaultSuffix') : ''}
+                {memberLabel(a, $t('agents.builtinNameSuffix'))}{a.id === $effectiveDefaultAgentId
+                  ? $t('newtask.defaultSuffix')
+                  : ''}
               </option>
             {/each}
-            <!-- ★ 2026-11（D145）：平台成员显示但置灰 -->
-            {#each blockedAssigneesList as b (b.agentId)}
-              <option value={`blocked:${b.agentId}`} disabled>{b.name} — {b.reason}</option>
-            {/each}
+            <!-- ★ 2026-11（D165）：置灰选项整段删掉——没有 task 入口的平台成员**不出现**。 -->
           </select>
           <span class="hint">
             {$t('newtask.defaultHint')}

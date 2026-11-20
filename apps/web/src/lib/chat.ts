@@ -132,23 +132,17 @@ export function canChatAgent(agent: Agent): boolean {
   return (CHAT_CAPABLE_BUILTIN_KINDS as readonly string[]).includes(agent.builtinKind)
 }
 
-/**
- * **不能选、但要显示出来**的那几条（2026-11，D145 使用者拍板："显示出来，只是置灰"）。
+/*
+ * ⚠️ 2026-11（D165）：这里原来有一个 `blockedChatExecutors()`——把"没有 chat 入口的平台成员"
+ *   **显示出来并置灰**（D145 使用者拍板："显示出来，只是置灰"）。
  *
- * 为什么不再"悄悄滤掉"：同一个下拉在不同人眼里长度不一样，人会以为"我的智能体少了"。
- * 所以平台成员照常出现在列表里，`disabled` + 一行原因；`executorChoices()` 仍然只返回
- * **能选**的那些（`applyChoice` 的逻辑一个字都不用动）。
+ *   **本批改回"根本不显示"**（使用者原话："沉淀起草者不应该显示出来（入口没有勾对话）"）。
+ *   理由变了：置灰那一版的顾虑是"列表长度会随身份变化"，但现在每个平台成员到底接哪几个
+ *   入口，**详情页的「入口」那一格写得很清楚**（勾选框 + 平台动作徽标），所以"少了谁"
+ *   有地方可查；而一个永远选不了的选项留在下拉里，只会让人每次都要读一遍原因。
  *
- * 判据与 daemon 同一句：`entries` 里有没有 `chat`（`owner === 'platform'` 且没有 chat
- * 的就是被平台自己用的那条，比如起草者/记忆整理者）。
+ *   ⇒ 判据统一成一句：**下拉里只出现"当前这个入口真能用"的那些**。
  */
-export function blockedChatExecutors(
-  agents: readonly Agent[],
-): Array<{ agentId: string; name: string; reason: string }> {
-  return agents
-    .filter((a) => isPlatformMember(a) && !hasEntry(a, 'chat'))
-    .map((a) => ({ agentId: a.id, name: a.name, reason: '平台成员，不参与对话' }))
-}
 
 export function executorChoices(
   agents: readonly Agent[],

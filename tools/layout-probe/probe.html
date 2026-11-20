@@ -8265,6 +8265,39 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         // ★ 2026-11（D109 智能体生成者）：新对话下拉里要有「智能体生成者」——
         //   它是唯一能聊天的内置岗位（判据 `builtinKind === undefined || === 'agent-maker'`，
         //   `chat.test.ts` 钉住纯函数那一半，这里钉住真的渲染在下拉里）。
+        /**
+         * ★★ 2026-11（D165）：**聊天下拉里内置成员带「（内置）」，且不能用的一个都不出现**。
+         *
+         * 使用者两句话：「沉淀起草者不应该显示出来（入口没有勾对话）」+「显示名称，如果是
+         * 内置智能体，后面括号增加『（内置）』的标识」。
+         *   · 起草者 / 整理者没有 `chat` 入口 ⇒ **不在下拉里**（原来"显示 + 置灰"）；
+         *   · 生成者 / 编排生成者 / 助手都接了 chat ⇒ 在，且名字带「（内置）」。
+         */
+        facts['chat.executorOptions'] = await (async () => {
+          const agents =
+            (await f.contentWindow.fetch('/api/agents').then((r) => r.json())).agents ?? []
+          const opts = [...(chatSelect()?.querySelectorAll('option') ?? [])]
+          const labels = opts.map((o) => (text(o) ?? '').trim())
+          const valueOf = (slot) => {
+            const a = agents.find((x) => x.slot === slot)
+            return a ? `agent:${a.id}` : null
+          }
+          const labelOf = (slot) => {
+            const v = valueOf(slot)
+            if (v === null) return null
+            return labels.find((l, i) => opts[i]?.getAttribute('value') === v) ?? null
+          }
+          return {
+            disabled: opts.filter((o) => o.disabled).length,
+            assistant: labelOf('assistant'),
+            maker: labelOf('agent-maker'),
+            wfMaker: labelOf('workflow-maker'),
+            drafter: labelOf('drafter'),
+            tidy: labelOf('memory-tidy'),
+            labels,
+          }
+        })()
+
         facts['chat.agentMakerChoice'] = await (async () => {
           const agents = (await f.contentWindow.fetch('/api/agents').then((r) => r.json())).agents ?? []
           // ⚠️ 2026-11（S4，D127）：判据从 `role === 'agent-maker'` 换成 `builtinKind`。

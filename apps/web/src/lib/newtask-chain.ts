@@ -54,15 +54,10 @@ export function executorCandidates(agents: readonly Agent[]): Agent[] {
   return agents.filter((a) => hasEntry(a, 'task'))
 }
 
-/**
- * **不能选、但要显示出来**的那几条（"显示出来，只是置灰"，D145）。
- *
- * 理由与聊天页同一个：列表长度必须稳定，否则人会以为"我的智能体少了"。
+/*
+ * ⚠️ 2026-11（D165）：这里原来有一个 `blockedAssignees()`——"没有 task 入口的平台成员"
+ *   **显示出来并置灰**（D145 定的）。**本批改回"根本不显示"**（使用者："任务在选择交给谁，
+ *   如上类似逻辑"）：下拉里只留**真能接这个活**的那些；某个成员接了哪些入口，详情页的
+ *   「入口」那一格写得清清楚楚。
  */
-export function blockedAssignees(
-  agents: readonly Agent[],
-): Array<{ agentId: string; name: string; reason: string }> {
-  return agents
-    .filter((a) => isPlatformMember(a) && !hasEntry(a, 'task'))
-    .map((a) => ({ agentId: a.id, name: a.name, reason: '平台成员，不接业务任务' }))
-}
+

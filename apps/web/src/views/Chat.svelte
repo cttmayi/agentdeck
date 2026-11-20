@@ -27,13 +27,13 @@
     applyChoice,
     canChatAgent,
     chatFilesState,
-    blockedChatExecutors,
     executorChoices,
     isTurnRunning,
     skillsHeldBackByDaemon,
     stripMemoryPrefix,
     type DraftPick,
   } from '../lib/chat.ts'
+  import { memberLabel } from '../lib/members.ts'
   import { get } from 'svelte/store'
   import { goCrystallize, pickChatAgentIntent, showToast } from '../lib/view.ts'
   import { askConfirm } from '../lib/confirm.ts'
@@ -311,7 +311,14 @@
    *    函数只跟踪表达式里看得见的标识符，函数体里读的 store 它看不见——
    *    表现是"agent 改了名，这一页不动"，而且没有任何报错。
    */
-  $: agentNames = new Map($agents.map((a) => [a.id as string, a.name]))
+  /*
+   * 名字表：**内置成员的显示名带「（内置）」**（D165，使用者要求）。
+   * ⚠️ 一处定义、所有显示点共用（下拉、对话抬头、起草提示）——各写一份就会出现
+   *   "下拉里有后缀、抬头里没有"这种半吊子。
+   */
+  $: agentNames = new Map(
+    $agents.map((a) => [a.id as string, memberLabel(a, $t('agents.builtinNameSuffix'))]),
+  )
 
   $: detail = $chatDetail
   $: activeTurns = detail?.turns ?? []
@@ -360,7 +367,11 @@
   /** 被这个旧 daemon 挡住、因此没进选项的那些 skill（页面上要点名说出来）。 */
   $: heldBackSkills = skillsHeldBackByDaemon($agents, $skills, skillsCarrySupported)
   $: agentChoices = draftChoices.filter((c) => c.kind === 'agent')
-  $: blockedChoices = blockedChatExecutors($agents)
+  /*
+   * ⚠️ 2026-11（D165）：这里原来有一组「不能选、但显示出来并置灰」的平台成员
+   *   （D145 定的）。使用者改了口径："沉淀起草者不应该显示出来（入口没有勾对话）" ⇒
+   *   下拉里**只出现真能当对话执行者的那些**，不再有 disabled 选项，也就不需要这份清单。
+   */
   $: skillChoices = draftChoices.filter((c) => c.kind === 'skill')
   $: draftOption = draftChoices.find((c) => c.value === draftChoice) ?? null
   /** 选中的 skill（没有就 null）。 */
@@ -1187,11 +1198,9 @@
         <select id="chat-agent" value={draftChoice} onchange={onDraftChoice}>
           <optgroup label={$t('chat.agentGroup')}>
             {#each agentChoices as choice (choice.value)}
+              <!-- ★ 2026-11（D165）：内置成员在下拉里补「（内置）」标识（使用者要求）；
+                   而没有 chat 入口的根本不出现（原来是显示 + 置灰，本批改回不显示）。 -->
               <option value={choice.value}>{agentNames.get(choice.agentId) ?? '—'}</option>
-            {/each}
-            <!-- ★ 2026-11（D145）：平台成员**显示出来、只是置灰**（不悄悄滤掉） -->
-            {#each blockedChoices as b (b.agentId)}
-              <option value={`blocked:${b.agentId}`} disabled>{b.name} — {b.reason}</option>
             {/each}
           </optgroup>
           {#if skillChoices.length > 0}
