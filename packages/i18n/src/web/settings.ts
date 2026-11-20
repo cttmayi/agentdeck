@@ -22,8 +22,8 @@ export const settingsText = {
   // ⚠️ 侧栏减半纪律：辅助文字 4–6 个字、一行放得下。
   'settings.navHint': { zh: '主题 · 语言', en: 'Theme · language' },
   'settings.headIntro': {
-    zh: '这一台怎么配：主题、语言、默认运行时，成本与审计导出，以及远端账号。',
-    en: 'How this machine is configured: theme, language, default runtime, costs & audit export, and the remote account.',
+    zh: '这一台怎么配：主题、语言、默认运行时，界面上的宽度，成本与审计导出，以及远端账号。',
+    en: 'How this machine is configured: theme, language, default runtime, on-screen widths, costs & audit export, and the remote account.',
   },
   'settings.general': { zh: '通用', en: 'General' },
   // ── 抽屉外壳 ──
@@ -73,6 +73,23 @@ export const settingsText = {
 
   // ── 2026-11：「关于」那几条（settings.about / diagnostics / webBuild* /
   //    protocolLabel）整节搬去了「关于」页（about.ts）——这里不留死词条。
+
+  // ── 布局（D176）──
+  // ★ 使用者选的那件事：拖宽原来只有"拖过才知道能拖"，拖坏了也没有回去的路。
+  //   这一节把**全部可拖的位置**列出来（名字与侧栏同一批词条），并给"恢复默认"。
+  'settings.layoutHeading': { zh: '布局', en: 'Layout' },
+  'settings.layoutHint': {
+    zh: '每个列表的宽度、沉淀页右侧产物栏的宽度都能拖，拖过会记住。恢复默认就是把这个位置退回初始宽度。',
+    en: 'Every list pane and the crystallize artifact pane can be dragged, and the width is remembered. Reset returns that spot to its starting width.',
+  },
+  'settings.layoutColWhere': { zh: '位置', en: 'Where' },
+  'settings.layoutColWidth': { zh: '当前宽度', en: 'Width' },
+  'settings.layoutDefault': { zh: '默认', en: 'Default' },
+  'settings.layoutReset': { zh: '恢复默认', en: 'Reset' },
+  'settings.layoutResetAll': { zh: '全部恢复默认', en: 'Reset all' },
+  'settings.layoutResetDone': { zh: '已恢复默认宽度', en: 'Widths reset' },
+  /** 产物栏那一行的名字（列表栏那六行用侧栏的词条，不重复定义） */
+  'settings.layoutArtifact': { zh: '沉淀 · 产物栏', en: 'Crystallize · artifact pane' },
 
   // ── 成本 ──
   'settings.costs': { zh: '成本', en: 'Costs' },

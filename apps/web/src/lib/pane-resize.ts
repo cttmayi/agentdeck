@@ -34,13 +34,39 @@ const LIST_MIN = 240 // 15rem：再窄列表没法读
 const LIST_MAX = 640 // 40rem：再宽就抢正文的地盘
 const LIST_VAR = '--list-w'
 
-const KEY_PREFIX = 'agentdeck.pane.'
+export const PANE_KEY_PREFIX = 'agentdeck.pane.'
+
+/** 沉淀页产物栏的存档名 */
+export const ARTIFACT_PANE = 'artifact'
+
+/**
+ * 老键（D175 之前）：读到就搬进新键。**按名字推**，不要让每个调用点再传一遍——
+ * 传一遍就等于第二处定义"老键长什么样"。
+ */
+function legacyFor(name: string): readonly string[] {
+  if (name === ARTIFACT_PANE) return ['agentdeck.crystallize.artifactW']
+  if (name.startsWith('list.')) return [`agentdeck.listW.${name.slice('list.'.length)}`]
+  return []
+}
+
+/**
+ * **有可拖列表栏的地方**（设置页「布局」照它列）。名称用侧栏同一批词条——
+ * 同一个页面对使用者只有一个名字。
+ * ⚠️ 加一个可拖的列表：视图模板里加 `data-list-key`，并在这里加一行；
+ *    `tests/web-pane-keys.test.ts` 盯着两边一致（少一行、多一行都红）。
+ */
+export const LIST_PANES = [
+  { name: 'list.chat', labelId: 'shell.navChat' },
+  { name: 'list.tasks', labelId: 'shell.navTasks' },
+  { name: 'list.agents', labelId: 'shell.navAgents' },
+  { name: 'list.workflows', labelId: 'workflows.navTitle' },
+  { name: 'list.schedules', labelId: 'schedules.navTitle' },
+  { name: 'list.crystallize', labelId: 'crystallize.navTitle' },
+] as const
 
 export type PaneResizeSpec = {
   /** 存档名（拼在 `agentdeck.pane.` 后面）。缺省时从 `data-list-key` 推成 `list.<key>` */
   name?: string
-  /** 老键（迁移用）：读到第一个就用它，并搬进新键 */
-  legacy?: readonly string[]
   min?: number
   max?: number
   /** 宽度写进哪个 CSS 变量 */
@@ -58,16 +84,17 @@ export type PaneResizeSpec = {
 const clampTo = (px: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, Math.round(px)))
 
-function readStored(name: string, legacy: readonly string[]): number | null {
+function readStored(name: string): number | null {
+  const legacy = legacyFor(name)
   try {
-    const raw = localStorage.getItem(KEY_PREFIX + name)
+    const raw = localStorage.getItem(PANE_KEY_PREFIX + name)
     const fromNew = Number(raw)
     if (raw !== null && Number.isFinite(fromNew) && fromNew > 0) return fromNew
     for (const key of legacy) {
       const old = Number(localStorage.getItem(key))
       if (Number.isFinite(old) && old > 0) {
         // 搬进新键：老键留着没有用处，删掉（下一次就是"新键直接命中"这条路）
-        localStorage.setItem(KEY_PREFIX + name, String(old))
+        localStorage.setItem(PANE_KEY_PREFIX + name, String(old))
         localStorage.removeItem(key)
         return old
       }
@@ -78,17 +105,50 @@ function readStored(name: string, legacy: readonly string[]): number | null {
   return null
 }
 
+/**
+ * 某个可拖位置**存下来的**宽度（没拖过 = null）。
+ * 设置页「布局」用它列"当前 / 默认"。
+ */
+export function paneWidth(name: string): number | null {
+  try {
+    const raw = Number(localStorage.getItem(PANE_KEY_PREFIX + name))
+    return Number.isFinite(raw) && raw > 0 ? Math.round(raw) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 恢复默认宽度：把新键与老键一起删掉。
+ * ⚠️ 不"写一个 448 进去"——默认宽度是 CSS 那一侧的事（`var(--list-w, …)` /
+ *    `var(--artifact-w, 28rem)`）；这里写死一个数就成了第二处定义。
+ * 挂着的那个视图要等下次挂载才回到默认（设置页与列表页不在同一屏，够用）。
+ */
+export function resetPaneWidth(name: string): void {
+  try {
+    localStorage.removeItem(PANE_KEY_PREFIX + name)
+    for (const legacy of legacyFor(name)) localStorage.removeItem(legacy)
+  } catch {
+    // 存不上不影响用
+  }
+}
+
+/** 全部恢复默认（六个列表栏 + 产物栏） */
+export function resetAllPaneWidths(): void {
+  for (const pane of LIST_PANES) resetPaneWidth(pane.name)
+  resetPaneWidth(ARTIFACT_PANE)
+}
+
 export function paneResize(node: HTMLElement, spec: PaneResizeSpec = {}): { destroy(): void } {
   const listKey = node.dataset.listKey
   const name = spec.name ?? `list.${listKey ?? 'default'}`
-  const legacy = spec.legacy ?? (listKey ? [`agentdeck.listW.${listKey}`] : [])
   const min = spec.min ?? LIST_MIN
   const max = spec.max ?? LIST_MAX
   const cssVar = spec.cssVar ?? LIST_VAR
   const measureSel = spec.measure ?? '.list-pane'
   const rightWidens = spec.rightWidens ?? true
 
-  const storeKey = KEY_PREFIX + name
+  const storeKey = PANE_KEY_PREFIX + name
   const apply = (px: number): void => node.style.setProperty(cssVar, `${px}px`)
   const currentWidth = (): number => {
     const fromVar = parseFloat(node.style.getPropertyValue(cssVar) || '')
@@ -110,7 +170,7 @@ export function paneResize(node: HTMLElement, spec: PaneResizeSpec = {}): { dest
     node.insertBefore(grip, node.children[1] ?? null)
   }
 
-  const stored = readStored(name, legacy)
+  const stored = readStored(name)
   if (stored !== null) apply(clampTo(stored, min, max))
 
   const wantsHandle = (target: EventTarget | null): HTMLElement | null => {

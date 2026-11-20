@@ -25,10 +25,17 @@
   } from '../lib/remote-store.ts'
   import { identity, loadIdentity, syncStatus } from '../lib/stores.ts'
   import { showToast } from '../lib/view.ts'
-  import { LOCALES, LOCALE_LABEL, isLocale, type Locale } from '@agentdeck/i18n'
+  import { LOCALES, LOCALE_LABEL, isLocale, type Locale, type WebTextId } from '@agentdeck/i18n'
   import { locale, setLocale, t, tx } from '../lib/i18n.ts'
   import { setThemePref, themePref, type ThemePref } from '@agentdeck/ui'
   import { markdownHtmlMode, setMarkdownHtmlMode } from '../lib/markdown-html.ts'
+  import {
+    ARTIFACT_PANE,
+    LIST_PANES,
+    paneWidth,
+    resetAllPaneWidths,
+    resetPaneWidth,
+  } from '../lib/pane-resize.ts'
   import type { MarkdownHtmlMode } from '../lib/markdown.ts'
 
   /** 设定页要列出的 runtime（身份接口给的那份清单） */
@@ -57,6 +64,34 @@
 
   let email = ''
   let password = ''
+
+  /**
+   * ★ D176：布局那一节的行——**全部可拖的位置** + 它现在存下来的宽度。
+   * 位置清单只在一处（`lib/pane-resize.ts` 的 `LIST_PANES`，那边有判据盯着与视图
+   * 模板里的 `data-list-key` 一致），这里不另抄一份。
+   * `width === null` 就是"没拖过 = 默认"，这一行是**读存档**得来的，不是猜的。
+   */
+  type LayoutRow = { name: string; labelId: WebTextId }
+  const LAYOUT_ROWS: readonly LayoutRow[] = [
+    ...LIST_PANES,
+    { name: ARTIFACT_PANE, labelId: 'settings.layoutArtifact' },
+  ]
+  function layoutRows(): Array<LayoutRow & { width: number | null }> {
+    return LAYOUT_ROWS.map((row) => ({ ...row, width: paneWidth(row.name) }))
+  }
+  let layout = layoutRows()
+
+  function resetLayout(name: string): void {
+    resetPaneWidth(name)
+    layout = layoutRows()
+    showToast(tx('settings.layoutResetDone'))
+  }
+
+  function resetAllLayout(): void {
+    resetAllPaneWidths()
+    layout = layoutRows()
+    showToast(tx('settings.layoutResetDone'))
+  }
 
   onMount(async () => {
     try {
@@ -243,6 +278,52 @@
     </div>
   </section>
 
+  <!-- ══════════ 布局 ══════════ -->
+  <!-- ★ D176（使用者选的那件事）：宽度原来只有"拖过才知道能拖"，拖坏了也没有回去的路。
+       这一节把**全部可拖的位置**列出来，并给"恢复默认"（删存档，不是写一个新数字进去）。 -->
+  <section class="main-panel" data-set-layout>
+    <header class="main-panel-head">
+      <h2>{$t('settings.layoutHeading')}</h2>
+      {#if layout.some((row) => row.width !== null)}
+        <button type="button" class="btn btn--ghost btn--sm" onclick={resetAllLayout}
+          >{$t('settings.layoutResetAll')}</button
+        >
+      {/if}
+    </header>
+    <div class="main-panel-body">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>{$t('settings.layoutColWhere')}</th>
+              <th>{$t('settings.layoutColWidth')}</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each layout as row (row.name)}
+              <tr>
+                <td>{$t(row.labelId)}</td>
+                <td class="fs-xs faint">
+                  {row.width === null ? $t('settings.layoutDefault') : `${row.width}px`}
+                </td>
+                <td class="layout-action">
+                  <button
+                    type="button"
+                    class="btn btn--ghost btn--sm"
+                    disabled={row.width === null}
+                    onclick={() => resetLayout(row.name)}>{$t('settings.layoutReset')}</button
+                  >
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+      <p class="hint">{$t('settings.layoutHint')}</p>
+    </div>
+  </section>
+
   <!-- ══════════ 远端能力 ══════════ -->
   <section class="main-panel" data-set-remote>
     <header class="main-panel-head">
@@ -328,5 +409,13 @@
      这里只剩**页面布局**（两列网格 + 远端卡跨行），符合"页面只决定放什么、放在哪"。 */
   [data-set-remote] {
     grid-column: 1 / -1;
+  }
+  /* 布局那一节是一张"位置 / 宽度 / 动作"的表，短——跨满整行，别在右边留一个空格子 */
+  [data-set-layout] {
+    grid-column: 1 / -1;
+  }
+  /* 最后一列（恢复默认）贴右缘：每行的按钮竖着对齐，不跟着位置名长短跑 */
+  .layout-action {
+    text-align: right;
   }
 </style>

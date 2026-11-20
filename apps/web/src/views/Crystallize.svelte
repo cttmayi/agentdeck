@@ -257,7 +257,6 @@
   use:paneResize
   use:paneResize={{
     name: 'artifact',
-    legacy: ['agentdeck.crystallize.artifactW'],
     min: 320,
     max: 760,
     cssVar: '--artifact-w',
