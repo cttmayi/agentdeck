@@ -82,6 +82,48 @@
         errors.push(message)
       }
 
+      /**
+       * ★★ D177：**这个按钮算不算「这一屏的主操作」**。
+       *
+       * 界面上的按钮有两种写法都等于 primary：显式 `btn btn--primary`，以及
+       * **一个变体都不写**的 `button` / `class="btn"`（`app.css` 那条基类规则给的就是
+       * accent 底色——"没有写变体的也按 primary 渲染"）。判据要按**界面看到的样子**算，
+       * 不按写法算，否则"主操作跑到栏头去了"会被判成通过。
+       */
+      function isPrimary(btn) {
+        if (btn.classList.contains('btn--primary')) return true
+        return !/\bbtn--(secondary|ghost|danger|link)\b/.test(btn.className)
+      }
+
+      /** 一组按钮里主操作的个数（`root` 下所有 button，含 `.btn` 形式的） */
+      function primaryCount(root) {
+        if (!root) return null
+        return [...root.querySelectorAll('button')].filter(isPrimary).length
+      }
+
+      /**
+       * ★★ D177（使用者选的 B 案）：**「主操作放哪」按族定，各族各自量**。
+       *
+       * 族 1 `.main-panel`（整块换掉右栏的面板：技能安装、工作区设置…）：主操作在
+       *   **底栏**（`.main-panel-foot`），栏头**只许** ghost（返回 + 工具性动作）。
+       *   这个测量给三处面板共用，所以只在这里写一次。
+       */
+      function panelActionPlace(panel) {
+        if (!panel) return null
+        const head = panel.querySelector('.main-panel-head')
+        const foot = panel.querySelector('.main-panel-foot')
+        const headButtons = [...(head?.querySelectorAll('button') ?? [])]
+        const footButtons = [...(foot?.querySelectorAll('button') ?? [])]
+        return {
+          headButtons: headButtons.map((b) => text(b)),
+          headAllGhost: headButtons.every((b) => b.classList.contains('btn--ghost')),
+          headPrimary: primaryCount(head),
+          footExists: foot !== null,
+          footPrimary: primaryCount(foot),
+          footButtons: footButtons.map((b) => text(b)),
+        }
+      }
+
       /** 计算样式；元素不在时给空对象（读到的字段是 undefined ⇒ 那条断言红，正是要的）。 */
       function cs(el) {
         if (!el) {
@@ -1738,6 +1780,13 @@ facts['entry.智能体'] = { from: f.contentWindow.location.hash, to: '#/agents'
            */
           const saved = field()?.value ?? ''
           // 改一下（**不保存**）
+          /**
+           * ★★ D177（B 案）：智能体页的「设置」是族 1 里**带表单**的那一种——
+           *   保存/取消在**底栏**，栏头只有「← 返回」。
+           */
+          facts['agents.settingsPanelActions'] = panelActionPlace(
+            d().querySelector('[data-settings-panel]'),
+          )
           const box = field()
           box.value = `${saved}\n\n【探针：这段没保存，关掉之后不该还在】`
           box.dispatchEvent(new Event('input', { bubbles: true }))
@@ -2874,6 +2923,13 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           facts['skills.footButtonText'] = need('面板底部按钮', () =>
             text(panel.querySelector('.main-panel-foot button')),
           )
+          /**
+           * ★★ D177（B 案）：技能安装面板是族 1（`.main-panel` + 底栏）。
+           *   量的是**位置**：主操作在底栏、栏头只有返回。
+           *   ⚠️ 底栏那颗按钮没写变体（`<button type="submit">`）——按界面看到的重量算，
+           *      它**就是** primary（`app.css` 基类给 accent 底色）；按写法算会漏掉它。
+           */
+          facts['skills.panelActions'] = panelActionPlace(panel)
           facts['skills.tabCount'] = panel.querySelectorAll('.tab').length
           // 页签条里那个和面板头重复的「关闭」应当已经删掉
           facts['skills.duplicateCloseInTabs'] = !!panel.querySelector('.tabs .close')
@@ -5603,6 +5659,18 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           //    `langSelectOf()` 取到 null，中文切不回去，后面所有量中文的段全错。
           f.contentWindow.location.hash = '#/settings'
           await until(() => !!d().querySelector('[data-set-general]'), 60)
+          /**
+           * ★★ D177（B 案）：设置**页**的卡也是 `.main-panel` 这一族。
+           *   它们是"改了就生效 / 一按就发生"的卡（里面没有表单最后一步），所以：
+           *   栏头只许 ghost 的工具动作（「全部恢复默认」就是这一档），**不许**出现
+           *   primary / secondary / danger。量的是**每一张卡**，不是只量第一张。
+           */
+          facts['settings.pageCardsActions'] = [...d().querySelectorAll('.main-panel')].map(
+            (card) => ({
+              title: text(card.querySelector('.main-panel-head h2')),
+              ...panelActionPlace(card),
+            }),
+          )
           const langSelectZh = langSelectOf()
           if (!langSelectZh) errors.push('语言组：切回中文时抽屉里的语言 select 不见了')
           else {
@@ -8007,6 +8075,39 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             h: Math.round(r.height),
           }
         }
+
+        /**
+         * ★★ D177（使用者选的 B 案）：**「改了就生效」的面板不要底栏**。
+         *
+         * 聊天设置（`ChatSettings`）是 `.main-panel` 这一族里"没有最后一步"的那一档：
+         * 每个控件改完即保存（`saveSettings` 绑在 change 上），所以它**没有**
+         * `.main-panel-foot`，栏头也只有那颗 ghost 的「← 返回」。
+         * 量完顺手关掉（这颗是顶栏里的开关，再点一次就回去）。
+         * ⚠️ 反过来那一档（有底栏的面板）由 `skills.panelActions` 与
+         *    `agents.settingsPanelActions` 量——同一族两种形态各有一条判据。
+         */
+        facts['chat.settingsActionPlace'] = await (async () => {
+          const btn = [...d().querySelectorAll('.topbar .page-actions button')].find(
+            (b) => text(b) === '设置',
+          )
+          if (!btn) {
+            errors.push('聊天页顶栏找不到「设置」')
+            return null
+          }
+          click(btn)
+          const opened = await until(() => !!d().querySelector('[data-settings-panel]'), 30)
+          if (!opened) {
+            errors.push('点了聊天页的「设置」之后主区没有出现 .main-panel')
+            return null
+          }
+          await wait(400)
+          const panel = d().querySelector('[data-settings-panel]')
+          const place = panelActionPlace(panel)
+          // 收尾：再点一次关掉（后面还有判据要看聊天页的正文）
+          click(btn)
+          await wait(500)
+          return place
+        })()
 
         facts['chat.hasListPane'] = chatList() !== null
         facts['chat.hasDetailPane'] = chatDetail() !== null

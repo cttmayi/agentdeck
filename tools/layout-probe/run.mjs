@@ -1104,6 +1104,22 @@ const CHECKS = [
   },
   {
     view: '智能体',
+    key: 'agents.settingsPanelActions',
+    /**
+     * ★★ D177（B 案）：`SettingsPanel`（智能体页的「设置」= `WorkspaceSettings`）是
+     * 族 1 里**带表单**的那一种：保存 + 取消在**底栏**，栏头只有「← 返回」。
+     * 与技能安装面板同一条判据（同一个测量函数量出来的），因为它们**本来就是同一族**。
+     */
+    label: '★★ 工作区设置面板：**主操作在底栏**（唯一那颗 primary），**栏头只有 ghost**（返回）',
+    ok: (v) =>
+      !!v &&
+      v.headAllGhost === true &&
+      v.headPrimary === 0 &&
+      v.footExists === true &&
+      v.footPrimary === 1,
+  },
+  {
+    view: '智能体',
     key: 'agents.settingsDraftDiscarded',
     label:
       '★★★ 「设置」里改过内容、**没保存就关掉**，重开时必须回到**打开时那一份**（已保存的值，空也算一份）——这条来自使用者的原话："我修改了内容，没有保存直接点关闭或者取消后，重新打开，内容没有恢复保存前的内容"',
@@ -1827,6 +1843,25 @@ const CHECKS = [
   { view: '技能', key: 'skills.footButtonText', label: '面板底部是主操作「检查并安装」', ok: (v) => v === '检查并安装' },
   {
     view: '技能',
+    key: 'skills.panelActions',
+    /**
+     * ★★ D177（使用者选的 B 案：「主操作放哪」按族定，各族各自量）。
+     *
+     * 技能安装面板是 **族 1 `.main-panel`**：主操作（表单的最后一步）在**底栏**，
+     * 栏头**只许** ghost（这里就是那颗「← 返回技能列表」）。
+     * 量"位置"而不是"有没有那个按钮"：主操作跑到栏头去，按钮照样在、照样能点，
+     * 但那一屏的读法就变了（栏头是"我在哪 / 怎么回去"，底栏才是"这一步做完了"）。
+     */
+    label: '★★ 技能安装面板：**主操作在底栏**（唯一那颗 primary），**栏头只有 ghost**（返回）',
+    ok: (v) =>
+      !!v &&
+      v.headAllGhost === true &&
+      v.headPrimary === 0 &&
+      v.footExists === true &&
+      v.footPrimary === 1,
+  },
+  {
+    view: '技能',
     key: 'skills.tabCount',
     // ⚠️ 原来是 3（路径/GitHub · 远端目录 · 本地清单）——D73 之后多了「从本地安装」
     //    那一档（勾目录那套撤了，改成一个页签）。**数目要跟着改，而不是把断言放宽成
@@ -2290,6 +2325,18 @@ const CHECKS = [
   },
 
   // ══════════════ 聊天（闭环的旁路）══════════════
+  {
+    view: '聊天',
+    key: 'chat.settingsActionPlace',
+    /**
+     * ★★ D177（B 案）：`改了就生效` 的面板**不要底栏**——聊天设置每个控件改完即保存，
+     * 没有"最后一步"，所以没有 `.main-panel-foot`，栏头只有 ghost 的「← 返回」。
+     * 与 `skills.panelActions` / `agents.settingsPanelActions`（有底栏那一档）成对：
+     * 同一族 `.main-panel` 的两种形态各有一条判据。
+     */
+    label: '★★ 聊天设置面板：**没有底栏**（改了就生效，没有"最后一步"）、栏头只有 ghost',
+    ok: (v) => !!v && v.headAllGhost === true && v.headPrimary === 0 && v.footExists === false,
+  },
   {
     view: '聊天',
     key: 'chat.hasListPane',
@@ -4271,6 +4318,27 @@ const CHECKS = [
     key: 'lang.savedOnServer',
     label: '★ 选择写回了服务端（界面与 prompt 的语言指令一致）',
     ok: (v) => v === 'zh',
+  },
+  {
+    view: '设置页',
+    key: 'settings.pageCardsActions',
+    /**
+     * ★★ D177（B 案）：设置**页**的卡也是 `.main-panel` 这一族，但它们是"改了就生效 /
+     * 一按就发生"的卡（没有表单最后一步），所以**没有底栏**，栏头只许 ghost 的工具动作
+     * （「全部恢复默认」就是这一档）——不许出现 primary / secondary / danger。
+     * 量的是**每一张卡**：`map` 出来的数组里任何一张违规都红，并指名是哪一张。
+     */
+    label: '★★ 设置页每张卡：**栏头只许 ghost**（工具性动作），没有底栏、没有主操作',
+    ok: (v) =>
+      Array.isArray(v) &&
+      v.length >= 3 &&
+      v.every(
+        (card) => card.headAllGhost === true && card.headPrimary === 0 && card.footExists === false,
+      ),
+    show: (v) =>
+      Array.isArray(v)
+        ? v.map((c) => `${c.title}: 栏头 ${JSON.stringify(c.headButtons)}`).join('　')
+        : JSON.stringify(v),
   },
 
   // ── 新建任务 ──
