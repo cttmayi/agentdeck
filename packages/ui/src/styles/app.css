@@ -79,9 +79,14 @@
    *   比按钮高 4px，上下各留 2px 呼吸。它与顶栏的常驻控件（通知 / 设置 / 语言下拉）
    *   同高——"一条带子上的节奏"（D59 那条判据量的就是它）。
    */
-  --btn-h: 1.875rem;
-  --rail-h: calc(var(--btn-h) + 4px);
-  --ctl-h: var(--rail-h);
+  /**
+   * ★ D182：它现在是**控件高度**（按钮 + 输入框 + 下拉同一个数），所以改名
+   *   `--btn-h` → `--ctl-h`。量到的病：按钮 30px、输入框 40px、下拉 37px ——
+   *   ".workdir-row" 那种"输入 + 浏览…"的行里一行差 10px，聊天输入栏、`.field-row`
+   *   全是这个组合。`--rail-h` 仍是工具条轨道（= 控件高 + 4px）。
+   */
+  --ctl-h: 1.875rem;
+  --rail-h: calc(var(--ctl-h) + 4px);
   --radius: 8px;
   --radius-lg: 12px;
 
@@ -494,7 +499,7 @@ hr {
  *    （实测踩过：三条探针都还是绿的，因为它们只量"高度齐不齐"）。
  */
 .topbar .page-actions button {
-  height: var(--btn-h);
+  height: var(--ctl-h);
   padding: 0 var(--sp-3);
   border-radius: var(--radius-xs);
   background: transparent;
@@ -564,8 +569,8 @@ hr {
  */
 .topbar select {
   width: auto;
-  /* ★ D181：与按钮/轨道同一套数（原来这里是另一个数 2rem，与同排的按钮差 2px） */
-  height: var(--ctl-h);
+  /* ★ D181/D182：与轨道同一个数（原来这里是 2rem，与同排的按钮差 2px） */
+  height: var(--rail-h);
   padding: 0 var(--sp-2);
   font-size: var(--fs-xs);
 }
@@ -610,10 +615,11 @@ hr {
    *    看着就是没对齐。钉成一个值之后，加一个新按钮不会把这一排弄歪。
    *    探针里也有一条量它（`topbar.buttonHeights` 去重之后必须只剩一种）。
    *
-   * ★ D181：这个值现在叫 `--rail-h`（= 按钮高 + 4px），与工具条轨道**同一个数**
-   *   ——原来的 `--ctl-h` / `--ctl-h-sm` 两个数已经不存在了。
+   * ★ D181/D182：这个值现在叫 `--rail-h`（= 控件高 `--ctl-h` + 4px），与工具条轨道
+   *   **同一个数**。⚠️ 常驻控件在这里要显式取 `--rail-h`：`--ctl-h` 已经是"输入框/
+   *   按钮"的 30px，直接用会让顶栏那几颗图标比旁边的轨道矮 4px。
    */
-  height: var(--ctl-h);
+  height: var(--rail-h);
   padding: 0 var(--sp-2);
   font-size: var(--fs-sm);
   line-height: 1;
@@ -1270,7 +1276,7 @@ hr {
   border-radius: var(--radius);
 }
 .pane-actions button {
-  height: var(--btn-h);
+  height: var(--ctl-h);
   padding: 0 var(--sp-3);
   border: 0;
   border-radius: var(--radius-xs);
@@ -1466,7 +1472,7 @@ hr {
   border-radius: var(--radius);
 }
 .detail-head .detail-actions > button {
-  height: var(--btn-h);
+  height: var(--ctl-h);
   padding: 0 var(--sp-3);
   border: 0;
   border-radius: var(--radius-xs);
@@ -1517,7 +1523,7 @@ hr {
   border-radius: var(--radius);
 }
 .source-toggle button {
-  height: var(--btn-h);
+  height: var(--ctl-h);
   padding: 0 var(--sp-3);
   border-radius: var(--radius-xs);
   border: none;
@@ -1737,7 +1743,7 @@ button,
    */
   font-size: var(--fs-sm);
   padding: var(--sp-1) var(--sp-3);
-  line-height: calc(var(--btn-h) - 2 * var(--sp-1));
+  line-height: calc(var(--ctl-h) - 2 * var(--sp-1));
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1888,7 +1894,7 @@ button:disabled,
 .btn--icon {
   padding: 0 var(--sp-2);
   /* ★ D181：只有图标、没有文字行高可用 ⇒ 高度直接取那个数 */
-  height: var(--btn-h);
+  height: var(--ctl-h);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1918,12 +1924,39 @@ button:disabled,
   display: none;
 }
 
+/**
+ * ★★ D182：**输入控件与按钮同一个高度**（`--ctl-h` 30px）、同一个字号（`--fs-sm` 13px）。
+ *
+ * 量到的病：按钮 30px / 输入框 40px / 下拉 37px。于是「输入 + 浏览…」这种行
+ * （工作目录、聊天输入栏、`.field-row`）里两个控件差 **10px**——不是"没对齐"，
+ * 是两套尺寸。改之前输入框高 40 是因为 `padding: 8px 12px` + `font: inherit`(14px)。
+ *
+ * ⚠️ 这里用 `height` + `padding: 0 12px`（不是"行高凑出来"）：输入控件是**单行固定**
+ *   的盒子（多行的那个叫 `textarea`，它自己按 `rows` 长高），写死高度不会切字。
+ */
 input,
-textarea,
 select {
   font: inherit;
+  font-size: var(--fs-sm);
   width: 100%;
-  padding: var(--sp-2) var(--sp-3);
+  height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  transition: border-color 0.12s;
+}
+
+/**
+ * `textarea` 是多行控件：高度由 `rows` 定（写死会把字切掉），字号与内距跟上面同一套。
+ * ⚠️ 竖内距取 `--sp-1`（4px）而不是 `--sp-2`：单行文本域（`rows=1`）与输入框同高时才不突兀。
+ */
+textarea {
+  font: inherit;
+  font-size: var(--fs-sm);
+  width: 100%;
+  padding: var(--sp-1) var(--sp-3);
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--line-strong);

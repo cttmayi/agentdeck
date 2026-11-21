@@ -5923,6 +5923,23 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
              *   （实心 accent + 白字）。改之前：顶栏格子 24px、表单底栏 38px、模态框底栏 38px，
              *   而且表单那颗甚至不是 `btn`（裸 `<button>`）——使用者说的"差别太大"就是这三处。
              */
+            /**
+             * ★★★ D182：**输入控件与按钮同一个高度**（`--ctl-h` 30px / `--fs-sm` 13px）。
+             *   改之前按钮 30、输入框 40、下拉 37 —— 「输入 + 浏览…」这种行里两个控件
+             *   差 10px。这里量"同一行里真的同高"：工作目录那行的输入框与「浏览…」按钮、
+             *   以及表单底栏的主按钮。
+             */
+            facts['controls.rowSameHeight'] = (() => {
+              const m = (el) => {
+                if (!el) return null
+                const c = cs(el)
+                return { 高: Math.round(el.getBoundingClientRect().height), 字号: c.fontSize }
+              }
+              const input = d().querySelector('.form-advanced input:not([type=checkbox])')
+              const browse = d().querySelector('[data-newtask-workdir-browse]')
+              const submit = d().querySelector('.form-foot button[type=submit]')
+              return { 输入框: m(input), 浏览按钮: m(browse), 提交按钮: m(submit) }
+            })()
             facts['btn.uniform'] = (() => {
               const m = (el) => {
                 if (!el) return null
