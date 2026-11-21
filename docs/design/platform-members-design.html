@@ -240,18 +240,34 @@
   --text-dim: #4f5865;
   --text-faint: #5d6676;
 
-  --accent: #2b6fd0;
-  --accent-dim: #2f6fd0;
-  --good: #1f9d73;
-  --bad: #d64545;
-  --warn: #b7791f;
+  /**
+   * ★★★ D208（使用者："动，同一化"）：**把品牌色与状态色一起提到 AA，并且"同一个语义只有一个值"**。
+   *
+   * 为什么不只改 faint：D207 之后亮色还剩 4 处不达标，全是"品牌蓝 / 语义红画在有色底
+   *   `--surface-2`(#e2e7ee) 上"。量下来要过 4.5 得把这些颜色整体压深一档：
+   *     accent #2b6fd0 → #2560ba（有色底 3.94 → 4.88）、
+   *     good   #1f9d73 → #12714f（2.76 → 4.83）、 warn #b7791f → #8a5a0c（2.93 → 4.76）、
+   *     bad    #d64545 → #bd2f2f（3.52 → 4.68）、 review #7a5fd0 → #6a4fbf（3.86 → 4.85）。
+   *   `--accent-dim` 跟着 accent 走（它只当底色用；白字在其上 6.07）。
+   *
+   * **同一化**：`--status-*` 不再各自抄一份十六进制，而是 `var()` 引用基础色——
+   *   原来 `--status-active` 与 `--accent`、`--status-done` 与 `--good`、`--status-blocked`
+   *   与 `--warn`、`--status-todo` 与 `--text-faint` 都是**同值抄两遍**（改一处忘一处就会漂）。
+   *   现在一个语义只有一个值；改基础色，状态色自动跟。
+   */
+  --accent: #2560ba;
+  --accent-dim: #2560ba;
+  --good: #12714f;
+  --bad: #bd2f2f;
+  --warn: #8a5a0c;
 
   /* 运行状态色：与语义色分开，因为"进行中"既不是好也不是坏 */
-  --status-todo: #5d6676; /* D207：跟着 --text-faint（todo 就是最退后那一档状态） */
-  --status-active: #2b6fd0;
-  --status-review: #7a5fd0;
-  --status-done: #1f9d73;
-  --status-blocked: #b7791f;
+  --status-todo: var(--text-faint); /* D208：引用，不抄值 */
+  /* D208：状态色 = 基础色的**引用**（一个语义一个值） */
+  --status-active: var(--accent);
+  --status-review: #6a4fbf;
+  --status-done: var(--good);
+  --status-blocked: var(--warn);
 
   /* 代码高亮：亮色底下用墨色系（霓虹色只在暗底成立） */
   /**
@@ -311,11 +327,12 @@
   --bad: #f2716a;
   --warn: #e0b04a;
 
-  --status-todo: #8a93a2; /* D207：跟着 --text-faint */
-  --status-active: #5aa9f5;
+  --status-todo: var(--text-faint); /* D208：引用，不抄值 */
+  /* D208：暗色同样改成引用（暗色的基础色本来就都 ≥4.5，值不变） */
+  --status-active: var(--accent);
   --status-review: #b48ef0;
-  --status-done: #4ec9a0;
-  --status-blocked: #e0b04a;
+  --status-done: var(--good);
+  --status-blocked: var(--warn);
 
   /* D204：暗色下的 diff 增删色 + 不随主题的"纸/幕" */
   --diff-add: #7ee2a8;

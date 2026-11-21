@@ -459,6 +459,11 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
         [`${theme} faint / bg`, tok(block, '--text-faint'), tok(block, '--bg'), 4.5],
         [`${theme} faint / panel`, tok(block, '--text-faint'), tok(block, '--panel'), 4.5],
         [`${theme} faint / surface-2`, tok(block, '--text-faint'), tok(block, '--surface-2'), 4.5],
+        // ★ D208：状态色与品牌色当文字用时也一律 ≥4.5（"同一化"：一套标准，没有"登记缺口"了）
+        [`${theme} accent 当文字 / surface-2`, tok(block, '--accent'), tok(block, '--surface-2'), 4.5],
+        [`${theme} good 当文字 / surface-2`, tok(block, '--good'), tok(block, '--surface-2'), 4.5],
+        [`${theme} warn 当文字 / surface-2`, tok(block, '--warn'), tok(block, '--surface-2'), 4.5],
+        [`${theme} bad 当文字 / surface-2`, tok(block, '--bad'), tok(block, '--surface-2'), 4.5],
       )
     }
     const broken = MUST.filter(([, fg, bg, need]) => ratio(fg, bg) < need).map(
@@ -471,24 +476,28 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
      *    于是"又调低一点"这件事在 diff 里是可见的。
      */
     /**
-     * ⚠️ `--text-faint` 的两行**已经删了**：D207 把它们提进上面的"MUST ≥4.5"。
-     *    剩下的是**状态色当文字**——它们是语义色（绿/红/琥珀），压深会让"状态色"变浑浊，
-     *    而且它们主要出现在徽章里（浅色底 + 同色描边），所以继续留在棘轮档，只许变好。
+     * ★ D208（使用者："同一化"）：**状态色不许再抄一份十六进制**。
+     * 原来 `--status-active` / `--status-done` / `--status-blocked` / `--status-todo` 与
+     * `--accent` / `--good` / `--warn` / `--text-faint` 是**同值抄两遍**——改一处忘一处就漂。
+     * 现在两套主题里这四对都必须是 `var()` 引用。
      */
-    const FLOOR: Array<[string, string, string, number]> = [
-      ['亮 good 当文字 / surface', tok(lightBlock, '--good'), tok(lightBlock, '--surface'), 3.43],
-      ['亮 warn 当文字 / surface', tok(lightBlock, '--warn'), tok(lightBlock, '--surface'), 3.64],
-      ['亮 bad 当文字 / surface', tok(lightBlock, '--bad'), tok(lightBlock, '--surface'), 4.38],
-      // 品牌蓝 / 语义红画在**有色底**（`--surface-2`）上：也是"要动就得动品牌色"的那一类。
-      // 实测（D207 记）：accent 3.94、bad 3.52。要达标需 accent → #2560ba、bad → #c43636（都更暗）。
-      ['亮 accent 当文字 / surface-2', tok(lightBlock, '--accent'), tok(lightBlock, '--surface-2'), 3.94],
-      ['亮 bad 当文字 / surface-2', tok(lightBlock, '--bad'), tok(lightBlock, '--surface-2'), 3.52],
+    const UNIFIED: Array<[string, string]> = [
+      ['--status-active', '--accent'],
+      ['--status-done', '--good'],
+      ['--status-blocked', '--warn'],
+      ['--status-todo', '--text-faint'],
     ]
-    const worse = FLOOR.filter(([, fg, bg, floor]) => ratio(fg, bg) < floor - 0.01).map(
-      ([name, fg, bg, floor]) =>
-        `${name}：${String(Math.round(ratio(fg, bg) * 100) / 100)}:1，低于登记的下限 ${String(floor)}`,
-    )
-    assert.deepEqual(worse, [], `这些对比度比登记的下限更差了（棘轮不许往回退）：\n${worse.join('\n')}`)
+    const copied: string[] = []
+    for (const [theme, block] of [['亮', lightBlock], ['暗', darkBlock]] as const) {
+      const stripped = block.replace(/\/\*[^]*?\*\//g, '')
+      for (const [status, base] of UNIFIED) {
+        const m = stripped.match(new RegExp(`${status}:\\s*([^;]+);`))
+        if (!m) continue
+        const value = String(m[1]).trim()
+        if (value !== `var(${base})`) copied.push(`${theme} ${status} = ${value}（应为 var(${base})）`)
+      }
+    }
+    assert.deepEqual(copied, [], `状态色必须引用基础色（一个语义一个值）：\n${copied.join('\n')}`)
   })
 
   /**
