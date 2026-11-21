@@ -220,6 +220,44 @@
     }
 
       /**
+       * ★★ D203：**字符图标（▸ ▾ ⋯ × ✓ ✗ ⚠）字号只有一档**（`--fs-sm` = 13px），
+       *   只有"行内动作里那个 ×"登记为 17px（它是 28px 格子里唯一的内容）。
+       *
+       * 为什么值得量：字符图标的字号是**继承**来的，容器一换字号它就跟着变——
+       *   实测同一个 ▸ 在组头是 14px、折叠头 13px、工作目录树 12px。这类漂移用肉眼
+       *   几乎看不出来（差 1px），只有把字号摊开排在一起才看得见。
+       */
+      function sweepIcons(label) {
+        const doc = d()
+        const win = f.contentWindow
+        const acc = facts['icon.glyphs'] ?? { pages: [], seen: {}, unexpected: [] }
+        const GLYPH = /^[\u2190-\u21FF\u2500-\u27BF\u2B00-\u2BFF\uFE0F\u2700-\u27BF]+$/
+        /** 登记表：[类名, 允许字号, 理由] —— 探针是纯 JS，别在这儿写 TS 的类型标注 */
+        const REG = [
+          ['list-row-action', '17px', '列表行里那个删除 ×：28px 见方的格子里它唯一的内容，13px 不像"可点的动作"'],
+        ]
+        for (const el of doc.querySelectorAll('button, span, i, code, a')) {
+          const t = (el.textContent ?? '').trim()
+          if (t === '' || t.length > 3 || !GLYPH.test(t)) continue
+          if (el.children.length > 0) continue
+          const st = win.getComputedStyle(el)
+          if (st.display === 'none' || el.getBoundingClientRect().height === 0) continue
+          const size = st.fontSize
+          const cls = String(el.className || el.tagName)
+          const reg = REG.find(([c]) => cls.split(/\s+/).includes(c))
+          const key = `${t}|${size}`
+          acc.seen[key] = (acc.seen[key] ?? 0) + 1
+          if (reg) {
+            if (size !== reg[1]) acc.unexpected.push(`${label}:${t}=${size}（登记应为 ${reg[1]}）`)
+            continue
+          }
+          if (size !== '13px') acc.unexpected.push(`${label}:${t}=${size}`)
+        }
+        acc.pages.push(label)
+        facts['icon.glyphs'] = acc
+      }
+
+      /**
        * ★★ D202：**每个可聚焦元素在 `:focus-visible` 下都必须落到一条带 outline 的规则**。
        *
        * 为什么不用"真的聚焦再量"：探针里的 `element.focus()` 是**程序聚焦**，Chrome 不会
@@ -2204,6 +2242,7 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
         sweepGap('任务页')
         sweepRadius('任务页')
         sweepFocus('任务页')
+        sweepIcons('任务页')
         facts['tasks.rowHeights'] = need('各行高度', () =>
           rows.map((r) => Math.round(r.getBoundingClientRect().height)),
         )
@@ -2996,6 +3035,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         sweepGap('技能页')
         sweepRadius('技能页')
         sweepFocus('技能页')
+        sweepIcons('技能页')
         facts['skills.title'] = need('技能页标题', () => text(d().querySelector('.page-name')))
         // ⚠️ 两代老结构都不该再存在，各自是**不同**的一课：
         //   · `.install-panel`（最早那版"插在页头和列表之间的正文面板"）——它
@@ -6096,6 +6136,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           sweepGap('设置页')
           sweepRadius('设置页')
           sweepFocus('设置页')
+          sweepIcons('设置页')
           facts['headings.levels'] = (() => {
             const px = (el) => (el ? Math.round(parseFloat(cs(el).fontSize)) : null)
             const h1 = d().querySelector('.topbar .page-name')

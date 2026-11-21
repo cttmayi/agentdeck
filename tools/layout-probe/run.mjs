@@ -4607,6 +4607,18 @@ const CHECKS = [
       (v.unexpected.length ? ` · ✗ 没归类 ${v.unexpected.join(' ')}` : ''),
   },
   {
+    key: 'icon.glyphs',
+    /**
+     * ★★ D203：**字符图标字号只有一档**（13px），`list-row-action` 的 × 登记为 17px。
+     * 量法：三页扫所有"只含 1–3 个符号字符、没有子元素"的可见元素，比较 computed 字号。
+     */
+    label: '★★ 字符图标字号统一 13px（行内动作的 × 登记为 17px）',
+    ok: (v) => !!v && Array.isArray(v.unexpected) && v.unexpected.length === 0 && v.pages.length >= 3,
+    show: (v) =>
+      `${v.pages.join(' ')} · 见到的字形/字号：${Object.keys(v.seen).join(' ')}` +
+      (v.unexpected.length ? ` · ✗ 不统一 ${v.unexpected.slice(0, 5).join(' ')}` : ''),
+  },
+  {
     key: 'focus.rings',
     /**
      * ★★ D202：**键盘焦点全站只有一道环**（2px accent）。三页扫所有可聚焦元素：

@@ -1195,9 +1195,10 @@ hr {
   outline-offset: 1px;
 }
 
-/* chevron 跟组头同字号（`.chevron` 那一档本来是给 `.fold-head` 的 `--fs-sm`） */
+/* D203：chevron 不再"跟组头同字号"——原来 `font-size: inherit` 让它跟着组头的 14px 走，
+   于是同一个 ▸ 在组头里 14px、在折叠头里 13px、在工作目录树里 12px（实测三种都拍到了）。
+   字号统一由下面那条共享规则给，这里只管颜色。 */
 .list-group-head .chevron {
-  font-size: inherit;
   color: var(--text-faint);
 }
 
@@ -2387,7 +2388,6 @@ tbody tr:last-child td,
 .fold-head:hover { background: var(--surface-hover); }
 .fold-head .chevron {
   color: var(--text-faint);
-  font-size: var(--fs-sm);
   flex: 0 0 auto;
 }
 .fold-head[aria-expanded='true'] .chevron { color: var(--accent); }
@@ -2432,6 +2432,24 @@ tbody tr:last-child td,
 }
 .expand-toggle:hover { color: var(--text); background: var(--surface-hover); }
 .expand-toggle[aria-expanded='true'] .chevron { color: var(--accent); }
+
+/**
+ * ★★ D203：**字符图标（▸ ▾ ⋯ ✓ ✗ ⚠）只有一档字号：`--fs-sm`（13px）**。
+ *
+ * 它们不跟容器继承——原来 `.list-group-head .chevron { font-size: inherit }` 让组头里的 ▸
+ *  跟着组头的 14px 走，折叠头写死 `--fs-sm`，工作目录树的 twisty 又继承 12px，
+ *  于是**同一个字形在同一页里有 12 / 13 / 14 三个大小**（实测三种都拍到了）。
+ *  图标是"符号"，它的视觉重量不该随所在容器的字号漂移。
+ *
+ * 例外（登记在探针 `icon.glyphs` 里）：**列表行里的删除 ×** 用 `--fs-lg`（17px）——
+ *  它是那 28px 见方的格子里唯一的内容，13px 的 × 在那儿不像"可点的动作"。
+ */
+.chevron,
+.twisty,
+.wd-twisty,
+.expand-toggle .chevron {
+  font-size: var(--fs-sm);
+}
 
 /* 来源标识：路径/URL 再长也不许折行（一折这一格就变高、整行跟着变高）。
    `span` 与徽章同行（2026-10 紧凑性），单行省略，全文在 `title` 里。 */
