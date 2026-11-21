@@ -558,6 +558,24 @@ hr {
  *
  * ⚠️ 宽屏平铺。窄屏被 `@media` 换成 `⋯`（见文件里的断点）——两处是同一份数据。
  */
+/**
+ * ★ D200：**四条轨道共用同一个"格子之间的缝"**（2px）。
+ *
+ * 这四条是同一件东西——顶栏动作栏、栏头动作栏、详情栏动作栏、来源切换：
+ * 外层一张 `--rail-h` 的底（`--line-strong` + 圆角），里面每一格是 `.btn`。
+ * 原来每条各自写一遍 `gap: 2px`（四遍），而"按钮里图标与文字的 6px"又在另外
+ * 五条规则里各写一遍（五遍）——把"同一件事写了九遍"数出来之后，才看得出
+ * 这里其实只有**两个常量**：格子之间的缝 2px、格子内部图标与文字的 6px。
+ * 现在：缝在这里定义一次，6px 在 `.btn` 里定义一次。
+ */
+.topbar .page-actions,
+.pane-actions,
+.detail-head .detail-actions:has(> button + button),
+.source-toggle,
+.theme-picker,
+.view-switch {
+}
+
 .topbar .page-actions {
   display: flex;
   align-items: center;
@@ -566,7 +584,6 @@ hr {
   height: var(--rail-h);
   box-sizing: border-box;
   padding: 0 var(--sp-1);
-  gap: 2px;
   /* ★ D173：**四条轨道共用同一个值**（探针钉着：栏头那排与顶栏"是同一条工具条"，
      比的就是底色的字面值）。顶栏底色换成 `--rail` 之后 `--line` 在它上面只剩 1.15
      （会糊成一片），而 `--line` / `--line-strong` 只能选一个 ⇒ 四条一起抬到
@@ -592,7 +609,7 @@ hr {
   color: var(--text-dim);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  /* D200：图标与文字之间的 6px 收进 `.btn` 基类（这里不再重复）。 */
 }
 
 .topbar .page-actions button:hover:not(:disabled) {
@@ -780,7 +797,7 @@ hr {
   border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
-  gap: 6px;
+  /* D200：图标与文字之间的 6px 收进 `.btn` 基类（这里不再重复）。 */
   color: var(--text-dim);
   background: transparent;
 }
@@ -1374,7 +1391,6 @@ hr {
   height: var(--rail-h);
   box-sizing: border-box;
   padding: 0 var(--sp-1);
-  gap: 2px;
   /* D173：与顶栏那条轨道**同一个值**（"同一条工具条"，探针比字面值）。 */
   background: var(--line-strong);
   border-radius: var(--radius);
@@ -1388,7 +1404,7 @@ hr {
   color: var(--text-dim);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  /* D200：图标与文字之间的 6px 收进 `.btn` 基类（这里不再重复）。 */
 }
 .pane-actions button:hover:not(:disabled) {
   background: var(--surface);
@@ -1599,7 +1615,6 @@ hr {
   height: var(--rail-h);
   box-sizing: border-box;
   padding: 0 var(--sp-1);
-  gap: 2px;
   /* D173：与顶栏那条轨道**同一个值**（"同一条工具条"，探针比字面值）。 */
   background: var(--line-strong);
   border-radius: var(--radius);
@@ -1613,7 +1628,7 @@ hr {
   color: var(--text-dim);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  /* D200：图标与文字之间的 6px 收进 `.btn` 基类（这里不再重复）。 */
 }
 .detail-head .detail-actions > button:hover:not(:disabled) {
   background: var(--surface);
@@ -1650,7 +1665,6 @@ hr {
   height: var(--rail-h);
   box-sizing: border-box;
   padding: 0 var(--sp-1);
-  gap: 2px;
   /* D173：同一条工具条的第四个用法，同一个值。 */
   background: var(--line-strong);
   border-radius: var(--radius);
@@ -1664,7 +1678,7 @@ hr {
   color: var(--text-dim);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  /* D200：图标与文字之间的 6px 收进 `.btn` 基类（这里不再重复）。 */
   cursor: pointer;
   white-space: nowrap;
 }
@@ -1947,6 +1961,11 @@ button,
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* ★ D200：**按钮里"图标 ↔ 文字"的缝只有这一处**。原来是五条轨道规则各写一遍
+     `gap: 6px`（`.topbar .page-actions button` / `.page-menu button` / `.pane-actions button` /
+     `.detail-actions > button` / `.source-toggle button`）——同一个值写五遍就等于没有定义，
+     而且 6 不在 `--sp-*` 刻度上（4/8/12/16/24/32/48）。它是**控件内部的排版常量**，
+     不是块与块之间的间距档，所以不进刻度，但必须只有一个出处。 */
   gap: 6px;
 }
 
@@ -2830,7 +2849,6 @@ tbody tr:last-child td,
   padding: 2px;
   border-radius: var(--radius);
   background: var(--surface-2);
-  gap: 2px;
 }
 .theme-picker button {
   border: none;
@@ -2885,7 +2903,6 @@ tbody tr:last-child td,
   padding: 2px;
   border-radius: var(--radius);
   background: var(--surface-2);
-  gap: 2px;
 }
 .view-switch button {
   border: none;

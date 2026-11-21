@@ -219,6 +219,53 @@
       facts['ctl.heights'] = acc
     }
 
+      /**
+       * ★★ D200：**元素之间的间距只有四类来源**，这条把它们分开量。
+       *
+       * 已知的四种：
+       *   ① **令牌刻度**：`--sp-1..8` = 4 / 8 / 12 / 16 / 24 / 32 / 48（块与块之间）；
+       *   ② **紧贴档 2px**：分段格子之间的缝、标题与副标题、紧凑字段的标签与输入框
+       *      （"两块本该连着"的地方，不是"隔着一段距离"）；
+       *   ③ **控件内部常量 6px**：`.btn` 里图标与文字之间——它不是间距档，是按钮内部的排版常量；
+       *   ④ **内容/容器决定**：行内各元素 8px 之类，跟着内容走。
+       *
+       * 这条判据扫当前页面所有容器的 `gap`，把值归到上面前三类之一；出现刻度外的**新值**就报红
+       * （第一版扫出来的是 6.5px——那是 `<option>` 的 computed 值，不是我们自己写的，已排除）。
+       */
+      function sweepGap(label) {
+        const doc = d()
+        const win = f.contentWindow
+        const acc = facts['gap.values'] ?? { pages: [], seen: {}, unexpected: [] }
+        const ALLOWED = [0, 2, 4, 6, 8, 12, 16, 24, 32, 48]
+        const containers = [...doc.querySelectorAll('*')].filter((el) => {
+          const st = win.getComputedStyle(el)
+          if (st.display === 'none') return false
+          return /flex|grid/.test(st.display)
+        })
+        let counted = 0
+        for (const el of containers) {
+          const st = win.getComputedStyle(el)
+          const raw = (st.columnGap && st.columnGap !== 'normal' ? st.columnGap : '') || st.gap || ''
+          if (raw === '' || raw === 'normal') continue
+          const px = Math.round(parseFloat(raw.split(/\s+/)[0]))
+          if (!Number.isFinite(px) || px === 0) continue
+          counted += 1
+          const key = `${String(px)}px`
+          acc.seen[key] = (acc.seen[key] ?? 0) + 1
+          if (!ALLOWED.includes(px)) {
+            const cls =
+              String(el.className || el.tagName)
+                .split(/\s+/)
+                .filter((c) => c !== '' && !c.startsWith('svelte-'))
+                .slice(0, 2)
+                .join('.') || el.tagName
+            acc.unexpected.push(`${label}:${cls}=${String(px)}px`)
+          }
+        }
+        if (counted > 0) acc.pages.push(`${label}(${String(counted)})`)
+        facts['gap.values'] = acc
+      }
+
       /** 计算样式；元素不在时给空对象（读到的字段是 undefined ⇒ 那条断言红，正是要的）。 */
       function cs(el) {
         if (!el) {
@@ -2026,6 +2073,7 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
         )
         // ── 行高：长标题不许把一行撑高 ──
         sweepCtl('任务页')
+        sweepGap('任务页')
         facts['tasks.rowHeights'] = need('各行高度', () =>
           rows.map((r) => Math.round(r.getBoundingClientRect().height)),
         )
@@ -2815,6 +2863,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         facts['entry.技能.actual'] = text(d().querySelector('.page-name'))
         await wait(500)
         sweepCtl('技能页')
+        sweepGap('技能页')
         facts['skills.title'] = need('技能页标题', () => text(d().querySelector('.page-name')))
         // ⚠️ 两代老结构都不该再存在，各自是**不同**的一课：
         //   · `.install-panel`（最早那版"插在页头和列表之间的正文面板"）——它
@@ -5912,6 +5961,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             }
           })()
           sweepCtl('设置页')
+          sweepGap('设置页')
           facts['headings.levels'] = (() => {
             const px = (el) => (el ? Math.round(parseFloat(cs(el).fontSize)) : null)
             const h1 = d().querySelector('.topbar .page-name')

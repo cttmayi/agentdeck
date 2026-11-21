@@ -4607,6 +4607,25 @@ const CHECKS = [
       (v.unexpected.length ? ` · ✗ 没归类 ${v.unexpected.join(' ')}` : ''),
   },
   {
+    key: 'gap.values',
+    /**
+     * ★★ D200：**间距只有四类来源**——令牌刻度（4/8/12/16/24/32/48）、紧贴档 2px
+     * （分段格子的缝 / 标题与副标题 / 紧凑字段）、控件内部常量 6px（`.btn` 里图标与文字）、
+     * 以及内容决定的（行内 8px 之类）。扫任务 / 设置 / 技能三页所有容器的 `gap`，
+     * 出现刻度外的**新值**就报红。
+     */
+    label: '★★ 间距只有四类来源（刻度 4/8/12/16/24/32/48 · 紧贴 2 · 控件内 6 · 内容）',
+    ok: (v) =>
+      !!v &&
+      Array.isArray(v.unexpected) &&
+      v.unexpected.length === 0 &&
+      Array.isArray(v.pages) &&
+      v.pages.length >= 3,
+    show: (v) =>
+      `${v.pages.join(' ')} · 见到的 gap：${Object.keys(v.seen).sort((a, b) => parseFloat(a) - parseFloat(b)).join(' / ')}` +
+      (v.unexpected.length ? ` · ✗ 刻度外 ${v.unexpected.join(' ')}` : ''),
+  },
+  {
     view: '设置页',
     key: 'ctl.sweep',
     /**
