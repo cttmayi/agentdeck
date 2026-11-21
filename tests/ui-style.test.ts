@@ -238,6 +238,7 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
     for (const rel of [
       'docs/design/ui-demo.html',
       'docs/design/platform-members-design.html',
+      'docs/design/workflow-agents-design.html',
     ]) {
     /*
      * ★ 2026-11（D136）：使用者要一份"以后照着抄"的 HTML 范例。范例若像设计稿那样
@@ -428,7 +429,11 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
       // ② 标记里不许再用它。⚠️ `load()` 只扫 apps/packages，**不含 `docs/`** ——
       //    设计稿正是踩坑的地方（演示稿里那 3 处就是这么漏掉的），所以这里额外读 docs/design。
       const targets: Array<[string, string]> = [...files]
-      for (const rel of ['docs/design/ui-demo.html', 'docs/design/platform-members-design.html']) {
+      for (const rel of [
+        'docs/design/ui-demo.html',
+        'docs/design/platform-members-design.html',
+        'docs/design/workflow-agents-design.html',
+      ]) {
         targets.push([rel, await readFile(join(REPO_ROOT, rel), 'utf8')])
       }
       for (const [rel, raw] of targets) {

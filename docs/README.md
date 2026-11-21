@@ -18,7 +18,8 @@
 | 这东西是干什么的、给谁用 | [`../README.md`](../README.md)（使用者的那一份） |
 | **要做什么**、验收标准、不变量、决策记录 | [`./srs/requirements.md`](./srs/requirements.md) |
 | **现在的代码长什么样**（模块、依赖、接口、数据落点、不变量强制点、代码索引） | [`./design/architecture.md`](./design/architecture.md) |
-| **东西存在哪个文件里、哪个文件说了算、能不能直接改**（智能体 / SKILL / 记忆 / 编排的落盘形状） | [`./design/storage-layout.md`](./design/storage-layout.md) |
+| **东西存在哪个文件里、哪个文件说了算、能不能直接改**（智能体 / SKILL / 记忆 / 编排的落盘形状） | [`./design/workflow-agents-design.html`](./design/workflow-agents-design.html) | **编排内建智能体的界面草稿（D234 的界面落点，待拍板）** —— 一行方案：在编排详情右栏、代码编辑器下面加一节「本编排的智能体」（列表 + 就地编辑名字/指令/技能）；三种落点对比、三屏 1:1 界面、交互与文案、10 条探针判据、一期不做清单、落地顺序。**设计稿，逐字嵌 `app.css`** | 草稿 |
+| [`./design/storage-layout.md`](./design/storage-layout.md) |
 | **runtime 是怎么抽象出来的**（AgentBackend 公共契约、RuntimeDescriptor 数据表、公共机器、差异点、加 runtime 清单） | [`./runtime/runtime-framework.md`](./runtime/runtime-framework.md) |
 | **为什么这么做**（架构、数据模型、接口、状态机、安全边界） | [`./design/design.md`](./design/design.md) |
 | **一条 run 实际是怎么跑起来的**（命令行、注入、收尾） | [`./runtime/pipeline.md`](./runtime/pipeline.md) |

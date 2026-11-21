@@ -27,6 +27,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const DEMOS = [
   join(ROOT, 'docs/design/ui-demo.html'),
   join(ROOT, 'docs/design/platform-members-design.html'),
+  join(ROOT, 'docs/design/workflow-agents-design.html'),
 ]
 const APP_CSS = join(ROOT, 'packages/ui/src/styles/app.css')
 const COMPONENTS = [

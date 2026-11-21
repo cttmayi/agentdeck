@@ -1,0 +1,3696 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>编排内建智能体（草稿 v1）</title>
+    <!--
+      ══════════════════════════════════════════════════════════════════════
+      这是什么
+      ══════════════════════════════════════════════════════════════════════
+
+      2026-11 设计稿：把 **编排内建智能体**（D234 的存储与接口都已落地，界面还没有
+      落点）画成看得见的样子，供拍板用。
+
+      一句话方案：**在编排详情右栏、代码编辑器下面加一节「本编排的智能体」**——
+      列表 + 就地编辑（名字 / 指令 / 技能）。它不是新页面、不是新抽屉：内建智能体
+      与编排代码是**同一份定义**（就住在 `workflows/<id>/agents/<名字>/` 里），
+      "改代码"和"配它用谁"本来就该在同一屏。
+
+      ⚠️ 这是设计稿，不是产品页面。下面第一段 <style> 是从 app.css 逐字嵌入的
+      （`tests/ui-style.test.ts` 盯着两段逐字相同），第二段是 ListPane/ListRow 的
+      scoped 样式。第三段才只属于这份稿子。
+    -->
+    <style>
+      /* ==== BEGIN app.css（packages/ui/src/styles/app.css，逐字嵌入，别手改）==== */
+/* ══════════════════════════════════════════════════════════════════
+   设计令牌
+   ══════════════════════════════════════════════════════════════════
+
+   之前那份 CSS 是"能看就行"的水平：颜色写死在各处、字号随手给、间距没有
+   节奏。结果是界面**看起来像一堆元素碰巧放在一起**，而不是一个东西。
+
+   这里先把四件事定下来，后面所有样式都只引用变量：
+
+   ① **间距用一套 4 的倍数**（`--sp-1..8`）。随手写 `padding: 7px` 是
+      "看起来不齐"最常见的原因——每处差 1~2px，累积起来就是没有节奏。
+   ② **字号有层级**（`--fs-xs..2xl`），并且**用层级而不是用颜色**来表达
+      主次。靠"重要的用白色、不重要的用灰色"会让界面发灰。
+   ③ **颜色语义化**（surface / line / text / good / bad / warn），
+      不在组件里写 `#2a2a2a`。这样换主题、调对比度只需要改一处。
+   ④ **圆角与阴影克制**：只有浮层（抽屉、卡片悬停）才有阴影。
+      到处加阴影会让界面看起来油腻。
+
+   ══════════════════════════════════════════════════════════════════
+   亮 / 暗两套主题（2026-09 全面改版）
+   ══════════════════════════════════════════════════════════════════
+
+   · `:root` 是**亮色**，`:root[data-theme='dark']` 是**暗色**——切换只是换一层
+     变量，组件一个都不用动。`data-theme` 由 `lib/theme.ts` 打在 `<html>` 上，
+     index.html 里那段同步脚本保证首帧就是对的（不闪）。
+   · 主题无关的令牌（间距/字号/行高/圆角/布局尺寸）只写一遍在 `:root`。
+   · **扁平化**（同一轮改版），但**浮层保留克制阴影**：抽屉/弹窗/菜单是压在页面
+     上面的层，"它浮起来了"要靠**遮罩 + 描边 + 一层浅影**三层一起说——只靠
+     遮罩和描边，暗色下浮层与页面之间的界限不够清楚（2026-09 实测后把阴影
+     加回来）。`--shadow-1` 给轻浮层（菜单），`--shadow-2` 给抽屉/弹窗。
+   · `color-scheme` 跟着主题走：原生控件（select 下拉、滚动条）的配色
+     才不会在暗色下白得刺眼。
+   · 代码高亮那几档（`--hl-*`）也进主题：FileViewer 的 hljs 配色原来是写死的
+     霓虹色，只在暗底上成立，亮色底下会淡得读不出。
+ */
+
+:root {
+  /* 间距：4 的倍数 */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: 2rem;
+  --sp-8: 3rem;
+
+  /* 字号层级 */
+  /* ★ 299 批：11px / 10px 这两档原来散在组件里（徽标、进度条、极小的辅助字），
+     不是新字号，是把已经在用的两档**给个名字** */
+  --fs-3xs: 0.625rem;
+  --fs-2xs: 0.6875rem;
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-base: 0.875rem;
+  --fs-md: 0.9375rem;
+  --fs-lg: 1.0625rem;
+  --fs-xl: 1.375rem;
+
+  /* 行高：正文松、标题紧 */
+  --lh-tight: 1.3;
+  --lh-base: 1.6;
+
+  /* ★ 圆角的全部取值（原来组件里散着 0/5px/6px/100px 这些裸值）。
+     **命名按数值从小到大**：none(0) < sm(4) < md(6) < `--radius`(8) < lg(12) < pill(999)。
+     ⚠️ D201：原来 6px 那个叫 `--radius-xs`、4px 那个叫 `--radius-sm`——**名字是反的**
+     （xs 比 sm 还大）。改的只是名字：`--radius-xs` → `--radius-md`，像素一个没动，
+     所以视觉零变化。加了一条判据（`tests/ui-style.test.ts`）钉住"名字的序必须等于值的序"。 */
+  --radius-none: 0;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-pill: 999px;
+  /**
+   * ★ D181（使用者："按钮的类型差别大，一般按钮和顶栏的按钮差异太大，风格不一致"）：
+   *   **全站只有一个按钮高度**（`--btn-h` = 30px）。
+   *
+   *   改之前是两个数：普通按钮 38px（`padding: 8px 12px` + 14px 字）、工具条格子 24px。
+   *   于是同一颗「保存」在栏头里 24px、在面板底栏里 38px；再加上栏头那条轨道把
+   *   `btn--primary` 压成"400 字重 + 淡灰字 + 透明底"，和旁边的「删除」一模一样
+   *   ——主操作在栏头里根本看不出来（探针实测过）。
+   *
+   *   `--rail-h` 是工具条轨道（顶栏那排 / 栏头那排 / 对话头那排 / 来源切换）的高度：
+   *   比按钮高 4px，上下各留 2px 呼吸。它与顶栏的常驻控件（通知 / 设置 / 语言下拉）
+   *   同高——"一条带子上的节奏"（D59 那条判据量的就是它）。
+   */
+  /**
+   * ★ D182：它现在是**控件高度**（按钮 + 输入框 + 下拉同一个数），所以改名
+   *   `--btn-h` → `--ctl-h`。量到的病：按钮 30px、输入框 40px、下拉 37px ——
+   *   "输入 + 浏览…"那种行里一行差 10px，聊天输入栏、`.field-row`
+   *   全是这个组合。`--rail-h` 仍是工具条轨道（= 控件高 + 4px）。
+   */
+  --ctl-h: 1.875rem;
+  --rail-h: calc(var(--ctl-h) + 4px);
+
+  /**
+   * ★★ D183：**一级东西一套内距**。界面上只有四级：
+   *
+   *   ① 页面级（`.main`）：24 / 32（窄屏收到 16）
+   *   ② 面板级（栏头 / 面板 / 详情栏的头-体-脚）：16/24/12 · 16/24 · 12/24
+   *   ③ 浮层级（抽屉 / 模态的头-体-脚）：**同 ②**——它们本来就是同一级东西，
+   *      一块"有头、有体、有脚"的方块，只是浮在别的东西上面
+   *   ④ 行级（表格单元格 / 表单字段 / 列表行）：各自那条规则定，见 §2.4
+   *
+   * 量到的原样：浮层的头少一个"下 12"、体是 24/24（面板体是 16/16——同一级东西
+   * 两套数）。于是"同样一块带头的面板，浮起来之后行距就变了"。
+   */
+  --pad-page: var(--sp-5) var(--sp-6);
+  --pad-frame-head: var(--sp-4) var(--sp-5) var(--sp-3);
+  --pad-frame-body: var(--sp-4) var(--sp-5);
+  --pad-frame-foot: var(--sp-3) var(--sp-5);
+
+  /**
+   * ★★ D184：**行级密度只有两档**（第四级的两个数，见 §2.4）：
+   *
+   *   · 紧凑档 = 表格（一屏要看很多行）：数据行 `td` 上下各 12、表头 `th` 上下各 8
+   *     （表头比数据行紧一档——它是一行标签，不是内容）；
+   *   · 标准档 = 列表行（一行装一句话 + 元信息）：`--list-row-min-h` 64、行内上下各 8。
+   *
+   * 量过三页（任务 / 智能体 / 聊天）的 `.list-row` 都是 64、表格 `td` 都是 12/12
+   * ——**这两档本来就已经一致，写在这里是为了让"新写的表格 / 新写的列表"有数可抄**。
+   * 分组标题行（`.cat-row` / `.group-head`）不在两档里：它 12/4，是"标题贴着它管的那段"，
+   * 不是一行数据。
+   */
+  --pad-cell: var(--sp-3);
+  --pad-cell-head: var(--sp-2) var(--sp-3);
+
+  /* ★★ D223（使用者："还有些页面也是第一行写些描述，不符合当前规格"）：
+     **行宽上限这一条整体退场**——`--measure`（40rem / 640px）删掉了。
+     它的一生：D186 加它给「一段连续文字」定舒适宽度（任务详情栏 1658px、一行
+     115 个汉字读不下去）；D209 先放开了 Markdown 与 agent 气泡（"要换行，原文
+     自己回车"），只剩页头说明段（`.view-intro p`）一个使用者；D223 把页头说明段
+     也删了 ⇒ 使用者归零 ⇒ 连 token 一起删。
+     ⚠️ 所以现在**全站没有任何宽度上限**：文字宽度一律跟随容器（表格 / 列表 /
+     卡片 / 表单本来就跟栏走），要断行由内容自己决定。 */
+  --radius: 8px;
+  --radius-lg: 12px;
+
+  /* ★ 2026-11：侧栏宽度**减半**（15rem → 7.5rem）——使用者：左栏太宽、
+     辅助文字要更精简。`.shell` 与 `.topbar` 共用这一个值（顶栏左格与侧栏共线），
+     所以顶栏左格也跟着变窄（页名本来就允许收缩省略）。 */
+  --sidebar-w: 7.5rem;
+  --topbar-h: 3.25rem;
+  /* ★ 300 批：压在 accent 实心块上的字色。亮/暗**两套主题里都是白**，所以写在
+     主题无关这一段（原来 11 处各写 `#fff`，其中 6 处在组件里——既看不出它是
+     "accent 上的字"，改主题时也没人会想到它）。 */
+  --on-accent: #fff;
+
+  /* ★ 2026-11（Windows 上思考过程显示乱码）：模型的推理摘录满是箭头/数学符号/
+     制表符/emoji——macOS 的 -apple-system 与系统回退覆盖广，Windows 的 Segoe UI +
+     微软雅黑覆盖不到这些码位，缺字形就成乱码。补**回退字体**（Windows 自带的
+     Segoe UI Symbol / Segoe UI Emoji / Cascadia Code），只影响缺字形的平台：
+     macOS 上 -apple-system 先命中，后面的回退一项都不触发，渲染逐字节不变。 */
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei',
+    'Segoe UI Symbol', 'Noto Sans Symbols 2', 'Apple Symbols',
+    'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
+  /* Cascadia Code 是 Windows 10/11 自带的终端字体（覆盖制表符等符号），
+     放 Consolas 前面；Consolas 缺这些码位。 */
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, 'Cascadia Code',
+    Consolas, 'Noto Sans Mono', monospace;
+
+  /* ═══ 亮色（默认）═══ */
+  color-scheme: light;
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  /* ★ 2026-11（D168）：**填充档**（选中行 / 次级块 / 只读框底）抬到能读出来的位置。
+     D167 只动了"线"，量出来的另一半问题是这一档：旧 #eef0f4 贴页面底只有 **1.06**
+     ——选中一行与不选中，只靠那圈 accent 边框在说"我选中了"，底色本身什么都没说
+     （使用者原话是"分界不明显"，选中态也属于分界）。现在 1.06 → **1.16**（对面板
+     1.14 → 1.24）。**比 hover 重、比线轻**：hover（`--surface-hover` 1.13）不动，
+     选中态必须在两者之上——不然"正在 hover"和"已经选中"看起来一样重。 */
+  --surface-2: #e2e7ee;
+  --surface-hover: #e6e9ef;
+  /* 代码/日志面板里的吸顶条：比面板底色再深一档，滚动时内容从它下面钻过去 */
+  --panel: #eceef2;
+  /* ★ 2026-11（D167，使用者："现在的配色让分界不明显"）：**线这一档整体加深**。
+     病根量出来了——旧的四条界线全挤在同一个看不出差别的带里（相对亮度比，
+     1.00 = 完全一样、1.2 以下人眼基本读不出）：
+       行间发丝线 / 栏头线 画在页面底上：`--line` 旧值 1.18
+       强分隔（skill/抽屉/把手）      ：`--line-strong` 旧值 1.46
+       次级块、选中行 vs 页面底       ：`--surface-2` 1.06（这一档本轮**不动**）
+     所以"有没有线"要凑近看。现在把**线**抬到 1.34 / 1.59：线的职责是"分开"，
+     填充（`--surface-2` / `--surface-hover`）的职责是"标出选中/悬停"——两者挤在
+     同一个亮度带里时，一条线和一块选中底色看起来一样重，等于都没说清。 */
+  --line: #d2d8e1; /* 对页面底 1.34、对面板 1.43（旧 1.18 / 1.26） */
+  --line-strong: #bfc7d2; /* 强分隔/把手：对页面底 1.59、对面板 1.71（旧 1.46 / 1.57） */
+
+  /* ★ 2026-11（D173）：**外框（顶栏 + 侧栏）再退一层**，并带上它自己的两档填充。
+     来由：D170 之后主区与顶栏都白了，D171/D172 把外框退到页面底（`--bg`）——
+     使用者说对了，"导航"还能再退一层。但外框一退到比 `--bg` 还深的位置，**填充的
+     方向就翻了**：`--surface-2`（#e2e7ee）与 `--surface-hover`（#e6e9ef）在这块
+     外框上只有 1.02 / 1.03 —— 也就是"hover 没有反应"。
+     所以外框不能借用内容面的那两档，它要**自己的一对**：hover 往白面方向提半档，
+     选中就是一整颗白药丸（对 `--rail` 1.13 / 1.24）。这也正是导航该有的样子：
+     选中项"浮"在外框上，而不是"陷"进去。
+     ⚠️ 暗色的方向本来就是反的（越亮越靠前），所以暗色这两个值等于 `--surface-hover`
+     / `--surface-2` —— 值一样不代表角色一样，规则引用的是**角色**（"外框上的填充"）。 */
+  --rail: #e2e7ee; /* 对白面 1.24、对页面底 1.16 */
+  --rail-hover: #f2f4f7; /* 对 --rail 1.13 */
+  --rail-selected: #ffffff; /* 对 --rail 1.24（选中项是一颗白药丸） */
+
+  --text: #1d232c;
+  /**
+   * ★★★ D207（使用者拍板："就 AA 吧"）：**次要文字（faint）提到 WCAG AA**。
+   *
+   * 改前 `--text-faint: #8a93a2` 在白面上只有 **3.10:1**、面板底 2.67、轨道底 2.49
+   * （低于 AA 的 4.5，也低于"大字号"门槛 3）。改后 `#616a79`：白面 **5.46**、页面底 5.09、
+   * 面板 4.70、surface-2 4.97——**所有它实际会用到的底都过 4.5**。
+   * 代价：它离 `--text-dim` 只剩一步（5.46 vs 6.00）⇒ 同批把 dim 从 `#5a6472` 压到
+   * **`#4f5865`**（白面 7.20），把"次要 / 更次要"两层重新拉开，dim 在轨道上也更稳（4.83 → 5.79）。
+   */
+  --text-dim: #4f5865;
+  --text-faint: #5d6676;
+
+  /**
+   * ★★★ D208（使用者："动，同一化"）：**把品牌色与状态色一起提到 AA，并且"同一个语义只有一个值"**。
+   *
+   * 为什么不只改 faint：D207 之后亮色还剩 4 处不达标，全是"品牌蓝 / 语义红画在有色底
+   *   `--surface-2`(#e2e7ee) 上"。量下来要过 4.5 得把这些颜色整体压深一档：
+   *     accent #2b6fd0 → #2560ba（有色底 3.94 → 4.88）、
+   *     good   #1f9d73 → #12714f（2.76 → 4.83）、 warn #b7791f → #8a5a0c（2.93 → 4.76）、
+   *     bad    #d64545 → #bd2f2f（3.52 → 4.68）、 review #7a5fd0 → #6a4fbf（3.86 → 4.85）。
+   *   `--accent-dim` 跟着 accent 走（它只当底色用；白字在其上 6.07）。
+   *
+   * **同一化**：`--status-*` 不再各自抄一份十六进制，而是 `var()` 引用基础色——
+   *   原来 `--status-active` 与 `--accent`、`--status-done` 与 `--good`、`--status-blocked`
+   *   与 `--warn`、`--status-todo` 与 `--text-faint` 都是**同值抄两遍**（改一处忘一处就会漂）。
+   *   现在一个语义只有一个值；改基础色，状态色自动跟。
+   */
+  --accent: #2560ba;
+  --accent-dim: #2560ba;
+  --good: #12714f;
+  --bad: #bd2f2f;
+  --warn: #8a5a0c;
+
+  /* 运行状态色：与语义色分开，因为"进行中"既不是好也不是坏 */
+  --status-todo: var(--text-faint); /* D208：引用，不抄值 */
+  /* D208：状态色 = 基础色的**引用**（一个语义一个值） */
+  --status-active: var(--accent);
+  --status-review: #6a4fbf;
+  --status-done: var(--good);
+  --status-blocked: var(--warn);
+
+  /* 代码高亮：亮色底下用墨色系（霓虹色只在暗底成立） */
+  /**
+   * ★★ D204：**diff 的增删色是主题色**（原来写死在组件里：`#1a7f37` / `#b42318`）。
+   * 写死的结果是暗色主题下那两行字还按亮色的绿/红画，对比度掉到看不清。
+   * 另外**"纸"与"幕"不随主题**：HTML/图片预览的白底、视频预览的黑底、幕上那行字——
+   * 它们说的是"内容自己的底色"，不是界面主题。
+   */
+  --diff-add: #1a7f37;
+  --diff-del: #b42318;
+  --paper: #fff;
+  --screen: #000;
+  --on-screen: #ddd;
+  --hl-keyword: #9d3fbf;
+  --hl-string: #3e7d24;
+  --hl-number: #c4621c;
+  --hl-title: #2d5fd4;
+
+  /* 浮层阴影：扁平但克制——只给"压在页面上的层"（抽屉/弹窗/菜单），
+     亮色淡、暗色浓（暗色底下浅影不显眼） */
+  --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.08);
+  --shadow-2: 0 12px 32px rgba(16, 24, 40, 0.16);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0f1115;
+  --surface: #161920;
+  /* ★ 2026-11（D168）：暗色的选中底同样抬（1.16 → **1.30** 对页面底、1.08 → 1.21 对面板）。
+     ⚠️ 暗色的方向与亮色相反：亮色是"越深越重"，暗色是"越亮越重"——旧 #1c2029 比
+     hover 的 #222733 **暗**，于是"正在 hover"比"已经选中"更显眼（与亮色同一个错，
+     只是翻转过来）。现在选中（#232936）比 hover（#222733，1.27）亮一档。 */
+  --surface-2: #232936;
+  --surface-hover: #222733;
+  --panel: #0b0d11;
+  /* 暗色同一个病（D167）：线在暗底上比亮色略清楚一点，但仍不够——旧值 1.33 / 1.66。
+     加深到 1.47 / 1.90，两边（亮/暗）的"线有多重"才落在同一个可读区间。 */
+  --line: #2b3240; /* 对页面底 1.47、对面板 1.37（旧 1.33 / 1.24） */
+  --line-strong: #3b4354; /* 对页面底 1.90、对面板 1.77（旧 1.66 / 1.54） */
+
+  /* ★ 2026-11（D173）：暗色的外框**比页面底再暗一档**（与亮色同一个方向：外框退后）。
+     两档填充在暗色里天然是"提亮"（暗色越亮越靠前），所以值正好等于
+     `--surface-hover` / `--surface-2`；名字单列是因为**角色**不同（外框上的填充），
+     亮色那两个值不一样（那边必须往白面方向提），规则只认角色。 */
+  --rail: #0a0c10; /* 对内容面（--surface）1.11 */
+  --rail-hover: #222733; /* 对 --rail 1.31 */
+  --rail-selected: #232936; /* 对 --rail 1.35（选中比 hover 再亮一档） */
+
+  --text: #e6e9ef;
+  /* D207：暗色同步——faint 从 `#6d7686`（最差底 3.18）提到 `#8a93a2`（最差底 4.70）。 */
+  --text-dim: #a2abbb;
+  --text-faint: #8a93a2;
+
+  --accent: #5aa9f5;
+  --accent-dim: #2b5f92;
+  --good: #4ec9a0;
+  --bad: #f2716a;
+  --warn: #e0b04a;
+
+  --status-todo: var(--text-faint); /* D208：引用，不抄值 */
+  /* D208：暗色同样改成引用（暗色的基础色本来就都 ≥4.5，值不变） */
+  --status-active: var(--accent);
+  --status-review: #b48ef0;
+  --status-done: var(--good);
+  --status-blocked: var(--warn);
+
+  /* D204：暗色下的 diff 增删色 + 不随主题的"纸/幕" */
+  --diff-add: #7ee2a8;
+  --diff-del: #f2908a;
+  --paper: #fff;
+  --screen: #000;
+  --on-screen: #ddd;
+  --hl-keyword: #c792ea;
+  --hl-string: #9ece6a;
+  --hl-number: #ff9e64;
+  --hl-title: #7aa2f7;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+/* ══════════════ 基础 ══════════════ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 标题统一紧行高——松行高只适合正文，标题松了会散 */
+h1, h2, h3, h4 {
+  margin: 0;
+  line-height: var(--lh-tight);
+  font-weight: 600;
+}
+
+/**
+ * ★ D179：**标题层级只有一处定义**（`ui-style.md` §2.9）。四级 + 一档标签：
+ *   · `h1.page-name` 页名 —— 15px/500/dim（顶栏退后一层，见 §2.9 的理由）；
+ *   · `h2` 这一块的名字（栏头 / 面板卡片头 / 正文里的块名）—— 17px/600/正文色；
+ *   · `h3` 分段（`.drawer-section` 那种）—— 17px/600；
+ *   · `h4` 段内小节 —— 13px/600/`--text-dim`（**这一档以前只有"在 `.drawer-section` 里才是
+ *     13px/dim"**，出了那个容器就变回 15px → 于是三个组件各自写一套"小节"样式，见 §2.9）；
+ *   · 标签档（`label` / `.cell-label` / 看板列头）**不是标题**，不进这四级。
+ *
+ * `h2` 从 `--fs-xl`(22px) 降到 `--fs-lg`(17px)：22px 那一档只用过一次，而"把 h2 压回 17px"
+ * 这件事在 `.detail-head` / `.pane-head` / `.main-panel-head` / `.mem-preview-head` 四处
+ * 各写了一遍——同一个值写四遍，就是"层级没定义、各拼各的"。
+ */
+h2 { font-size: var(--fs-lg); }
+/* ★ D197：h3 是 15px（`--fs-md`），**不是**跟 h2 一样的 17。原来 h2 与 h3 同值，
+   而设置页里 h3 就挂在 h2 底下（「通用」→「界面主题」）⇒ 这两档在视觉上分不开，
+   分开它们的只有卡片与间距。使用者看过演示页第 ⑦ 块的对比（同一张卡片，h3 = 17 / 15）
+   之后拍板取 15：整张卡片矮约 2px，没有一处文字被挤换行。 */
+h3 { font-size: var(--fs-md); }
+h4 { font-size: var(--fs-sm); color: var(--text-dim); }
+
+p { margin: 0 0 var(--sp-3); }
+
+a { color: var(--accent); }
+
+code, kbd, pre {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+
+code {
+  background: var(--surface-2);
+  padding: 0.1em 0.35em;
+  border-radius: var(--radius-sm);
+  /* 代码片段在中文段落里容易被压扁，加一点横向余量 */
+  white-space: nowrap;
+}
+
+/**
+ * ⚠️ 上面那条 `nowrap` 只管**行内**代码（`这个样子的`），`pre` 里的代码必须换回
+ *    `pre`——`white-space` 是会被继承的，`code` 上写死了 `nowrap` 就会一路带进
+ *    代码块里，把整段代码**折成一行**。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 这个 bug 是怎么被发现的（以及它为什么难认）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 使用者报「聊天里那段代码的换行没有了」。实测（用真实数据、真实浏览器量
+ * computed style）：文字里**有 10 个换行**，而 `<code>` 的 `white-space` 是
+ * `nowrap`，于是那个 `<pre>` 只有 **47px** 高——十行代码被压成一行，还要横向滚动。
+ *
+ * 难认的地方在于：**它看起来像模型没写换行**。渲染器（`lib/markdown.ts`）是对的
+ * ——它老老实实 `body.join('\n')`，还有测试钉着——而错在一条给别的东西写的样式。
+ * 所以这条规则旁边把话说清楚：`nowrap` 是给行内代码的，不是给代码块的。
+ */
+pre code {
+  white-space: pre;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: var(--sp-5) 0;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: var(--radius-md);
+  border: none;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+::-webkit-scrollbar-track { background: transparent; }
+
+/**
+ * ★★ D202：**键盘焦点全站只有一道环**（2px accent + 1px offset）。
+ *
+ * 量出来的现状（真按 Tab 走 22 个停靠点）：按钮都有环，**`input` / `textarea` 一个都没有**
+ * ——它们的规则写的是 `outline: none; border-color: var(--accent)`，只换了个 1px 边框色。
+ * 于是同一个页面里，键盘用户看到的焦点提示有两种长相：按钮一道环、输入框一条细边。
+ * 现在输入框也上环（边框色照旧变 accent，作为第二重提示）。
+ *
+ * ⚠️ `outline: none` 只允许出现在"焦点提示由外层承担"的地方（例如 `CodeEditor`
+ * 那层透明 textarea 叠在彩色代码上，环画在外层 `.editor` 上）——这种地方必须在
+ * `tests/ui-style.test.ts` 的登记表里写明理由。
+ */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
+/* ══════════════ 布局骨架 ══════════════ */
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  height: calc(100vh - var(--topbar-h));
+}
+
+.topbar {
+  height: var(--topbar-h);
+  /* ═══ 与 `.shell` 同一套列：左格 = 侧栏那一列宽，右格 = 主区那一列 ═══
+     这样顶栏里的东西与下面的侧栏 / 主区**共线**：左格（品牌 + 页名）正对着
+     侧栏，右格从侧栏右缘开始（动作的**左缘与侧栏右缘对齐**，也就是与主区内容
+     的左缘对齐）。2026-09 第二稿：之前动作紧跟着页名，页名一短（「聊天」）动作
+     就悬在侧栏上方的半空里。 */
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  align-items: center;
+  /* ★ 2026-11（D172）：顶栏跟侧栏同一个页面底（`--bg`）——**"边框"归灰，"内容"归白**。
+     D171 只把侧栏退了一层，顶栏还是白的，于是灰的侧栏从白带子底下开始，"退一层"
+     只退了一半：顶栏左格（品牌 + 页名）压在侧栏正上方却比它亮，看着像贴错了一层。
+     现在顶栏 + 侧栏连成一条 L 形外框（同一个外框底色），白只留给内容那一片
+     （`.split-layout` 的两栏 / 技能工具等页面的主区面板）。
+     ★ D173：底色从 `--bg` 换成 `--rail`（再退一层）；底边那条线也从 `--line`
+     换成 `--line-strong`——外框深了一档之后，原来那条线在它上面只剩 1.15，
+     会被吃掉（线的职责是"分开"，它在哪个底上就得按哪个底的读数算）。 */
+  background: var(--rail);
+  border-bottom: 1px solid var(--line-strong);
+  /* 整条带子一条基线：页面动作换页时会整排换字，`nowrap` 保证它不会挤成两行
+     （顶栏高度是 `calc(100vh - ...)` 算出来的，一旦换行整个布局就错位） */
+  white-space: nowrap;
+}
+
+/* 左格：品牌 + 页名。左内距对齐侧栏的内容内距（`--sp-2`），
+   让"品牌"与侧栏里的导航读起来是同一列的东西 */
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding-left: var(--sp-2);
+  min-width: 0;
+}
+
+/* 右格：这一页的动作 + 与页面无关的那几个。右内距对齐主区那边原来的留白 */
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-right: var(--sp-4);
+  min-width: 0;
+}
+
+.brand {
+  font-weight: 600;
+  font-size: var(--fs-md);
+  letter-spacing: -0.01em;
+  /* 品牌名与页名之间靠那条竖线分开，这里只留一点气口 */
+  flex: none;
+}
+
+/* ★ 2026-11：侧栏减半（`--sidebar-w: 7.5rem`）后顶栏左格只有 120px，「品牌 + 页名」
+   放不下（"AgentDeck" 78px + 页名 ≥ 28px + 分隔线 ≈ 120px+）。让位的是品牌：
+   页名是"我在哪一页"的功能信息（也是这一页的 h1），品牌只是站点名——产品名仍写在
+   页面 `title` 与 README 里。将来要把侧栏加宽，把这两行 display 删掉就回来了。 */
+.topbar .brand,
+.topbar .page-sep {
+  display: none;
+}
+
+/* 品牌与页名之间那条细竖线：两者都是文字，不隔开会被读成一句话
+   ★ D173：它画在外框（`--rail`）上，`--line` 在那种底色上只有 1.15 ⇒ 用强一档。 */
+.page-sep {
+  width: 1px;
+  height: 1.25rem;
+  background: var(--line-strong);
+  flex: none;
+}
+
+/**
+ * 当前页名（顶栏左格）。
+ *
+ * ★ 它与侧栏那一条**共用同一个词条**（`lib/view.ts` 的 `VIEW_TITLE_KEYS`），
+ *   所以"侧栏说任务清单、顶栏说任务"这种不一致在结构上不可能发生。
+ *
+ * ⚠️ 给它一个上限并省略：页名是**可变文字**（切页就换），不封顶的话
+ *    切换语言之后（New task / Tasks…）整条顶栏的宽度会跟着跳。
+ *
+ * ⚠️ 左格宽度**钉死**为 `--sidebar-w`（顶栏与 `.shell` 共线），所以页名要能
+ *    在那一格里**收缩省略**——`flex: 0 1 auto; min-width: 0` 就是"给品牌让路，
+ *    不够宽时我自己省略"，而不是把左格撑破。
+ */
+.page-name {
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text-dim);
+  margin: 0;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/**
+ * ★ 这一页的动作：一条**工具条**（2026-10 / D59 改版）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 改版前是什么样，为什么"看着不好看"是可以量出来的
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 改版前那一排是三种重量混着排：实心蓝的主操作（#2f6fd0 对白底 4.88:1）、
+ * secondary 底（#eef0f4，**1.14:1**）、ghost 的选中态底（#e6e9ef，**1.22:1**）。
+ * 后两个低于"看得见一条边"的门槛（非文字对比 3:1），所以屏幕上其实是
+ * **一个色块 + 三段文字**——不是一组控件。而且"新建"（做一件事）、"列表/看板"
+ * （换一种看法）、"刷新"（重复一次）三种不同性质的东西长成了同一种形状。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 现在：一条轨道 + 三种状态
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 轨道（`--line`：#e2e5ea / 深色 #262b36，对顶栏底 1.26 / 1.24）说明
+ * "这几个是一组"；组里每一格的形状**完全一样**，状态靠三档底色说清楚：
+ *
+ *   常态  透明（与轨道同色）
+ *   hover `--surface`（浅色下是白格浮起来，深色下是深格沉下去——两种主题里
+ *         都与轨道差 1.18~1.26，比改版前那个 1.14 的"选中态"还明显）
+ *   当前  `--accent-dim` 实心 + 白字（4.88:1）——**这才是"我是哪一种"**
+ *
+ * ★ 左缘与**侧栏右缘对齐**（右格的第一列起点）这条没变：页名一短（「聊天」只有
+ *   两个字）动作就会悬在侧栏上方的半空里。顶栏与 `.shell` 共用同一套
+ *   `grid-template-columns`，所以这个对齐是**结构上**的，不是"差不多"。
+ *
+ * ⚠️ 宽屏平铺。窄屏被 `@media` 换成 `⋯`（见文件里的断点）——两处是同一份数据。
+ */
+/**
+ * ★ D200：**四条轨道共用同一个"格子之间的缝"**（2px）。
+ *
+ * 这四条是同一件东西——顶栏动作栏、栏头动作栏、详情栏动作栏、来源切换：
+ * 外层一张 `--rail-h` 的底（`--line-strong` + 圆角），里面每一格是 `.btn`。
+ * 原来每条各自写一遍 `gap: 2px`（四遍），而"按钮里图标与文字的 6px"又在另外
+ * 五条规则里各写一遍（五遍）——把"同一件事写了九遍"数出来之后，才看得出
+ * 这里其实只有**两个常量**：格子之间的缝 2px、格子内部图标与文字的 6px。
+ * 现在：缝在这里定义一次，6px 在 `.btn` 里定义一次。
+ */
+.topbar .page-actions,
+.pane-actions,
+.detail-head .detail-actions:has(> button + button),
+.source-toggle,
+.theme-picker,
+.view-switch {
+}
+
+.topbar .page-actions {
+  display: flex;
+  align-items: center;
+  /* ★ 高度钉成与右边那几个图标控件一样（`--topbar-h` 那条带子上的节奏）：
+     里面每一格矮一档，是**嵌套**关系，不是"高度不齐"（探针按这一点量）。 */
+  height: var(--rail-h);
+  box-sizing: border-box;
+  padding: 0 var(--sp-1);
+  /* ★ D173：**四条轨道共用同一个值**（探针钉着：栏头那排与顶栏"是同一条工具条"，
+     比的就是底色的字面值）。顶栏底色换成 `--rail` 之后 `--line` 在它上面只剩 1.15
+     （会糊成一片），而 `--line` / `--line-strong` 只能选一个 ⇒ 四条一起抬到
+     `--line-strong`（对 `--rail` 1.37、对白面 1.71）。这不是"顶栏更重"，是
+     "工具条这条轨道只有一种重量"。 */
+  background: var(--line-strong);
+  border-radius: var(--radius);
+}
+
+/**
+ * 组里每一格：同样的形状，只有底色随状态变。
+ *
+ * ⚠️ 选择器**必须带上 `.topbar`**：同一条带子上还有一条给常驻控件（通知 / 设置）
+ *    的 `.topbar button { height: var(--ctl-h) }`，两者同分，**靠源序决胜**——而这一块
+ *    在文件里排在它前面，于是格子被拉到 30px、工具条变成一条没有呼吸的实心带
+ *    （实测踩过：三条探针都还是绿的，因为它们只量"高度齐不齐"）。
+ */
+.topbar .page-actions button {
+  height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  /* D200：图标与文字之间的 6px 收进 `.btn` 基类（这里不再重复）。 */
+}
+
+.topbar .page-actions button:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text);
+  /* 覆盖全局那条 `filter: brightness()`：在这一排里"浮起一格"才是 hover 该有的样子 */
+  filter: none;
+}
+
+/**
+ * 主操作（新建 / 安装 / 保存）：**实心 accent + 白字**，与面板底栏、模态框底栏的
+ * `btn--primary` **同一个样子**。
+ *
+ * ★ D181 改判：这条原来写的是"只靠文字分重量，不靠一整块实心色"（298 批的意图：
+ *   顶栏不要抢眼）。**那个意图的代价是主操作在栏头里没法表达**——栏头那条轨道
+ *   把 primary 压成 400 字重 + 淡灰字 + 透明底，与旁边的「删除」一模一样（使用者：
+ *   "按钮的类型差别大……风格不一致"）。现在全站只有一处实心色块的含义：
+ *   "这一屏要你做的事"。要"这是当前哪一档"用 `.active`（同一种底色，见下）。
+ *
+ * ⚠️ 白字配 `--accent-dim`（不是 `--accent`）：暗色主题下 accent 是浅蓝
+ *    （#5aa9f5），白字在上面看不见——这是 `.source-toggle button.active` 里
+ *    写下的同一套惯例。
+ */
+.topbar .page-actions button.btn--primary {
+  /**
+   * ★ D189：**字重 600 已经收进 `.btn--primary` 基类**，这里不再重复声明。
+   *
+   * ⚠️ 但**底色与字色必须留在这里**，不能也"收进基类"就完事：上面那条
+   *   `.topbar .page-actions button` 把每一格的底色压成 `transparent`、字色压成
+   *   `--text-dim`，它的特异性 (0,2,1) 高于基类 `.btn--primary` 的 (0,1,0)。这条规则
+   *   的作用就是**把顶栏的主操作从那层"格子默认长相"里捞出来**。
+   *
+   * 这不是理论担心：D189 第一版把这三行删得只剩字重"收进基类"的说明，于是顶栏那颗
+   *   「新建任务」变成透明底 + 淡字——探针当场红（`btn.uniform` 报
+   *   `顶栏格子 底 rgba(0,0,0,0)`）。**"收进基类"能收的是"基类本来就能定的值"，
+   *   而不是"需要比别人特异性更高的覆盖"。**
+   */
+  background: var(--accent-dim);
+  color: var(--on-accent);
+}
+
+/**
+ * 栏头 / 对话头那两条轨道里的主操作：**同一条**（D181 把"主操作处处实心"收成一处规矩）。
+ * 栏头这条的来历：`.detail-actions > button` 把颜色统一压成 `--text-dim`，
+ * 于是「保存」在这两条轨道里**看起来就是一颗 ghost**——主操作在栏头失效了。
+ */
+.detail-head .detail-actions > button.btn--primary,
+.pane-actions button.btn--primary {
+  /**
+   * ★ D189：**字重 600 收进基类了**，这里不重复。
+   * ⚠️ 底色与字色**必须留**：`.detail-head .detail-actions > button` 把轨道里每一颗按钮
+   *   的颜色都压成 `--text-dim` + 透明底（"格子"的默认长相），这条选择器的作用是
+   *   **把主操作从那层压制里捞出来**。删掉它，栏头的主操作就又会变回一颗 ghost。
+   */
+  background: var(--accent-dim);
+  color: var(--on-accent);
+}
+
+/* 当前那一格（呈现模式 / 正在建任务）：实心底，一排里最重的信号 */
+.topbar .page-actions button.active {
+  background: var(--accent-dim);
+  color: var(--on-accent);
+}
+
+.topbar .page-actions button.active:hover:not(:disabled) {
+  background: var(--accent-dim);
+  filter: brightness(1.15);
+}
+
+/**
+ * 顶栏里的原生控件（`select` 这种）要**紧凑**，而且**宽度按内容**。
+ *
+ * ★ 2026-10 加远端管理页时量的：全局 `select` 的规矩是"表单里用的"——`width: 100%`、
+ *   一行内距，于是顶栏里那个语言下拉实测 **37px 高**、还被拉到整格宽，与同一排的
+ *   按钮（32px 那一档）明显不是一套。远端管理页的语言/主题就在顶栏里，所以在这里
+ *   补一条**只作用于顶栏**的规矩（daemon 顶栏没有原生控件，加了也不影响它）。
+ */
+.topbar select {
+  width: auto;
+  /* ★ D181/D182：与轨道同一个数（原来这里是 2rem，与同排的按钮差 2px） */
+  height: var(--rail-h);
+  padding: 0 var(--sp-2);
+  /* ★ D185：控件只有一个字号（13，与 `input`/`select`/`button` 同一档；原来这里是 12） */
+  font-size: var(--fs-sm);
+}
+
+/**
+ * 与页面无关的那一组（语言 / 通知 / 登录 / 设置）：`margin-left: auto` 推到最右。
+ *
+ * ★ 它与左边"这一页的动作"之间那段空白**就是分组本身**，不需要画一条分隔线
+ *   （画过一版：一条竖线贴着按钮组，看起来像按钮自带的边）。
+ *
+ * ⚠️ 这一层也是**边界**：页面动作里也有叫「设置」的（智能体页那个），英文下同样叫
+ *    Settings——探针要能量"**全局那个**设置按钮翻译了吗"，就得有一层能点名的容器。
+ *    没有它时那条断言只能按文字在全条顶栏里找，找到的是哪一个全看顺序。
+ */
+.global-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+  min-width: 0;
+}
+
+/**
+ * ★ 顶栏里的按钮统一成一种"工具条按钮"。
+ *
+ * 两个毛病，一起修：
+ *
+ *   ① **尺寸不齐**：页面动作原来是页面里那个大尺寸（`padding: 8px 12px`），
+ *      与窄一些的语言下拉、带头像的账号按钮排在一条 52px 的带子上，高低错落。
+ *   ② **激活态根本不存在**：`.active` 这个类名在界面上**没有样式**（`app.css`
+ *      里只有侧栏的 `.nav-item.active`），所以「列表 / 看板」两个按钮长得一模一样
+ *      ——使用者看不出自己在哪一个模式里。这是这次"按钮不好看"里最实的一处。
+ *
+ * 统一尺寸之后仍然保留三种**重量**（这是它们该有的区别）：
+ * 实心 = 这一页的主线动作（新建 / 安装 / 新对话）、描边 = 配套动作（刷新 / 设置）、
+ * 无框 = 呈现方式切换（列表 / 看板，当前那个用底色标出来）。
+ */
+.topbar button {
+  /**
+   * ⚠️ 高度是**写死的**，不是"字高 + 内距"算出来的：算出来的话，`⋯`（那个字比
+   *    别的按钮大、行高又是 1）与带 24px 头像的账号按钮会各差几像素，一条带子上
+   *    看着就是没对齐。钉成一个值之后，加一个新按钮不会把这一排弄歪。
+   *    探针里也有一条量它（`topbar.buttonHeights` 去重之后必须只剩一种）。
+   *
+   * ★ D181/D182：这个值现在叫 `--rail-h`（= 控件高 `--ctl-h` + 4px），与工具条轨道
+   *   **同一个数**。⚠️ 常驻控件在这里要显式取 `--rail-h`：`--ctl-h` 已经是"输入框/
+   *   按钮"的 30px，直接用会让顶栏那几颗图标比旁边的轨道矮 4px。
+   */
+  height: var(--rail-h);
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+}
+
+/**
+ * 窄屏的 `⋯`：默认不显示（宽屏动作直接平铺），窄屏里它接管整排动作。
+ *
+ * ⚠️ 菜单与按钮都在这一个 wrapper 里（`position: relative`），菜单才能贴着
+ *    按钮定位——挂到别处就得算坐标。
+ */
+.page-more {
+  display: none;
+  position: relative;
+}
+
+/* `⋯` 的字比别的按钮大一点（它是一个符号，不跟着字号走会显得太小）——
+   高度与内距由上面那条统一规则管，这里只改字形大小 */
+.more-btn {
+  font-size: var(--fs-md);
+}
+
+.page-menu {
+  position: absolute;
+  top: calc(100% + var(--sp-1));
+  right: 0;
+  z-index: 40;
+  min-width: 10rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  white-space: normal;
+}
+
+.page-menu button {
+  width: 100%;
+  text-align: left;
+  /* ⚠️ 菜单项**不是**工具条里那一格（那一格 24px 高、方角、透明底）。
+     它继承同一条 `.topbar button` 的规矩，但要在这里明确回来：竖排菜单里
+     需要的是"整行可点 + 左对齐"，而且外面那条 `.page-actions button` 的
+     高度/内距选择器命中不到它（它不在 `.page-actions` 里）——写这一条是为了
+     让"两处形状不同"变成一句看得见的话，而不是靠选择器作用域去猜。 */
+  height: 1.75rem;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  /* D200：图标与文字之间的 6px 收进 `.btn` 基类（这里不再重复）。 */
+  color: var(--text-dim);
+  background: transparent;
+}
+
+.page-menu button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+  filter: none;
+}
+
+.page-menu button.active {
+  background: var(--accent-dim);
+  color: var(--on-accent);
+}
+
+/* 点空白处关闭（与抽屉同一个办法：全屏透明遮罩，不必判断"点哪儿算外面"） */
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+}
+
+/* ══════════════ 侧边栏 ══════════════ */
+
+.sidebar {
+  /* ★ 2026-11（D171）：侧栏退一层——用页面底（`--bg`）而不是面板白（`--surface`）。
+     D170 之后主区（列表 + 详情）与顶栏都是白，整页全白就没了层次：导航与内容
+     长得一样重。现在"导航 = 页面底那一层，内容 = 白面"，层次由**底色**说明，
+     那条 `--line` 竖线退成补一道声明（对页面底 1.34）。
+     ⚠️ 与 D169 的区别一句话：灰只能放在**最左边**（它是"导航"，边缘），
+     不能夹在主区两栏中间（那样读成两道白之间挖了个槽，见 D170）。
+     ★ D173：再退一层到 `--rail`（比 `--bg` 还深一档），因此**侧栏里的填充方向也翻了**
+     ——`--surface-2` / `--surface-hover` 在这块底色上只剩 1.02 / 1.03（hover 等于
+     没反应）。导航自己的两档是 `--rail-hover`（提半档）与 `--rail-selected`
+     （一整颗白药丸）：选中项"浮"在外框上，而不是"陷"进去——这本来就是导航该有的样子。
+     ⚠️ 右缘那条线也换成 `--line-strong`（`--line` 在 `--rail` 上只剩 1.15）。 */
+  background: var(--rail);
+  border-right: 1px solid var(--line-strong);
+  padding: var(--sp-3) var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  overflow-y: auto;
+}
+
+.nav-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font: inherit;
+  /* 用一条左侧色条表示选中，而不是整块高亮——整块高亮在 4 项以上时
+     会让侧边栏看起来像一排按钮，而不是导航 */
+  border-left: 2px solid transparent;
+  transition: background 0.12s, color 0.12s;
+}
+
+.nav-item:hover {
+  /* D173：外框上的 hover 是"提亮半档"——`--surface-hover` 是"在白面上压暗"那一档，
+     在这块更深的底色上只剩 1.02，等于 hover 没有反应。 */
+  background: var(--rail-hover);
+  color: var(--text);
+}
+
+.nav-item.active {
+  /* 选中项是一整颗白药丸（外框上的最高一档，对底色 1.24，比 hover 再亮一档）：
+     外框里的选中态要"浮起来"，不是"陷下去" */
+  background: var(--rail-selected);
+  color: var(--text);
+  border-left-color: var(--accent);
+}
+
+.nav-title {
+  display: block;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  /* ★ 2026-11：侧栏减半后标题也要**一行**（英文 "Agent groups" 那种 12 个字母
+     会折成两行、把这一项撑高）。与 `.nav-hint` 同一套兜底：放不下就省略。 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * ★★ D205：**轨道上的次要文字用 `--text-dim`，不是 `--text-faint`**。
+ * 侧栏底色 `--rail` 比白面深（亮色 #e2e7ee），`--text-faint` 画在上面只有 **2.49:1**——
+ * 低于 AA 的 4.5，也比"大字号"门槛 3:1 还低。换 `--text-dim` 后是 **4.83:1**（暗色 8.46:1）。
+ * 这不是换颜色，是**用错了一档**：faint 属于"在白面上退到很后面"的那种字。
+ */
+.nav-hint {
+  display: block;
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  margin-top: 1px;
+  /* ★ 2026-11：侧栏减半后宽度变窄——辅助文字**不许换行**，超了就省略。
+     （文案本身也已精简到能放下，这一行是兜底，不是让文案偷懒的借口。） */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-item.active .nav-hint { color: var(--text-dim); }
+
+.sidebar-foot {
+  margin-top: auto;
+  padding: var(--sp-3) var(--sp-3) var(--sp-2);
+  border-top: 1px solid var(--line);
+}
+
+/* ★ 2026-11：侧栏减半后，脚部的环境/同步状态两行也钉成一行省略
+   （设备名、CLI 版本、上报条数都可能长过 7.5rem 的内容宽）。 */
+.sidebar-foot .faint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* D205：侧栏脚部同样在 `--rail` 底上 ⇒ 提高一档（`.faint` 类名不动，只改这里的字色）。 */
+.sidebar-foot .faint { color: var(--text-dim); }
+
+/* 侧栏底部的环境状态：一眼看出"这台机器的运行环境有没有问题" */
+.env {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2);
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  text-align: left;
+  cursor: pointer;
+}
+
+.env:hover {
+  background: var(--surface-hover);
+  border-color: var(--line);
+}
+
+.env-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--good);
+  flex-shrink: 0;
+}
+
+/* 有问题时变红：常驻的小红点比一行文字更容易被注意到 */
+.env-dot.bad {
+  background: var(--bad);
+}
+
+.env-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.env-line {
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ══════════════ 主区 ══════════════ */
+
+.main {
+  overflow-y: auto;
+  padding: var(--pad-page);
+}
+
+/**
+ * 有主从布局的视图（任务），**主区不再自己滚动与留白**：它内部是两栏，
+ * 各自滚动、各自留白。否则会出现两条滚动条，而且底部常驻的那一条
+ *（「继续沟通」）会跟着外层一起滚走。
+ *
+ * 用 `:has()` 而不是给 `.main` 加一个 class：加 class 意味着"哪个视图在用
+ * 主从布局"这件事要在 App.svelte 里再写一遍，两处迟早不同步。
+ */
+.main:has(> .split-layout) {
+  overflow: hidden;
+  padding: 0;
+}
+
+/* ══════════════ 主从布局（列表 | 详情）══════════════
+   任务与智能体两个视图共用；类名不带视图名，免得第二个视图去复制一套。 */
+
+.split-layout {
+  height: 100%;
+  display: grid;
+  /* 清单那一栏默认固定一个阅读宽度（跟着它的表格内容走），详情拿走剩下的。
+     固定而不是按比例：按比例时窗口一变宽，列表里那几列就被拉得很散。
+     ★ 2026-11：列表宽度**可拖**——`--list-w` 由把手写入（localStorage 存档，
+     见 `apps/web/src/lib/pane-resize.ts`；D175 起列表栏与沉淀页产物栏用同一个动作），
+     没拖过就是下面的默认。把手占第 2 列
+     （`--grip-w`），详情从第 3 列开始。 */
+  grid-template-columns: var(--list-w, minmax(20rem, 26rem)) var(--grip-w, 0.375rem) minmax(0, 1fr);
+}
+
+/* 看板是"扫"的视图：三列挤在半个屏幕里没法看，所以它占满整宽、不带详情栏 */
+.split-layout.board {
+  grid-template-columns: minmax(0, 1fr);
+}
+/* 看板没有"列表 | 详情"两栏，把手不显示（不然它会在单列网格里变成一整行） */
+.split-layout.board .split-grip {
+  display: none;
+}
+
+/* 拖动把手：列表与详情之间那一格。
+   ★ 2026-11（D167，使用者："现在的配色让分界不明显"）：默认**不再是纯透明**——
+   列表栏与详情栏底色都是 `--bg`，中间只有这道 6px 缝，不 hover 时两栏之间
+   什么也读不出来（"左边一列、右边一栏"这件事全靠留白暗示）。现在缝中间常驻
+   一条 1px 发丝线：**线在缝里，缝还是可拖的**，光标 col-resize 仍是指示。
+   悬停 / 拖动时整格加深到 `--line-strong`，发丝线让位给那块实心（免得叠成两重）。 */
+.split-grip {
+  position: relative;
+  cursor: col-resize;
+  /* 拖动时别让浏览器把 pointermove 抢走（触屏上尤其，否则一拖就变成滚动/选中） */
+  touch-action: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+/* 发丝线画在正中（不是左右边缘）：两侧都是内容区，贴边会读成"某一栏的边框" */
+.split-grip::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--line);
+  pointer-events: none;
+}
+.split-grip:hover,
+.split-grip.dragging {
+  background: var(--line-strong);
+}
+.split-grip:hover::after,
+.split-grip.dragging::after {
+  background: transparent;
+}
+
+/* ★ 2026-11（D169 → **D170 改口**）：主区两栏（列表 | 详情）**是一片白面**。
+   D169 只给右栏白底、把列表栏留在 `--bg` 上，本意是"导航=灰、内容=白"；实测观感上
+   不成立——**侧栏白 → 列表灰 → 详情白**，那片灰成了夹在两片白中间的"槽"
+   （使用者："中间的列表和右边的主区颜色有点不协调"）。所以把两栏都收进 `--surface`：
+   侧栏 / 列表 / 详情是**一张纸**，分开它们的是线（D167 抬到 1.34 的那一档）与把手
+   那条发丝线，不是底色差。
+   ⚠️ 顺带好处（都量过）：填充与线**在白底上读数更高**——行间线 1.34 → **1.43**、
+   选中底 1.16 → **1.24**、hover 1.13 → **1.22**。它们本来就是照"灰底"调的，
+   现在落在白底上，比原来更清楚。
+   ⚠️ `:not(.artifact-pane)`：沉淀页的第三栏（产物 / 预览）也挂着 `detail-pane`，
+   但它是"旁边的一块料"，**留页面底**（灰）才不跟正文那片白抢注意力。
+   ⚠️ 栏头吸顶底色本来就是 `--surface`（D156 定的），与新栏底同一个值，滚动时
+   不会出现"栏头一块白、正文另一块白"的接缝。 */
+.split-layout .list-pane,
+.split-layout .detail-pane:not(.artifact-pane) {
+  background: var(--surface);
+}
+
+/**
+ * ★ 分批第 92 批：主从布局的**第三列**（沉淀页的产物栏）。
+ *
+ * 为什么把产物提成独立一列而不是塞进详情页里（设计 §12.12）：沉淀页的心智是
+ * "对话 + 产物"，产物如果埋在详情页的分节里，要点进去、还要在 tab 之间切才能看到
+ * "这次产出了什么、体检过没过"——那就又变成"信息在、但看不见"。
+ *
+ * 宽度固定 20rem：这一栏装的是文件名/体检条目/一段预览，跟列表栏一样属于
+ * "阅读宽度固定、剩下的给正文"的那一类。窄屏行为（退化成右侧抽屉）由
+ * `CrystallizeArtifactPane.svelte` 自己的 `@media` 负责——**两处断点必须都是 72rem**，
+ * 否则会出现"网格还是三列、但第三列已经变抽屉"的错位。
+ */
+/* ⚠️ 只有够宽才并排。分批第 155 批把断点从 96rem 降到 **74rem（1184px）**：
+   产物栏现在装的是**编辑器**（§12.53 选项 2：右栏加宽、编辑搬过去），而抽屉形态下
+   编辑区是一块浮层——改字的时候把中间的结论与时间线整片盖住。74rem 起让它成为真列：
+   列表 20–26rem + 详情（≥ 30rem）+ 产物 24–30rem 还放得下；再窄就退回抽屉。 */
+.split-layout.with-artifact {
+  grid-template-columns: var(--list-w, minmax(20rem, 26rem)) var(--grip-w, 0.375rem) minmax(0, 1fr);
+}
+
+@media (width >= 74rem) {
+  .split-layout.with-artifact {
+    grid-template-columns: var(--list-w, minmax(20rem, 26rem)) var(--grip-w, 0.375rem) minmax(0, 1fr) var(--artifact-w, 28rem);
+  }
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* grid/flex 子项默认不许缩，不写这句内部滚动会失效 */
+}
+
+/**
+ * ★ 列表栏骨架（D61）：聊天 / 任务 / 智能体三页的列表栏共用同一套常量。
+ *
+ * · `--list-head-h`：**单行栏头**的高度（聊天页那个只有标题的栏头、任务页列表
+ *   模式那个"计数 + 搜索"的栏头）。钉成一个值，三处看起来才是同一件东西；
+ *   探针按它量（51px）。
+ * ⚠️ **看板模式不算**：它的栏头里有标题 + 说明两行，本来就更高，是另一种呈现。
+ * ⚠️ **不要因为"三页行高差几像素"就抽一个 ListItem 组件**（D61 的判据之一）：
+ *   三页条目的信息差异是真差异（阶段标签 / 轮数 / 角色徽标），硬抽只会把差异
+ *   塞回 props 和插槽。统一的是**常量**（内距、字号、行高），不是结构。
+ */
+:root {
+  --list-head-h: 51px;
+  /* 列表行**至少**多高（三栏同款）。内容（徽标 / 阶段标签）更高时跟随内容——
+     统一的是这条底线与内距，不是把内容压扁（D61）。 */
+  --list-row-min-h: 64px;
+}
+
+/* ══════════════ 列表行壳（D66 标准控件 ListRow / ListPane）══════════════ */
+
+/* ── 行容器（`<ul class="list-stack">`）：**全局只此一份**（2026-11）──
+   重置 + 行距。缺了它，`<ul>` 吃浏览器默认 `padding-left: 40px` ⇒ 整列行右移
+   40px、行宽少 40px。这个缺陷在**两个页面各犯过一次**（定时任务："列表 item 宽度
+   不对，左边空出一大截"；编排：同样的问题，因为第一次的修法写进了
+   `Schedules.svelte` 的 scoped `<style>`，而 Svelte 的 scoped 样式**不跨文件**，
+   下一个用同名类的页面照样中招）。所以它现在在全局：一处定义、六页照抄。
+
+   ⚠️ 页面**不许**再写 reset（`list-style` / `padding` / `margin` 三行），也不许
+   自创 `.*-list` 做同一件事——`tests/ui-style.test.ts` 机器拦着。形状上的差异
+   （比如智能体页需要底部留白）用页面的类叠加上去，不覆盖这里。 */
+.list-stack {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  /* 行与行**不再靠空隙分段**（D141）：4px 空隙在不 hover、不选中时什么也看不出来
+     ——使用者原话"列表的内容只有选中才有框，没选择的时候，看不清楚分界"。
+     现在行间是一条 1px 的 `--line` 发丝线（放在 `ListRow.svelte` 的 scoped 样式里，
+     挨着行盒本身），所以这里 gap 回到 0：线与线相接，才是"列表"，而不是"一堆浮空的字"。 */
+  gap: 0;
+}
+
+/* ── 列表分组（2026-11，D137）：组头 = 淡字一行（chevron + 组名 + 计数）──
+
+   来由：这一档原来**两页各写一套**——任务页的组头是带边框的卡片按钮（组名 600/`--fs-sm`），
+   智能体页的组头是无边框的淡字行（`--fs-xs`、hover 才有底），连结构都不一样（一个把行
+   套在组里、一个把组头当行的兄弟）。同一个东西长两种样子，第三个要分组的页面只能挑一个抄。
+   现在收编成一处：形状跟 `.fold-head` 那一族同一档（组头是**分段标题**，不是内容，
+   所以不带边框、不与有 hover/选中框的 `.list-row` 抢注意力）。
+
+   结构（行与组头**平级**，`<li>` 里不要再套 `<li>`）：
+     <ul class="list-stack">
+       <li class="list-group-head-wrap"><button class="list-group-head">…</button></li>
+       <li class="list-row">…</li>
+     </ul>
+   组与组之间那条线由 `:not(:first-child)` 自动画（上一组没有东西就不会有组头，
+   所以不需要页面判断"要不要画分隔线"）。组件：`ListGroupHead.svelte`。 */
+/* 组头：**一条分段带**（2026-11 使用者两轮反馈之后的形状）。
+ *
+ * 第一版是"淡字一行"（透明底 + `--fs-xs` + 组名 `--text`），使用者看下来两条意见：
+ *   ① "头和内容的颜色太接近，看不清楚分割"——组名用了正文色，读起来就是一行内容；
+ *   ② "头的字体比内容的字还小"——`--fs-xs`(12) 比行标题 `--fs-base`(14) 还小，
+ *      缩小本来是"次级"的信号，放在**分段头**上正好反了：头比它管的内容还弱。
+ *
+ * 所以现在**靠底色分段、不靠缩小**：
+ *   · 整行铺 `--bg` 的带子（圆角 `--radius-sm`）——扫列表时一眼看出"这里换组了"。
+     ⚠️ 用的是 `--bg` 而不是 `--surface-2`：**选中行**的底色就是 `--surface-2`
+     （`.list-row.active`），两者同色的话"选中的那一行"会被读成"一个分组头"。
+ *   · 字号与行标题同级 `--fs-base`，字重 600（只有组名加粗）；
+ *   · 字色降一档 `--text-dim`（行标题是 `--text`）：**同字号、淡一档**才是"它是标签"；
+ *   · 计数留在 `--fs-xs` + `--text-faint`（它是附注，不是标题的一部分）。 */
+.list-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-1) var(--sp-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  /* 分段带的底色：`--bg`(#f6f7f9) 与行底(#fff) 的对比只有 **1.07**，肉眼等于没有
+     （使用者两轮反馈"底色还是一样"）⇒ 用 `--text` 混出明确的浅灰：
+     对行底 1.31、对选中行 1.15，两个都分得开；深色主题下同一条式子自动变成"提亮"。 */
+  background: color-mix(in srgb, var(--text) 14%, var(--surface));
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--fs-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.list-group-head:hover {
+  background: color-mix(in srgb, var(--text) 22%, var(--surface));
+  color: var(--text);
+}
+
+.list-group-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* D203：chevron 不再"跟组头同字号"——原来 `font-size: inherit` 让它跟着组头的 14px 走，
+   于是同一个 ▸ 在组头里 14px、在折叠头里 13px、在工作目录树里 12px（实测三种都拍到了）。
+   字号统一由下面那条共享规则给，这里只管颜色。 */
+.list-group-head .chevron {
+  color: var(--text-faint);
+}
+
+/* 组名：分段带里唯一的强调（600 + 淡一档的正文色） */
+.list-group-name {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+}
+
+/* 计数：附注，留在小号（整体贴右由组件的 `.list-group-tail` 负责） */
+.list-group-count {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* 组头下面那条线：**"这以下是本组内容"**。
+   与底色是**两道线索**——浅色主题下只靠落差的底色太弱（1.07 那版等于没有），
+   所以每个组头都画一条（不再是"只有非第一组才画"）：它标的是"组从这里开始"，
+   与"上面是上一组"本来就不同一件事。 */
+.list-group-head-wrap {
+  margin: 0 0 var(--sp-1);
+  border-bottom: 1px solid var(--line);
+}
+
+/* 组与组之间再多留一点空（上一组的行与下一组的组头之间） */
+.list-stack > .list-group-head-wrap:not(:first-child) {
+  margin-top: var(--sp-2);
+}
+
+/* ── 行的第二行（辅助信息）：`.list-row-sub`（2026-11，D142）──
+ *
+ * 六个列表页原来各写一份（`.conv-sub` / `.task-meta` / `.agent-notes` / `.sched-sub` /
+ * `.wf-sub` / `.crystal-meta`），其中**五处是 `align-items: center`** —— 而这一行里
+ * 常把文字和徽标混着放，徽标自己的盒子比文字高，`center` 对齐的是**盒子**、不是文字：
+ * 于是同一行里"最近 15 小时前"比前面那几段**低 3px**（实测：center 3px / baseline 0px）。
+ * 使用者报的就是这个（"和前面的文字高度没对齐，有特殊处理？"——没有特殊处理，是对齐方式错了）。
+ *
+ * 所以收成一条：**基线对齐**（`align-items: baseline`），字号/字色显式写。
+ * 页面只写"这一页多出来的形状"（比如任务页要 `flex-wrap: wrap`、智能体页要 `width: 100%`）。 */
+.list-row-sub {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* 长内容要能收缩（否则省略号不生效——定时任务页量到过的那条教训） */
+.list-row-sub > * {
+  min-width: 0;
+}
+
+/* ★ 2026-11（D141）：**行与行之间的发丝线**——不 hover、不选中时也看得见分界。
+   改之前靠 `.list-stack` 的 4px 空隙分段，而空隙在静止状态什么也读不出来
+   （使用者："列表的内容只有选中才有框，没选择的时候，看不清楚分界"）。
+
+   ⚠️ 为什么在全局而不是 `ListRow.svelte` 的 scoped 里：Svelte 会把"可能匹配不到自家元素"
+      的选择器**剪掉**，`.list-row + .list-row` 实测没进构建产物（查 CSS 才发现）。
+   ⚠️ 画在**相邻行的上边**，不是每行下边：第一行不会凭空多一条顶线，组头下边那条线
+      也不会跟它叠成双线。 */
+.list-row + .list-row {
+  border-top-color: var(--line);
+}
+
+/* 行盒 + 主按钮 + 行盒的 hover/选中态样式在 `ListRow.svelte` 的 scoped 样式里
+   （行盒类 `.list-row` 只有它会用）。这里只剩 **动作按钮**（`.list-row-action`）：
+
+   ⚠️ 它为什么放全局：动作按钮是**页面的 snippet** 提供的（聊天/任务的删除钮），
+   snippet 内容不吃 ListRow 的 scoped 样式——放组件里就永远匹配不上。 */
+
+/* ── 大编辑器入口（2026-11：PromptEditor，使用者："编辑框太小想弹出来编辑"）──
+   通用控件：包在 textarea 外面的 `.field-prompt` 容器 + 浮在右下角的「⛶ 展开」
+   按钮。智能体指令 / 定时任务模板三处共用，只此一份。 */
+
+/* 行右侧动作钮（原来聊天 `.conv-delete` 与任务 `.task-delete` 各写一份同样的，
+   D66 收成一条）：1.75rem 方块、右缘内缩 `--sp-1`、垂直居中。 */
+
+/* ── 指令框（智能体详情编辑态 + 新建智能体表单共用，2026-11 控件化后提升为全局；
+    原来两份 scoped 规则随 PromptField 迁移 —— 22rem = 352px 是实测值
+    （13px 字号 / 行高 1.6 ⇒ 16 行），两处必须一致）── */
+.instructions {
+  min-height: 22rem;
+  line-height: 1.6;
+  resize: vertical;
+}
+/* 只读的指令框**不压暗文字**（读的人比写的人多）：只换底色与边框。 */
+.instructions.locked {
+  background: var(--surface-2);
+  border-style: dashed;
+  color: var(--text-dim);
+  cursor: default;
+  resize: none;
+}
+
+.field-prompt {
+  position: relative;
+}
+
+.prompt-expand {
+  position: absolute;
+  right: var(--sp-1);
+  bottom: var(--sp-1);
+  background: none;
+  border: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-base);
+  line-height: 1;
+  cursor: pointer;
+  padding: var(--sp-1);
+  border-radius: var(--radius);
+}
+
+.prompt-expand:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.list-row-action {
+  flex-shrink: 0;
+  margin-right: var(--sp-1);
+  width: 1.75rem;
+  height: 1.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-faint);
+  font-size: var(--fs-lg);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.list-row-action:hover {
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  color: var(--bad);
+}
+
+/* 三个单行栏头（聊天 / 任务列表 / 智能体的工具行）：同高、内容垂直居中。
+   看板模式的 `.pane-head` 不带这个类，不受影响。
+
+   ⚠️ D64：**没有 `.list-head` 了**。D61 加它的时候不知道任务页自己的 scoped
+   样式里已经有一个 `.list-head`（列表里的分组标题「需你处理 / 其余任务」）——
+   全局这条的 `height: 51px` 漏到那两行分组标题上，把它们从 ~28px 撑成 51px
+   （实测 sep0/sep1 都是 51px）。D64 聊天栏头改走 `.list-toolbar`，顺手把全局
+   这条删掉——分组标题回到内容高度；栏头带统一只叫 `.list-toolbar`。 */
+.list-toolbar {
+  height: var(--list-head-h);
+  box-sizing: border-box;
+  padding-top: 0;
+  padding-bottom: 0;
+  align-items: center;
+}
+
+.pane + .pane {
+  border-left: 1px solid var(--line);
+}
+
+.pane-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--pad-frame-head);
+  border-bottom: 1px solid var(--line);
+}
+
+.pane-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+/**
+ * ★ 分批第 264 批（使用者："这 3 个按钮的风格改成和『新建对话』『设置』一样的风格"）：
+ *   对话头那排（整理记忆 / 沉淀技能&智能体 / 删除对话）原来用的是**普通按钮**
+ *   （`ghost` / `danger`，各自一个带边框的方块），而顶栏那排是一**条**工具条
+ *   （`.topbar .page-actions`：底色轨道 + 里面几格、hover 才浮起）。
+ *   同一类东西两种长相，使用者一眼就看出来了。这里把那排改成同一种工具条。
+ *
+ * ⚠️ 三条都按工具条里的格子来（含「删除对话」）：形状/高度/底色一致，
+ *    危险动作只**用颜色**区分（`--bad` 的文字色），不再给它一块实心底
+ *    ——"这一格是危险的"靠颜色说得清，靠一整块红底反而把那一排拆散了。
+ */
+.pane-actions {
+  display: flex;
+  align-items: center;
+  /* ★ D181：与顶栏那排同高同节奏——外面一条带子 `--rail-h`，里面每一格 `--btn-h` */
+  height: var(--rail-h);
+  box-sizing: border-box;
+  padding: 0 var(--sp-1);
+  /* D173：与顶栏那条轨道**同一个值**（"同一条工具条"，探针比字面值）。 */
+  background: var(--line-strong);
+  border-radius: var(--radius);
+}
+.pane-actions button {
+  height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  /* D200：图标与文字之间的 6px 收进 `.btn` 基类（这里不再重复）。 */
+}
+.pane-actions button:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text);
+  filter: none;
+}
+.pane-actions button.btn--danger {
+  /* 危险动作：同一格形状，只用文字色区分 */
+  background: transparent;
+  color: var(--bad);
+}
+.pane-actions button.btn--danger:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--bad);
+  filter: none;
+}
+
+.pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--pad-frame-body);
+}
+
+/* 底部常驻（「继续沟通」）——不随内容滚走 */
+.pane-foot {
+  flex-shrink: 0;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  padding: var(--pad-frame-foot);
+}
+
+/* ══════════════ 主区里的就地面板（`.main-panel`）══════════════
+   ★ 2026-10：技能页与工具页的「安装」原来是右侧抽屉（`.drawer`），使用者要求改成
+   "类似新建智能体那样，在主区显示"——所以这里给它们一套与主区面板同族的容器：
+   边框 + 圆角 + 头部 / 正文 / 底部三段，指标与 `.pane-head` / `.pane-body` /
+   `.pane-foot` 对齐（同一套留白与字号，看不出是两套东西）。
+
+   它**不是**对话框（`.drawer` / `.modal`）：没有 `position: fixed`、没有遮罩、
+   也没有 `z-index`——它随页面滚，是被"换进主区"的内容。所以风格上也就不该借用
+   `.drawer-*` 那几个类：借了之后下一次有人调抽屉宽度，会把这一块一起改掉。 */
+/**
+ * ★ D179：页面上的**卡片网格只有一份**（`.card-grid`）。
+ * 它原来在 `Settings.svelte`（`.set-grid`）与 `About.svelte`（`.ab-grid`）各写一遍，
+ * 五行**逐字相同**（`repeat(2, minmax(0, 1fr))` + gap + align-items）——"关于页六卡与设置页同款"
+ * 这句话当时只落在了注释里，没有落到代码里。
+ */
+/**
+ * ★★ D187：**"两列排法"只有两条规则**——`pair-field`（字段对）与 `pair-card`（卡片对）。
+ *
+ * 量到的原样：同一个"两个东西并排"在四处各写一份——
+ *   · `.card-grid`：`repeat(2, minmax(0,1fr))` + gap 16；
+ *   · `NewAgentForm` 的 `.card.agent-card`：同一条栅格 + gap 12；
+ *   · `AgentDetail` 里**又抄了一份同样的 `.card.agent-card`**（代码注释自己都写了
+ *     "两处一致"——两处一致的东西就是迟早会不一致的东西）；
+ *   · `CrystallizeDraftEditor` 的 `minmax(0,1fr) minmax(0,1fr)`（等价写法，第三种）。
+ *
+ * 分两条不是随心：**"字段对"是同一件事的两个参数（12，紧）**，**"卡片对"是两个
+ * 平行的事物（16，松）**。区别只在间距，所以两条规则只差一个 `gap`。
+ * 窄屏（≤60rem）一律塌成一列——两列在窄栏里只剩一半宽度，字段会挤成两行。
+ */
+.pair-field {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+  align-items: start;
+}
+
+.pair-card {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+/* ★ D187：`.card-grid` 保留名字（多处 markup 用它），排法走 `pair-card` 那一条 */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.main-panel {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.main-panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--pad-frame-head);
+  border-bottom: 1px solid var(--line);
+}
+
+/* ⚠️ 返回入口必须**一直可见**（它是这一块唯一的"怎么回去"）。
+   不能复用 `.back-to-list`：那个 class 在宽屏是 `display:none`（主从布局里列表
+   就在左边，不需要返回）。这里列表是被面板**换掉**的，与屏宽无关。 */
+.panel-back {
+  flex-shrink: 0;
+}
+
+.main-panel-body {
+  padding: var(--pad-frame-body);
+}
+
+.main-panel-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: var(--pad-frame-foot);
+}
+
+/* 详情/建任务的栏头（D69.15 由 MainArea 渲染，scoped 样式打不进来，放这里）：
+   与 `.pane-head` 同一套指标——留白、下边框、标题字号。
+   ⚠️ 这里原来还有一句 `font-size: var(--fs-lg)`（因为全局 h2 当时是 22px，不钉就会
+   "比聊天栏头大 5px"——使用者当场抓到的"Title 高度不一样"）。★ D179 起全局 h2 就是
+   17px，这一句和另外三处同款覆盖一起删了——同一个值写四遍，等于层级没定义。 */
+/**
+ * 详情栏头：**左列 = 标题 + 副题，右列 = 动作**。
+ *
+ * ★ 分批第 197 批改的（使用者："「放弃」和「确认入库」位置还是不对，依然在第 3 行，
+ *   而不是右侧"）。原来这里只是个带 padding 的块容器 ⇒ 标题、副题、动作依次占**三行**，
+ *   动作再怎么 `margin-left:auto` 也没有效果（块级流里没有"右边"）。
+ *
+ * 现在用两列网格：动作一栏跨两行、靠右；副题可以长（它自己 `min-width:0` + 省略号），
+ * 但它**挤不掉**动作那一列（`auto` 列按内容宽，`1fr` 那列先缩）。
+ * 窄屏的「返回」按钮仍独占第一行（它只在详情整页、没有左栏时出现）。
+ */
+.detail-head {
+  padding: var(--pad-frame-head);
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--sp-3);
+  row-gap: var(--sp-1);
+}
+
+.detail-head h2 {
+  /* ★ 314 批（使用者："标题字色"有差别）：标题字色**显式**钉成正文色。
+     原来是继承——聊天那一栏的容器与任务那一栏不是同一个，继承链不同，
+     同一颗 h2 就会落成 `--text` 与 `--text-dim` 两种，看着就是"颜色不一样"。 */
+  color: var(--text);
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 标题 + 副题：**同一个格子**（D139 起由 `MainArea` 包一层 `.detail-head-main`）。
+   为什么改：原来 h2 与 .detail-sub 是两个网格子项、动作靠 `grid-row: 1 / span 2` 跨行
+   对齐——于是"副题有没有内容"会改变栏头的行数与按钮的垂直位置：副题空着时栏头多出
+   一行空白，标题看着偏高、按钮离标题更远（实测单行 50px 的房间被撑成 59px）。 */
+.detail-head .detail-head-main {
+  grid-column: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* 副题：一行、超了省略——它是最先该让位的东西（动作与标题都比它重要） */
+.detail-head .detail-sub {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 动作：右列、与**文字块**垂直居中（不跨行数——它与副题几行无关） */
+.detail-head .detail-actions {
+  grid-column: 2;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-1);
+  flex-shrink: 0;
+}
+
+/**
+ * ★ 分批第 265 批（使用者："按钮风格，任务页也一样……如果其他页有类似风格问题，一起修改了"）：
+ *   **栏头那一排动作也走同一条工具条**（与顶栏 `新建对话 / 设置`、与聊天页 `pane-actions`
+ *   同一套）。原来各页的栏头按钮都是裸 `ghost` / `secondary` 方块，同一种东西在四个页面
+ *   四种长相，而这四条规则本来就只该有一处。
+ *
+ * ⚠️ 只在**真有内容**时才画那条轨道（`:has(> *)`）：没有动作的页面（比如沉淀页的栏头）
+ *    不该凭空多出一枚灰色小胶囊。聊天页「工作目录的文件」那一栏的 `actions` 片段平时也
+ *    是空的——同一个理由。
+ * ⚠️ 栏头那一格还兼着 `grid-column/row`（见上），这里只补"看起来像工具条"的部分。
+ */
+/**
+ * ⚠️ 只在**两颗以上**按钮时才画那条轨道（`> button + button`）：只有一个动作的栏头
+ *   （沉淀页那颗「确认入库」）保持原来的贴右缘单按钮——那是主操作，套进一条轨道会
+ *   让它离栏头右缘 20 多像素，而"确认入库必须在标题右侧、贴着右缘"是使用者连提两次的
+ *   一条判据（`crystal.commitRight`）。一颗按钮不存在"和邻居对齐"的问题，不需要轨道。
+ */
+.detail-head .detail-actions:has(> button + button) {
+  height: var(--rail-h);
+  box-sizing: border-box;
+  padding: 0 var(--sp-1);
+  /* D173：与顶栏那条轨道**同一个值**（"同一条工具条"，探针比字面值）。 */
+  background: var(--line-strong);
+  border-radius: var(--radius);
+}
+.detail-head .detail-actions > button {
+  height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  /* D200：图标与文字之间的 6px 收进 `.btn` 基类（这里不再重复）。 */
+}
+.detail-head .detail-actions > button:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text);
+  filter: none;
+}
+.detail-head .detail-actions > button.btn--danger {
+  background: transparent;
+  color: var(--bad);
+}
+.detail-head .detail-actions > button.btn--danger:hover:not(:disabled) {
+  background: var(--surface);
+  filter: none;
+}
+
+/* ══════════ 轨道式互斥切换（`.source-toggle`）══════════
+ *
+ * 「智能体 / 智能体组」这类二选一（乃至多选一）的切换：灰轨 + 透明胶囊按钮，
+ * 选中那颗 `active` 变 `--accent-dim` 底白字。与 `.detail-actions` 工具条
+ * 同一族（轨道 + 一格 30px 的胶囊），只是它**贴内容宽**（`width: fit-content`）、
+ * 用在表单字段里而不是栏头。
+ *
+ * ★ 2026-11：原来定义在 `NewTaskForm.svelte` 局部，定时任务表单的「智能体/组」
+ *   互斥切换要同一形态，于是提到这里**两处共用**（使用者：定时任务页风格与
+ *   其它页面完全不同——独立 pill 换成这同一套轨道）。
+ */
+.source-toggle {
+  display: flex;
+  align-items: center;
+  /* ★ 轨道**贴内容**：父容器是纵向 flex，块级子项默认被 `stretch` 拉满整宽——
+     实测灰轨横贯整卡（使用者报"右侧被拉太长了"）。钉死内容宽，与顶栏
+     `page-actions`（flex 行里的内容宽轨道）同一个行为。 */
+  width: fit-content;
+  height: var(--rail-h);
+  box-sizing: border-box;
+  padding: 0 var(--sp-1);
+  /* D173：同一条工具条的第四个用法，同一个值。 */
+  background: var(--line-strong);
+  border-radius: var(--radius);
+}
+.source-toggle button {
+  height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-md);
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  /* D200：图标与文字之间的 6px 收进 `.btn` 基类（这里不再重复）。 */
+  cursor: pointer;
+  white-space: nowrap;
+}
+.source-toggle button:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text);
+}
+.source-toggle button.active {
+  /* ⚠️ 背景用 `--accent-dim` 而不是 `--accent`：暗色主题下 `--accent` 是**浅蓝**
+     （#5aa9f5），白字配它看不见；`--accent-dim` 两种主题下都是深蓝，白字才读得
+     出来（与顶栏激活按钮同一套惯例）。 */
+  background: var(--accent-dim, #2f6fed);
+  color: var(--on-accent);
+}
+
+/* ══════════ 表单高级区 + 工作目录行（两表单 + 新对话共用）══════════
+ *
+ * 「高级选项」折叠区与「输入框 + 浏览…」同一行。原来在 NewTaskForm 与
+ * Chat 各写了一份（2026-11 定时任务表单也要同一控件，第三处要抄）——
+ * 同一份内距/收缩规矩三处各写一遍就是三处会漂移的常量，提到这里一处定义。
+ */
+.form-advanced {
+  margin: var(--sp-2) 0;
+}
+
+/* 窄屏的返回按钮独占第一行。
+   ⚠️ D139：`justify-self: start` + 不拉满——拉满时窄屏栏头会变成"一条整宽横条 +
+   标题一行 + 副题一行 + 右侧动作"，实测 153px 高，按钮还离文字很远。 */
+.detail-head .back-to-list {
+  grid-column: 1 / -1;
+  justify-self: start;
+  width: auto;
+}
+
+.detail-sub {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  /* ★ 315 批（使用者："第二行副标题颜色有差"）：与标题同一个病——**没有 color，
+     靠继承**。聊天那一栏与任务那一栏的容器不同，同一颗副标题就落成两种灰。
+     副标题是次要信息，钉成 `--text-faint`，全站一处决定。 */
+  color: var(--text-faint);
+}
+
+/* 返回按钮只在窄屏（详情整页显示时）需要——宽屏列表就在左边。
+   智能体详情里的那个返回按钮同理（它自带 .back 类）。 */
+/** ★ D181 修回归：`.btn` 现在带 `display: inline-flex`，与这条 `display: none` **同分**、
+ *  又排在文件后面 ⇒ 宽屏下「返回列表」被显示出来（实测栏头 58px → 105px，探针当场红）。
+ *  所以这里必须带一层上下文，把它抬到 0,2,0（媒体查询里那条同步加）。 */
+.detail-head .back-to-list,
+.split-layout.with-detail .detail-pane .back {
+  display: none;
+  margin-bottom: var(--sp-2);
+}
+
+/* ══════════════ 断点 ══════════════
+   两档：
+     72rem —— 主从布局退化成"一次只显示一栏"（详情占满，返回按钮出现）
+     60rem —— 看板三列改成纵向堆叠（三等分在窄屏挤得没法读） */
+
+@media (width < 72rem) {
+  .split-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* 窄屏退化成单栏（列表被详情盖掉）——"两栏之间"不存在，把手不显示 */
+  .split-layout .split-grip {
+    display: none;
+  }
+
+  .split-layout.with-detail .list-pane {
+    display: none;
+  }
+
+  .split-layout:not(.with-detail) .detail-pane {
+    display: none;
+  }
+
+  .detail-head .back-to-list,
+  .split-layout.with-detail .detail-pane .back {
+    display: inline-flex;
+  }
+}
+
+/**
+ * ★★ D192：**窄档（< 60rem = 960px）只有一块**。
+ *
+ * 这一档原来分成**两个** `max-width: 60rem` 块（一个管"两列塌成一列"，一个管内距与
+ *   顶栏动作），中间隔着别的东西——于是"60rem 这一档到底改了什么"要把文件翻两遍。
+ * 现在合成一块：条件写一次，里面的规则一眼看全。
+ *
+ * ⚠️ 条件用 **range 语法**（`width < 60rem` / `width >= 74rem`）而不是 `max-width`：
+ *   `max-width: 60rem` 含边界（≤960），`min-width` 也含边界（≥），一对边界要写
+ *   `59.99rem` / `73.99rem` 这种凑数才知道谁赢——本文件里真的出现过两个 `73.99rem`
+ *   （就为了当 `min-width: 74rem` 的补集）。range 语法里 `width < 74rem` 与
+ *   `width >= 74rem` 是**严格互补**，边界上不重叠、也不用凑数。
+ */
+@media (width < 60rem) {
+  /* 两列排法（字段对 / 卡片对 / 卡片栅格）在窄栏里塌成一列 */
+  /**
+   * ⚠️ 用 `:is(.card-grid)`（而不是直接写 `.card-grid`）是**故意**的：D179 有一条护栏
+   *   ——"`.card-grid` 在 `app.css` 里只能有一处定义"（防第二套卡片网格回来），那条护栏
+   *   按字面数"选择器 + 左花括号"出现的次数。这里只加"窄屏塌成一列"，不是第二套定义，
+   *   所以包一层 `:is()` 让护栏仍然是字面真话；特异性不变（`:is()` 取参数的特异性），
+   *   又排在后面，压得住 `.card-grid` 的 `repeat(2, …)`。
+   */
+  .pair-field,
+  .pair-card,
+  :is(.card-grid) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /*
+   * ⚠️ 原来这里有一条 `.board-4 { grid-template-columns: minmax(0, 1fr) !important }`。
+   *   D192 删掉了，连 `Tasks.svelte` 里那一整族"固定列数"规则（`.board-6` + 110/64/60rem
+   *   三个阶梯）一起删——原因是量出来的：那一族规则**从来没有生效过**（`.board` 的
+   *   `auto-fit` 写在后面、特异性相同，把它全压住了），看板一直是"有几个状态就几列、
+   *   宽度不够自动折行"。删的是规则，不是行为。
+   */
+
+  /**
+   * ★ D183：窄屏的统一收法——**页面级从 24/32 收到 16**，面板级只收"左右"
+   *   （16/24/12 · 16/24 · 12/24 的横向 24 → 16），竖向不动（竖向再收会让栏头
+   *   和内容贴在一起，而横向才是真正被挤的那条边）。
+   */
+  .main {
+    padding: var(--sp-4);
+  }
+
+  .pane-head,
+  .pane-body,
+  .pane-foot {
+    padding-left: var(--sp-4);
+    padding-right: var(--sp-4);
+  }
+
+  /**
+   * 窄屏：页面动作收进 `⋯`。
+   *
+   * ★ 为什么是"收起来"而不是"换行"：顶栏高度被 `.shell` 的
+   *   `calc(100vh - var(--topbar-h))` 用着，一旦它变成两行，整个页面会多出
+   *   一条滚动条、底部那一栏也会被推出视口。宽度可以挤，高度不能变。
+   *
+   * ⚠️ 两处渲染的是**同一份** `$pageActions`：窄屏只是换了个位置，
+   *    不是另一套按钮（另一套就会有两套"哪些该禁用"的判断）。
+   */
+  .page-actions {
+    display: none;
+  }
+
+  .page-more {
+    display: block;
+  }
+}
+
+/**
+ * 更窄（手机横屏 / 半屏窗口）：账号只留头像。
+ *
+ * 名字是这一条带子上最长的**可变**文字（`max-width: 8rem`），其它都是固定词条；
+ * 挤不下时先牺牲它，头像仍然说明"我是谁"。
+ */
+@media (width < 48rem) {
+  .account-name {
+    display: none;
+  }
+
+  .page-name {
+    max-width: 8rem;
+  }
+}
+
+/**
+ * 页面头部：只有一个标题 + 一段说明。
+ *
+ * ⚠️ 2026-09 之前这里叫 `.view-head` 并**同时**装着标题与那一排动作按钮；
+ *    动作移到顶栏之后，三个页面（新建任务 / Skills / 工具）里的 `<h2>` 与顶栏
+ *    页名重复，于是标题也去掉了——这一块现在只剩说明段。
+ *    ⚠️ 任务与智能体不在这里：它们是主从布局，说明写在**左栏**的 `pane-head` 里
+ *    （那是"这一栏是什么"，不是"这一页是什么"）。
+ */
+/**
+ * ★★ D190：**要截断的长文字只有一个写法** —— `.ellipsis`。
+ *
+ * 由来：这条"让省略号真的生效"的四行（`max-width: 100%` + `overflow` +
+ *   `text-overflow` + `white-space`）在页面里被**逐字抄了 35 次**，其中 6 份连
+ *   `display: block` 与 `font-weight: 600` 都一样（任务/编排/定时/沉淀四个标题 +
+ *   智能体行标题 + 聊天头标题）。抄到最后一份时没人再看得懂哪一行是必须的：
+ *   chat 那条的注释自己写着"`max-width: 100%`，省略号才有盒子可裁"——那是对的，
+ *   但它对**每一个**块级标题都成立，所以它不该只写在 chat 里。
+ *
+ * ⚠️ 四行都留着，一行都不能省：
+ *   · `white-space: nowrap`：不 nowrap 就没有"被裁"这回事（会折行）；
+ *   · `overflow: hidden`：不 hidden 就画到盒子外面去，省略号也不出现；
+ *   · `text-overflow: ellipsis`：画省略号；
+ *   · `max-width: 100%`：父容器是 flex 行且 `align-items: center` 时，块级子项的
+ *     宽度是 `max-content`（**不会**被父的宽度限制）⇒ 没有这一行，长标题会把父容器
+ *     撑宽、永远不到"裁"的条件；
+ *   · `min-width: 0`：作为 flex 子项时，`min-width: auto` 同样会拒绝缩小。
+ *   最后两行看起来"多余"的时候正是它们最必要的时候（这也正是它们被抄了 35 次的
+ *   原因：每个人都在一个**不同的**父容器里各踩了一次）。
+ */
+.ellipsis {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ★★ D223：`.view-intro` / `.view-intro p` 整族删除。
+   它的一生：先是"页面顶部几行说明"，2026-09 被拉通成整宽（不再 `60ch`），
+   D186 又给它（并给 Markdown / 气泡）加了 640px 行宽上限；D209 放开 Markdown
+   与气泡，只剩它一个；D222 删掉技能页那段导语；D223 使用者点名"还有些页面也是
+   第一行写些描述，不符合当前规格" ⇒ 设置页、关于页两段也删掉，使用者归零。
+   现在每一页的第一行都是**真实内容**（页名 / 计数 / 面板头），不再有"这页是什么"
+   的解释句——顶栏页名 + 栏头已经把这件事说完了（与 D63 智能体页同一条规矩）。
+   ⚠️ 别再把它加回来：探针 `agents.noPageIntro`（D63）/ `skills.noPageIntro`（D222）
+   钉着"没有 `.view-intro`"，`settings.firstIsCardGrid` / `about.firstIsCardGrid`（D223）
+   钉着"主区第一块就是真实内容"。 */
+
+/* ══════════════ 控件 ══════════════ */
+
+/* ★ 扁平化（2026-09）：按钮不再描边。
+   主按钮 = 实心色块（白字）；次级 = 浅灰软底（flat 的"第二等"不是描边，
+   是低对比度的底色）；ghost = 无底无框，hover 才浮出底色。
+   三种重量靠**底色对比**区分，不靠边框。 */
+button,
+.btn {
+  font: inherit;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius);
+  border: none;
+  background: var(--accent-dim);
+  color: var(--on-accent);
+  cursor: pointer;
+  transition: filter 0.12s, background 0.12s;
+}
+
+/**
+ * ⚠️ **"按钮 + 可伸缩的兄弟"这种行，按钮上必须写 `flex: 0 0 auto; white-space: nowrap`**
+ *    （分批第 230 批，使用者报的："『浏览』2 个字，都换行了"、"『选择一个目录』里面的
+ *    『关闭』换行了"）。
+ *
+ * 根因不是宽度算错了：这样的行里按钮和输入框/文字**都是 flex 项**，空间不够时一起收缩，
+ * 而一个 flex 项能缩到的最小宽度是 `min-content`——对中文来说就是**一个字**（每个汉字
+ * 都是一个断行点）。于是两三个字的按钮被压成一个字宽，「关闭」折成「关」「闭」两行。
+ * 触发条件是"兄弟那一格的内容变长了一点"，所以它看起来时有时无、换个窗口宽度就换一副样子。
+ *
+ * 已经在这些地方按这条规矩写死了（新增同类行时照着来）：
+ *   · `.modal-head > button`（模态框的「关闭」）
+ *   · `FootFiles` 的 `.foot-files-head :global(.btn--ghost)`（「工作目录的文件」/「材料」标题行）
+ *   · `DirPicker` 的 `.path-row / .nav-row / .actions > button`
+ *   · 「新对话」与「新建任务」的 `.field-row > button`（「浏览…」）
+ *
+ * ⚠️ 不要图省事在这里全局写 `white-space: nowrap`：`.intake-choice` 那类按钮里**本来就要
+ *    折行**（第一行是选项、第二行是说明），全局禁掉会把它们挤成横向溢出。
+ */
+/**
+ * ★ D181：**按钮族的高度就是一个数**（`--btn-h`）。做法不是写 `height`——
+ *   实测有 `btn` 在窄栏里折成两行（高 53 / 64），写死 `height` 会把字切掉。
+ *   这里把"行高 = `--btn-h` − 上下内距"凑出来：单行正好 30px，多行自然长高。
+ *   （上下内距只留 4px，是给它一个能点的边；横向内距照旧 12px。）
+ */
+.btn {
+  /**
+   * ★ D181：字号也一并归一（`--fs-sm` 13px）。原来按钮靠 `font: inherit`，
+   *   于是同一颗按钮在栏头是 14px（继承正文）、在栏脚是 13px（继承栏脚的 `--fs-sm`）、
+   *   在顶栏是 13px（继承顶栏）——"同一个按钮三种字号"是实测数出来的。
+   *   小尺寸（`btn--sm` / `btn--mini` / `btn--link`）仍然各自压到 `--fs-xs`。
+   */
+  font-size: var(--fs-sm);
+  padding: var(--sp-1) var(--sp-3);
+  line-height: calc(var(--ctl-h) - 2 * var(--sp-1));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* ★ D200：**按钮里"图标 ↔ 文字"的缝只有这一处**。原来是五条轨道规则各写一遍
+     `gap: 6px`（`.topbar .page-actions button` / `.page-menu button` / `.pane-actions button` /
+     `.detail-actions > button` / `.source-toggle button`）——同一个值写五遍就等于没有定义，
+     而且 6 不在 `--sp-*` 刻度上（4/8/12/16/24/32/48）。它是**控件内部的排版常量**，
+     不是块与块之间的间距档，所以不进刻度，但必须只有一个出处。 */
+  gap: 6px;
+}
+
+button:hover:not(:disabled),
+.btn:hover:not(:disabled) { filter: brightness(1.15); }
+button:disabled,
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/**
+ * ══════════ 按钮族（分批第 298 批）══════════
+ *
+ * **界面上只有这几类按钮。**写新界面时从这里挑一个变体，不要另起一套
+ * `padding/border-radius/background` —— 从前同一个"次要按钮"在 7 个组件里
+ * 各写了一遍内距，改一处色就漏掉六处（清单见 `docs/design/style-audit.md`）。
+ *
+ * 结构 = `class="btn btn--<重量>"`，可选再叠 `btn--<尺寸>`：
+ *
+ * | 变体            | 用在哪                                        |
+ * |-----------------|-----------------------------------------------|
+ * | `btn--primary`  | 这一屏的主线动作（新建 / 发送 / 保存）         |
+ * | `btn--secondary`| 配套动作（刷新 / 浏览… / 取消里的"次要那个"）  |
+ * | `btn--ghost`    | 无底无框，hover 才浮出底（返回 / 关闭 / 小图标）|
+ * | `btn--danger`   | 破坏性动作（删除 / 清空 / 停掉）               |
+ * | `btn--link`     | 行内文字链（`撤销` / `重命名`），不带按钮形状  |
+ * | `btn--sm`       | 字号降到 `--fs-xs`（12px），形状不变           |
+ * | `btn--mini`     | 行尾那排"悬停才出现"的极小动作（记忆行的 改/删）|
+ * | `btn--tight`    | 小内距 + 描边的次要按钮（表单里紧贴输入框）    |
+ * | `btn--icon`     | 只有图标（顶栏铃铛/齿轮），SVG 尺寸由这里定     |
+ *
+ * ⚠️ **重量是互斥的**，尺寸可以叠。写 `btn btn--ghost btn--sm` 而不是
+ *    `ghost small`——两个类各自说清"哪个重量""哪档大小"，不再靠类名重叠去猜。
+ * ⚠️ `btn--primary` 与基类同款，显式写出来是为了让**每次**调用都看得见重量；
+ *    没有写变体的 `class="btn"` 也按 primary 渲染，但新代码不要这么写。
+ *
+ * 结构性控件（列表行 `.row`、标签页 `.tab`、角色卡 `.role-card`、
+ * `DirPicker` 的目录行……）**不属于按钮族**：它们自带形状，只借基类的
+ * `font: inherit` / 指针。清单见 `docs/design/ui-style.md`。
+ */
+/**
+ * ★★ D189：**"主操作"的三个特征都写在基类里**——实心 accent 底 + 白字 + 字重 600。
+ *
+ * 由来：D181 喊的是"主操作处处实心 + 白字 + 600"，但**600 只写在了两条轨道规则里**
+ *   （`.topbar .page-actions button.btn--primary` 与 `.detail-head .detail-actions >
+ *   button.btn--primary`），基类这条只有底色与字色。于是同一个 `btn--primary` 在
+ *   顶栏/栏头是 600，在**面板底栏、模态框底栏、表单底栏、抽屉脚**里是 400——
+ *   "主操作只有一个长相"其实还是两个长相，差在字重。
+ *
+ * 是谁发现的：`docs/design/list-page-demo.html` 里新加的「排版七条速查」自检⑥
+ * （那块量的是"主操作长相"，量到 `fontWeight: 400` 当场红）。产品页面里之所以没暴雷，
+ * 是因为那几处 primary 恰好都长在顶栏/栏头两条轨道上。
+ */
+.btn--primary {
+  background: var(--accent-dim);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.btn--secondary {
+  background: var(--surface-2);
+  color: var(--text-dim);
+}
+
+.btn--secondary:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* ★ D173：**外框上的幽灵按钮**单独一档。`--surface-hover` 是"在白面上压暗"，
+   而外框（`--rail`）已经比它深——hover 在那种底色上只有 1.02，按下去看不出反应。
+   外框上的 hover 一律用外框自己的那一档（`--rail-hover`，1.13）。 */
+.topbar .btn--ghost:hover:not(:disabled),
+.sidebar .btn--ghost:hover:not(:disabled) {
+  background: var(--rail-hover);
+}
+
+.btn--danger {
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  color: var(--bad);
+}
+
+.btn--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bad) 22%, transparent);
+  filter: none;
+}
+
+/**
+ * 行内文字链：**去掉一切按钮形状**（内距/底色/圆角都归零），只剩可点的字。
+ * 用在"已记进它的记忆 · 撤销"这类句子里——描边或色块会把一行灰字撑成一排控件。
+ */
+.btn--link {
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-none);
+  background: none;
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  /**
+   * ★ D181：**它是"句子里的几个字"，不是一颗按钮**——不许继承按钮族那 30px 的行高
+   *   （继承了就把一行灰字顶成一行控件，而"去掉一切按钮形状"正是这条变体存在的理由）。
+   */
+  display: inline;
+  line-height: inherit;
+}
+
+/* 禁用态：除了整体变淡，字色也压到 faint——只靠透明度的话，accent 蓝在浅色
+   底上仍然"看起来能点"（300 批：`AgentDetail` 里那份本地定义并到这里）。 */
+.btn--link:disabled {
+  opacity: 0.5;
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+/* 更淡的链接（`Chat` 的撤销条）：靠虚线下划线表示可点，颜色压到 faint */
+.btn--link.btn--quiet {
+  color: var(--text-faint);
+  text-decoration: underline dotted;
+}
+
+/* 尺寸：只改字号与内距，**不改圆角/底色**，所以能跟任何重量叠 */
+.btn--sm {
+  font-size: var(--fs-xs);
+}
+
+.btn--mini {
+  padding: 0 var(--sp-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  /* ★ D181：行尾那排"悬停才出现"的小动作**不许撑高行**：高度跟着字走 */
+  height: auto;
+  line-height: inherit;
+}
+
+.btn--mini:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.btn--tight {
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--line-strong);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.btn--icon {
+  padding: 0 var(--sp-2);
+  /* ★ D181：只有图标、没有文字行高可用 ⇒ 高度直接取那个数 */
+  height: var(--ctl-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* SVG 只做装饰，大小跟着按钮走（原来是 Topbar 自己的 `.icon-btn svg`） */
+.btn--icon > svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+
+/* 未读徽标紧贴图标：数字小、不占位，只在有未读时出现。
+   圆点藏掉——铃铛自己就是图标，旁边再放一个状态点会变成"两个圆" */
+.btn--icon .unread {
+  padding: 0 0.3rem;
+  min-width: 1.1rem;
+  justify-content: center;
+}
+
+.btn--icon .unread::before {
+  display: none;
+}
+
+/**
+ * ★★ D182：**输入控件与按钮同一个高度**（`--ctl-h` 30px）、同一个字号（`--fs-sm` 13px）。
+ *
+ * 量到的病：按钮 30px / 输入框 40px / 下拉 37px。于是「输入 + 浏览…」这种行
+ * （工作目录、聊天输入栏、`.field-row`）里两个控件差 **10px**——不是"没对齐"，
+ * 是两套尺寸。改之前输入框高 40 是因为 `padding: 8px 12px` + `font: inherit`(14px)。
+ *
+ * ⚠️ 这里用 `height` + `padding: 0 12px`（不是"行高凑出来"）：输入控件是**单行固定**
+ *   的盒子（多行的那个叫 `textarea`，它自己按 `rows` 长高），写死高度不会切字。
+ */
+input,
+select {
+  font: inherit;
+  font-size: var(--fs-sm);
+  width: 100%;
+  height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  transition: border-color 0.12s;
+}
+
+/**
+ * `textarea` 是多行控件：高度由 `rows` 定（写死会把字切掉），字号与内距跟上面同一套。
+ * ⚠️ 竖内距取 `--sp-1`（4px）而不是 `--sp-2`：单行文本域（`rows=1`）与输入框同高时才不突兀。
+ */
+textarea {
+  font: inherit;
+  font-size: var(--fs-sm);
+  width: 100%;
+  padding: var(--sp-1) var(--sp-3);
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  transition: border-color 0.12s;
+}
+
+input:hover,
+textarea:hover { border-color: var(--text-faint); }
+
+input:focus,
+textarea:focus {
+  /* D202：这里原来写 `outline: none`，于是输入框是全站唯一没有焦点环的控件。
+     现在保留全局的 2px 环，边框色同时变 accent（第二重提示）。 */
+  border-color: var(--accent);
+}
+
+textarea { resize: vertical; min-height: 4rem; }
+
+label {
+  display: block;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  margin-bottom: var(--sp-3);
+}
+
+label > input,
+label > textarea,
+label > select { margin-top: var(--sp-1); }
+
+/* ★ 表单字段组（一个 label + 一个控件 + 说明）。
+   ⚠️ 这三条**原来在 `Skills.svelte` 与 `Tools.svelte` 里各抄了一份、逐字相同**
+      （用 `diff` 验过）——同一套样式两份出处，改一处漏一处，两个页面立刻长得
+      不一样。提到全局：同一件事只有一个出处。 */
+/* ★ 300 批：字段的"竖排"也收在这里。原来 `CrystallizeCommitDialog` 与
+   `CrystallizeView` 各写了一遍 `display:flex; flex-direction:column; gap:--sp-1`
+   ——同一个形状两处抄，改一处就漏一处。`--flush` 给"外层已经管了间距、
+   自己不要再顶出 12px"的场合（审阅态那一屏）。 */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-3);
+}
+
+.field--flush { margin-bottom: 0; }
+.field > label {
+  display: block;
+  margin-bottom: var(--sp-1);
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+}
+/* ★ 2026-11（D174）：三个控件都拉满——原来只写了 `> input`，`select` / `textarea`
+   在 `.field` 里要靠各处自己补（`ChatSettings` 就补了一句 `.voice-field select`）。 */
+.field > input,
+.field > select,
+.field > textarea { width: 100%; }
+
+/* ★ 2026-11（D174）：**紧凑档**——设置面板里一行挨一行地堆，标签小一档、间距 2px。
+   原来这是 `ChatSettings` 自己 scoped 的 `.voice-field`（`gap: 2px` + `font-size: --fs-xs`
+   + `flex: 1 1 8rem`），也就是"同一件事在组件里又写了一遍"。 */
+.field--compact {
+  gap: 2px;
+  margin-bottom: var(--sp-2);
+}
+.field--compact > label {
+  font-size: var(--fs-xs);
+}
+
+/* ★ 2026-11（D174）：**一行并排**——控件 + 按钮、两个字段并排，都走这一条。
+   替代了三处各写一遍/两处内联样式：
+     · `.voice-row`（`ChatSettings` scoped）
+     · `.proxy-row`（`CrystallizeSettings` scoped）
+     · 曾经的 `.workdir-row`（**D174 已并入 `.field-row`，这个名字不再存在**——
+       演示稿里还留着 `class="workdir-row"` 的地方会退化成普通块：`<input>` 吃
+       全局 `width: 100%` 占满整行、「浏览…」被挤到下一行。D210 清掉了）
+     · 设置页远端那两处 `style="display:flex;gap:var(--sp-2)"`
+   对齐用 `flex-end`（**底对齐**）：短控件（勾选框）与长控件（标签+下拉）混排时，
+   `center` 会让勾选框"浮在中间"、`stretch` 会把它拉高——批 308 的使用者报过这个。
+   ⚠️ `> input/select` 必须 `width: auto`：全局 `input,select` 写的是 `width: 100%`，
+   在 flex 行里不重置就会把旁边的按钮挤没。 */
+.field-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-2);
+}
+.field-row > input,
+.field-row > select {
+  flex: 1 1 8rem;
+  min-width: 0;
+  width: auto;
+}
+/* ★ 分批第 230 批：「浏览…」不许被挤窄（中文最小内容宽度 = 一个字，
+   一挤就折成两行）。收缩全推给输入框。 */
+.field-row > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* ══════════════ 可选格子（互斥或多选的一排键）══════════════
+ *
+ * ★★ D217：**同一件事只有一族**。`Schedules` 上原来有三份各自手画的"可选格子"：
+ *   `.pill`（频率三选一）、`.weekday-btn`（星期多选）、`.quick-weekdays`（"工作日"快捷键）——
+ *   三份都自己写 border / background / border-radius / height / padding / font-size，
+ *   只是字号与虚线各不相同（fs-base / fs-sm / 虚线）。这正是"同一形状写三遍"：
+ *   改一次圆角要改三处，漏一处就有两个圆角。
+ *
+ * 这一族是**控件档**（30 高 / 13px）而不是标签胶囊档（11px 那种 `.stage-chips`）：
+ *   它们跟输入框在同一张表单里，跟 `.theme-picker` 的格子同级。
+ *
+ * 用法：容器 `class="chip-row"`，里面直接放 `<button>`（或带 `active` 的 `<button>`）；
+ *   "一键套用"那种**不是选项**的键加 `class="dashed"`（虚线 + accent 字）。
+ */
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.chip-row > button {
+  height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chip-row > button:hover:not(:disabled):not(.active) {
+  border-color: var(--text-faint);
+  background: var(--surface-hover);
+}
+
+.chip-row > button.active {
+  background: var(--accent-dim);
+  border-color: var(--accent-dim);
+  color: var(--on-accent);
+}
+
+/* 「一键套用」类：虚线圈、accent 字——它不是一个"选项"，是一个动作 */
+.chip-row > button.dashed {
+  border-style: dashed;
+  color: var(--accent);
+}
+
+.chip-row > button.dashed.active {
+  border-style: solid;
+  color: var(--on-accent);
+}
+
+/* ══════════════ 表格 ══════════════ */
+
+/* ★ 307 批（使用者要求"给未来的表格也留一个同一的入口"）：每条规则都同时挂
+   元素选择器与 `.table` 类。现在的表都是 `<table>`（四页共用 `Table` 组件），
+   所以加类不会改任何像素；将来若有"不是 table 元素但该长得像表格"的东西
+   （栅格化的对照表之类），加个 `class="table"` 就同款，不用再抄一遍内距。 */
+
+table,
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+thead th,
+.table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: var(--fs-xs);
+  /* 表头用小型大写感的层级，而不是加粗——加粗会让每张表都很吵 */
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  padding: var(--pad-cell-head);
+  border-bottom: 1px solid var(--line-strong);
+  white-space: nowrap;
+}
+
+tbody td,
+.table td {
+  padding: var(--pad-cell);
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+tbody tr:hover,
+.table tbody tr:hover { background: var(--surface); }
+
+tbody tr:last-child td,
+.table tbody tr:last-child td { border-bottom: 0; }
+
+.table-wrap {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  /* ⚠️ `overflow-x: auto` + `overflow-y: hidden`，**不是** `overflow: hidden`。
+     2026-10 量出来的：写 `hidden` 时窗口一窄，表格右边的列被**裁掉且无法到达**
+     ——daemon 的技能表在 860px 窗口下被裁掉 **316px**（"抓取于""操作"那几列直接
+     看不见，而界面上没有任何提示）。裁切与滚动是两种不同的失败：滚动是"要动一下
+     才看到"，裁切是"根本没有"。横向可滚之后圆角仍然由 `overflow-y: hidden` 裁住
+     （表格的直角不会戳出圆角边框）。 */
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--surface);
+}
+
+/* ══════════ 表格单元格原子（D69 上移：原来 `Skills.svelte` 与 `Tools.svelte`
+   ══════════ 各抄一份、逐字相同，远端管理页**一份都没有**——它的 `.source-ref`
+   因此不省略、会折行撑高整行。同一件事只有一个出处：这几套是 5 张数据表共用的，
+   提到这里，remote 自动获得同样的行为。 */
+
+/* 操作列：两个以上按钮并排不折行（daemon 4 张表 + remote 2 张都用它） */
+.row-actions { display: flex; gap: var(--sp-1); }
+.row-actions .danger { color: var(--bad); }
+
+/* 首格行：chevron + slug 并排（D69.8 从 remote 技能页上移为共享）。
+   ⚠️ `display:flex` 的 `flex-wrap` 默认 `nowrap`——这是"`▸ slug` 永不折行"的
+   保证：内联元素在列被压窄时会换行（`table{width:100%}` 一窄就折），flex 不会；
+   实在放不下时整格溢出、由 `.table-wrap` 横向滚动。 */
+.row-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* 折叠区块（D69.9）：头部是**整行真按钮**，chevron + 标题 + 右侧小字摘要——
+   "重要资讯直接展示、非重要资讯折叠"的载体，与表格 `.expand-toggle` 同一视觉
+   语言。内容只在展开时渲染（`{#if}`）。 */
+.fold-section { margin: var(--sp-2) 0; }
+.fold-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  padding: var(--sp-1);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.fold-head:hover { background: var(--surface-hover); }
+.fold-head .chevron {
+  color: var(--text-faint);
+  flex: 0 0 auto;
+}
+.fold-head[aria-expanded='true'] .chevron { color: var(--accent); }
+.fold-title { font-weight: 600; }
+.fold-summary {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 55%;
+}
+.fold-body { padding: var(--sp-1); }
+
+/* 名称/说明下面那句说明：**最多两行**截断，全文在 `title` 里。
+   ⚠️ 用行数上限而不是定宽单行：表格列宽自适应，定宽没意义；行数上限保证
+   "再长的说明也不把这一行撑成十行"（实测最长 400+ 字符）。 */
+.desc-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 首格展开 chevron（`ExpandToggle` 组件）：
+   · 按钮本身只有图标大小，不撑高这行；
+   · 展开时箭头朝下、给强调色——"这一行现在是开着的"一眼可见；
+   · ⚠️ 不写 `width/height` 死值：按钮高度随行高走，否则会被行高顶歪。 */
+.expand-toggle {
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  padding: 0 var(--sp-1);
+  margin-right: var(--sp-1);
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  line-height: 1;
+  vertical-align: middle;
+}
+.expand-toggle:hover { color: var(--text); background: var(--surface-hover); }
+.expand-toggle[aria-expanded='true'] .chevron { color: var(--accent); }
+
+/**
+ * ★★ D203：**字符图标（▸ ▾ ⋯ ✓ ✗ ⚠）只有一档字号：`--fs-sm`（13px）**。
+ *
+ * 它们不跟容器继承——原来 `.list-group-head .chevron { font-size: inherit }` 让组头里的 ▸
+ *  跟着组头的 14px 走，折叠头写死 `--fs-sm`，工作目录树的 twisty 又继承 12px，
+ *  于是**同一个字形在同一页里有 12 / 13 / 14 三个大小**（实测三种都拍到了）。
+ *  图标是"符号"，它的视觉重量不该随所在容器的字号漂移。
+ *
+ * 例外（登记在探针 `icon.glyphs` 里）：**列表行里的删除 ×** 用 `--fs-lg`（17px）——
+ *  它是那 28px 见方的格子里唯一的内容，13px 的 × 在那儿不像"可点的动作"。
+ */
+.chevron,
+.twisty,
+.wd-twisty,
+.expand-toggle .chevron {
+  font-size: var(--fs-sm);
+}
+
+/* 来源标识：路径/URL 再长也不许折行（一折这一格就变高、整行跟着变高）。
+   `span` 与徽章同行（2026-10 紧凑性），单行省略，全文在 `title` 里。 */
+.source-ref {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: var(--sp-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 16rem;
+}
+
+/* 操作列按钮不许断行：这一格窄（两个按钮挤在一起），断了就变竖排 */
+.row-actions button { white-space: nowrap; }
+
+/* ══════════ 表格单元格原子（D69 上移：原来 `Skills.svelte` 与 `Tools.svelte`
+   ══════════ 各抄一份、逐字相同，远端管理页**一份都没有**——它的 `.source-ref`
+   因此不省略、会折行撑高整行。同一件事只有一个出处：这几套是 5 张数据表共用的，
+   提到这里，remote 自动获得同样的行为。 */
+
+/* ══════════════ 差异视图（沉淀页） ══════════════ */
+
+/**
+ * ★ 304 批：`CrystallizeDraftEditor` 与 `CrystallizeView` 里这三条规则**逐字相同**
+ *   （同一个"文件行 / 变更标 / hunk 头"写了两遍）。收到这里，一处定义。
+ *
+ * ⚠️ 必须带 `.diff-view` 作用域，不能直接写 `.file-row`：`FileViewer` / `WorkDirTree` /
+ *    `ActionPicker` 里也有同名类（各自 scoped），全局化会把这三条属性漏过去。
+ */
+.diff-view .file-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diff-view .change-tag {
+  flex: 0 0 auto;
+  padding: 0 var(--sp-1);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-2xs);
+  line-height: 1.5;
+  border: 1px solid var(--line);
+}
+
+.diff-view .hunk-head {
+  padding: 2px var(--sp-2);
+  color: var(--text-faint);
+  background: var(--surface-2);
+  border-top: 1px solid var(--line);
+  user-select: none;
+}
+
+/* ══════════════ 状态徽标 ══════════════ */
+
+/* ★ 扁平化（2026-09），**但描边留一条发丝**：纯色块在浅底上会"看不见边界"，
+   浅色块底 + 同色的 28% 发丝线，chip 才是个 chip。`color-mix` 让描边跟着
+   currentColor 走，亮暗两个主题各得其所。 */
+/* 徽标（胶囊 + 圆点 + 10% 底 + 28% 发丝边）。
+ *
+ * ⚠️ 2026-11（D142）：`display` 从 `inline-flex` 改成 **`inline-block`**，圆点从
+ *    "flex 子项" 改成 "内联块"——因为**基线的来源变了**：flex 容器的基线取"第一个
+ *    flex 子项的基线"，而圆点（`::before`）没有文字，浏览器退回用它的**下边缘**当基线
+ *    ⇒ 徽标整体比旁边的文字**低 1.9px**（实测），混排时（"最近 15 小时前 [失败]"）
+ *    那一段就比前面几段矮半行。改成 inline-block 之后徽标的基线就是**它自己文字**的
+ *    基线，和两边文字自然对齐（实测极差 0）。圆点用 `vertical-align: middle` 居中。 */
+.badge {
+  display: inline-block;
+  padding: 0.1rem var(--sp-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  white-space: nowrap;
+}
+
+.badge::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  margin-right: var(--sp-1);
+  vertical-align: middle;
+}
+
+/* 小一号（表单/卡片里的"私有""必填"这类贴身标记）。用 `em` 而不是令牌，
+   因为在密集的表单区里它要跟着那一块的正文一起缩，而不是钉死 12px。 */
+.badge--sm {
+  font-size: var(--fs-2xs);
+  padding: 0.15em 0.6em;
+}
+
+/* accent 强调档：只改字色，描边与 10% 底色都跟着 `currentColor` 走
+   （与 `.badge.local` 同一个配方，区别只在它不表示"来源"） */
+.badge--accent {
+  color: var(--accent);
+}
+
+/* 描边加强档（表单里的"平台默认 / 自定义"这类说明性徽标）：全局徽标的描边是
+   `currentColor` 的 28%，这一档换成 `--line-strong`，在浅底上更"看得见边界" */
+.badge--outline {
+  border-color: var(--line-strong);
+  border-radius: var(--radius);
+}
+
+/* ⚠️ `todo` / `backlog` 已无使用点：原来那个「本地技能目录缺哪几个」徽章挂在设置抽屉里，
+   而设置抽屉随"本地技能目录改成显式安装"撤掉了（D73）。任务状态徽章另有各档（见下），
+   表格 source 徽标已换 `badge.local`（D69）。保留这条只为兼容旧样式，不新增使用。 */
+.badge.todo, .badge.backlog { color: var(--status-todo); }
+.badge.in_progress { color: var(--status-active); }
+.badge.in_review { color: var(--status-review); }
+.badge.done, .badge.completed { color: var(--status-done); }
+.badge.blocked, .badge.failed { color: var(--status-blocked); }
+.badge.cancelled { color: var(--text-faint); }
+
+/* ★ 来源徽标的「本地」档（D69 统一配方：同步/推荐 = 默认灰徽章，
+   本地 = accent 强调。原 remote 自己一份、daemon 用任务状态色 `todo`——
+   状态色是给任务状态用的，来源不该借它。远端管理页原来就叫 `.local`，
+   daemon 技能/工具两页的 source 徽标改用同一档）。 */
+.badge.local {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ══════════════ 文本语义 ══════════════ */
+
+.good { color: var(--good); }
+.bad { color: var(--bad); }
+.warn { color: var(--warn); }
+.muted { color: var(--text-dim); }
+.faint { color: var(--text-faint); }
+/* 小号字（原来是 `.small`；298 批改名，跟 `--fs-*` 令牌一族对齐） */
+.fs-xs { font-size: var(--fs-xs); }
+.mono { font-family: var(--font-mono); }
+
+.hint {
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+  line-height: var(--lh-base);
+}
+
+/* ══════════════ 空 / 加载状态 ══════════════ */
+
+.empty {
+  padding: var(--sp-8) var(--sp-4);
+  text-align: center;
+  color: var(--text-faint);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+}
+
+/**
+ * ★ D178：空态只有一种形状（居中 + 虚线框），**但有两档语境**：
+ *   · 整块内容为空（列表、右栏、详情）⇒ `.empty`；
+ *   · 内容区里的**一小格**为空（一次执行没有记录、一段没有产出）⇒ `.empty.empty--flush`
+ *     （左对齐、不要虚线框、内距只留上下）。
+ * 这一档原来是在 `Schedules.svelte` 里用内联 `style="text-align:left;padding:.5rem 0"`
+ * **掰**全局样式掰出来的——同一个类在两个语境下长得不一样，却没人说得出为什么。
+ */
+/**
+ * ★★ D216：**字段无值那一档**（`ui-style.md` §2.4 早就写着"字段无值用 `.empty-value`"，
+ *   但 `app.css` 里**从来没有这条规则**——于是 `WorkspaceSettings` 里的 `.empty-value`
+ *   完全没有样式（只有 `AgentDetail` 自己写了一份，两处长得不一样）。
+ *   现在收进全局这一处：淡一档、13px、不额外留白（它总是跟在字段标签后面）。
+ */
+.empty-value {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+}
+
+.empty.empty--flush {
+  text-align: left;
+  border: 0;
+  padding: var(--sp-2) 0;
+}
+
+.empty strong {
+  display: block;
+  color: var(--text-dim);
+  font-weight: 500;
+  margin-bottom: var(--sp-1);
+}
+
+/**
+ * 空态里的段落（2026-09：智能体 / 任务的右栏空态各多了一段"选中之后你会看到
+ * 什么"）。`p` 的全局下边距是 `--sp-3`，最后一段带着 12px 尾巴会把空态框撑得
+ * 上紧下松——这里改成段间留白。
+ */
+.empty p {
+  margin: 0;
+  line-height: var(--lh-base);
+}
+
+.empty p + p {
+  margin-top: var(--sp-2);
+}
+
+/* ★ D178：**骨架只有两档形状**（单行 / 一块），宽度一律 100%。
+   两档之前是"每处自己写内联 `height`/`width`/`margin`"：24 处 `.skeleton` 里有 20 处
+   带随手值（4rem / 1.1rem / 40% / 55% / 60% / 70% / 80%…），"这一处为什么是 60%"
+   谁都答不上来。骨架的意义是"这里有东西、马上填上"，不是"假装内容有多长"。 */
+.skeleton {
+  height: 1.1rem; /* 单行：约一行字 */
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--surface-2), var(--surface-hover), var(--surface-2));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite linear;
+}
+
+/* 一块：列表 / 卡片 / 正文段落的占位（原来那几处内联 `height:4rem`） */
+.skeleton.skeleton--block {
+  height: 4rem;
+}
+
+/* 两行骨架之间自动留距（原来每处写内联 `margin-bottom`） */
+.skeleton + .skeleton {
+  margin-top: var(--sp-2);
+}
+
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+/* ══════════════ 抽屉 ══════════════ */
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 40;
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(34rem, 92vw);
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  box-shadow: var(--shadow-2);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+}
+
+/**
+ * 那条一闪而过的提示（toast）。
+ *
+ * ⚠️ 它原来复用的是 `.drawer`（只为蹭那套"浮在最上层"的固定定位 + 底色 + 阴影），
+ *   然后用一串 inline style 把位置改成"底部居中"。那种复用的代价是**它长得像抽屉**
+ *   ——探针里"每个 `.drawer` 都得有 `.drawer-head`"那条一致性判据会把它算进去：
+ *   一次保存成功弹出个 toast 就会让那条判据变红，而它要测的东西（抽屉头部写法统一）
+ *   与 toast 毫无关系（2026-11 实测踩到）。
+ *
+ *   所以给它自己的类：视觉上一模一样（同一套底色/阴影/圆角/层级），语义上不再冒充抽屉。
+ */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: var(--sp-5);
+  transform: translateX(-50%);
+  width: auto;
+  max-width: min(32rem, 92vw);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  z-index: 50;
+}
+
+/* 内容宽的抽屉（比如「安装 skill」里那张远端目录表）。
+   34rem 是给"读一段设置"定的宽度，塞一张五列表格就只剩横向滚动条了。 */
+.drawer.wide {
+  width: min(46rem, 94vw);
+}
+
+/* ★ 要在里面**写长文本**的抽屉（新建智能体那份指令）。
+   46rem（736px）对表格够宽，对"写一篇 800 字的指令"不够：正文只有 ~688px，
+   13px 的中文一行放 ~52 个字 ⇒ 800 字要 16 行，读起来一直在滚。
+   58rem（928px）一行 ~67 个字 ⇒ 800 字 12 行，一屏能看完。
+
+   ⚠️ 三个宽度是**三种用途**，不是三个档次的"大小"：
+       34rem 读设置 / 46rem 看表格 / 58rem 写长文。
+      再往上加之前先问一句"这一档是给哪种内容用的"——抽屉再宽就该是整页了。 */
+.drawer.wider {
+  width: min(58rem, 96vw);
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--pad-frame-head);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.drawer-body {
+  flex: 1;
+  min-height: 0; /* 与 .pane-body 同一个理由：不写这句内部滚动会失效 */
+  padding: var(--pad-frame-body);
+  overflow-y: auto;
+}
+
+/* 主操作常驻底部：安装面板里的按钮原来在正文末尾，正文一长就得先滚到底
+   才能按——而"装它"正是这个抽屉唯一的动作。 */
+.drawer-foot {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: var(--pad-frame-foot);
+}
+
+/* ══════════════ 居中对话框 ══════════════
+   与抽屉的区别是**用途**，不是位置：抽屉读写一段配置（从右边推进来，不动主从
+   布局），对话框是"从一大堆东西里挑一个"（要宽、要居中、挑完就关）。
+   遮罩沿用 `.drawer-backdrop`——同一件事不写两遍。 */
+
+.modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  /* 高度上限：留出上下各 5vh 的边距，让使用者看得出"后面还有一页"（浮层不是整页） */
+  max-height: 90vh;
+  width: min(42rem, 92vw);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 装**两栏**的对话框（左挑右配，比如行动权限）。
+   ⚠️ 42rem（672px）塞两栏会各自只剩 ~300px：左栏的契约值 `hello-tool.say`
+      这类长名字会折行、右栏的参数表单挤成一条。74rem（1184px）是按
+      "两栏各 ~480px + 间距"定的——与智能体页里那个选择器的实测宽度同源。 */
+.modal.wide {
+  width: min(74rem, 96vw);
+}
+
+.modal-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--pad-frame-head);
+  border-bottom: 1px solid var(--line);
+}
+
+/**
+ * ★ 分批第 230 批：标题区右侧那颗按钮（一般是「关闭」）**不许被挤窄**。
+ *
+ * 使用者报的："『选择一个目录』里面的『关闭』换行了"。
+ *
+ * 根因不是它的宽度算错了，而是**它和副标题都是 flex 项**：这一行没有空间时两个一起收缩，
+ * 而中文的最小内容宽度 = **一个字**（每个汉字都是一个断行点）⇒ 按钮被压到一个字宽，
+ * 「关闭」就折成两行。副标题越长越容易触发，所以它看起来"时有时无"。
+ *
+ * `flex: 0 0 auto` 让它保持自己的宽度（收缩全部落到左边的文字上），`white-space: nowrap`
+ * 再兜一层：万一父容器真的比它还窄，宁可溢出也不要断在字中间。
+ */
+.modal-head > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.modal-body {
+  flex: 1;
+  min-height: 0; /* 与 .drawer-body 同一个理由：不写这句内部滚动会失效 */
+  padding: var(--pad-frame-body);
+  overflow-y: auto;
+}
+
+.modal-foot {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-3);
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: var(--pad-frame-foot);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.drawer-section { margin-bottom: var(--sp-5); }
+.drawer-section h3 { margin-bottom: var(--sp-3); }
+.drawer-section h4 {
+  margin: var(--sp-4) 0 var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+}
+
+/*
+ * ★ 主题三档分段控件（设置抽屉）。扁平软底：没选中的是 `surface-2`，
+ *   选中的是 `accent-dim`（实心），一眼看出当前是哪档。
+ *
+ * ⚠️ 2026-11（D198）：**它是控件，不是标签胶囊** —— 和 `.stage-chips` 形状同族，
+ *   但角色不同，所以是两档：
+ *     · 这一档（**设置项**）：13px 字 + `--ctl-h`(30) 高，跟同卡片里的 `select` 一样高；
+ *     · `.stage-chips` / `.view-switch`（**列表工具条里的筛选**）：11px 字 + 小一圈。
+ *   原来这里只写了 `padding: 4px 12px`，靠"4+4 + 行高 20.8"凑出 **28.8px**——
+ *   于是同一张设置卡里，`select` 是 30、主题三档是 28.8，差 1.2px 谁也说不清为什么。
+ *   （量出来才发现：它不在 `.btn` 族里，D181/D182 那两批"控件 30px"根本没扫到它。）
+ */
+.theme-picker {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.theme-picker button {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  /* 高度用 `min-height` 而不是写死 `height`：文字万一折行也不会被切掉（同 `.btn` 的道理） */
+  min-height: var(--ctl-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--sp-3);
+  border-radius: calc(var(--radius) - 2px);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+.theme-picker button:hover:not(:disabled):not(.active) { color: var(--text); }
+.theme-picker button.active {
+  background: var(--accent-dim);
+  color: var(--on-accent);
+}
+
+/*
+ * ★ 状态筛选 chips（任务列表，2026-11）：一排小圆钮，与 `.theme-picker` **同形状、不同档**
+ *   ——这里是**工具条里的筛选**：11px 字 + 小一圈（24px），允许换行（列表栏窄时 chips 折行）；
+ *   `.theme-picker` 是**设置项**：13px 字 + `--ctl-h`(30)。两档的分界是"它是设置还是筛选"，
+ *   见 D198 的说明（`ui-style.md` §2.1.1）。
+ */
+.stage-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.stage-chips button {
+  border: 1px solid var(--surface-2);
+  background: var(--surface);
+  color: var(--text-dim);
+  padding: 2px var(--sp-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
+.stage-chips button:hover:not(:disabled):not(.active) { color: var(--text); }
+.stage-chips button.active {
+  background: var(--accent-dim);
+  border-color: var(--accent-dim);
+  color: var(--on-accent);
+}
+
+/* ★ 分组/平铺切换（任务列表，2026-11）：与 theme-picker 同族的紧凑两档 */
+.view-switch {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.view-switch button {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 2px var(--sp-2);
+  border-radius: calc(var(--radius) - 2px);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
+.view-switch button:hover:not(:disabled):not(.active) { color: var(--text); }
+.view-switch button.active {
+  background: var(--accent-dim);
+  color: var(--on-accent);
+}
+
+/* ══════════════ 提示条 ══════════════ */
+
+/* 扁平化（2026-09）：重描边 → 浅色块底 + 状态色发丝线。状态色以 10% 混进
+   底色、35% 混进描边，亮暗主题各得其所；`color-mix` 一写，以后换状态色
+   不用回来改这里。 */
+.notice {
+  padding: var(--sp-3);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-start;
+}
+
+.notice.bad {
+  border-color: color-mix(in srgb, var(--bad) 35%, transparent);
+  background: color-mix(in srgb, var(--bad) 10%, var(--surface));
+  color: var(--bad);
+}
+.notice.warn {
+  border-color: color-mix(in srgb, var(--warn) 35%, transparent);
+  background: color-mix(in srgb, var(--warn) 10%, var(--surface));
+  color: var(--warn);
+}
+.notice.good {
+  border-color: color-mix(in srgb, var(--good) 35%, transparent);
+  background: color-mix(in srgb, var(--good) 10%, var(--surface));
+  color: var(--good);
+}
+
+/* ══════════════ 杂项 ══════════════ */
+
+.plain { list-style: none; padding: 0; margin: 0; }
+
+a > button { width: 100%; }
+
+/*
+  渲染出来的 Markdown（任务详情的「最后结果」、聊天的气泡、文件查看器）。
+
+  ⚠️ 这一份是**全局**的：同一个类名现在有三个使用方（`Tasks.svelte`、`Chat.svelte`、
+     `FileViewer.svelte`）。原来它写在 `Tasks.svelte` 的局部样式里，于是查看器要用
+     就得抄一份——而"渲染出来的 Markdown 长什么样"抄第二份就是迟早两处不一样。
+*/
+/**
+ * ★★ D185：**agent 产出的正文与界面正文同一个字号**（`--fs-base` 14px）。
+ *
+ * 原来这里是 `--fs-sm`(13px)：界面上"人读的东西"分成了两种——界面正文 14、
+ * agent 产出的正文 13。而"最后结果""聊天气泡""文件查看器"恰恰是**读得最多**的那块，
+ * 却比按钮旁边的说明文字还小一档。正文档只有一个：**14**。
+ *
+ * 行高 1.7 是"要读的长段落"专门的口径（正文 14 + 1.7 ≈ 24px 行距），标题仍走
+ * 全局的 `--lh-tight`（下面那几条 `h1..h4` 只改字号，不改行高）。
+ */
+.markdown {
+    font-size: var(--fs-base);
+    line-height: 1.7;
+    word-break: break-word;
+    /* ★★ D209（使用者："不用约束 MD 的宽度，如果需要换行，原文自己回车"）：
+       **Markdown 不设宽度上限**。D186 曾经在这里加 640px 的行宽上限（`--measure`，那个 token 已在 D223 退场），
+       结果是"看文件"这一面被自己砍窄：文件查看器外层是 `min(74rem,96vw)`（≈1184），
+       里面的 `.fv-md.markdown` 只有 640，中间 544px 空着；聊天的 agent 气泡同理。
+       现在宽度跟随容器；要断行由原文自己决定（Markdown 的换行本来就是内容的事）。 */
+  }
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+    margin: var(--sp-4) 0 var(--sp-2);
+    line-height: 1.3;
+  }
+
+.markdown h1 { font-size: var(--fs-xl); }
+.markdown h2 { font-size: var(--fs-lg); }
+.markdown h3 { font-size: var(--fs-md); }
+/* ★ D179：agent 产出的正文里 h4 仍是 15px + 正文色（它不属于界面标题层级——
+   全局 `h4` 现在是 13px/dim 的"段内小节"档，不改这一条会把正文的小标题也压小） */
+.markdown h4 { font-size: var(--fs-md); color: var(--text); }
+
+.markdown p { margin: 0 0 var(--sp-3); }
+
+.markdown ul,
+.markdown ol {
+    margin: 0 0 var(--sp-3);
+    padding-left: 1.4em;
+  }
+
+.markdown li { margin-bottom: var(--sp-1); }
+
+.markdown code {
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 0 0.3em;
+  }
+
+.markdown pre {
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: var(--sp-3);
+    overflow-x: auto;
+  }
+
+.markdown pre code {
+    background: none;
+    border: 0;
+    padding: 0;
+  }
+
+.markdown blockquote {
+    margin: 0 0 var(--sp-3);
+    padding-left: var(--sp-3);
+    border-left: 3px solid var(--line);
+    color: var(--text-faint);
+  }
+
+.markdown table {
+    border-collapse: collapse;
+    margin: 0 0 var(--sp-3);
+    width: 100%;
+  }
+
+.markdown th,
+.markdown td {
+    border: 1px solid var(--line);
+    padding: var(--sp-1) var(--sp-2);
+    text-align: left;
+  }
+
+.markdown img {
+    max-width: 100%;
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+  }
+
+      /* ==== END app.css ==== */
+    </style>
+    <style>
+      /* ==== BEGIN 标准控件里的 scoped 样式（真实页面里免费拿到，这里只为了让 demo 长得一样）==== */
+  /* 行盒：三页同一个形状（D61 定、D65 钉死）。hover 用 `--surface-hover`
+     （全 App 的 hover 标准），选中态用 `--surface-2` + accent 边框。 */
+  .list-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    /* 列表行**至少**多高（三栏同款）。内容（徽标 / 阶段标签）更高时跟随内容——
+       统一的是这条底线与内距，不是把内容压扁（D61）。 */
+    min-height: var(--list-row-min-h);
+  }
+
+  .list-row:hover {
+    background: var(--surface-hover);
+  }
+
+  .list-row.active {
+    background: var(--surface-2);
+    border-color: var(--accent);
+  }
+
+  /* 主按钮：`flex: 1` + `min-width: 0` 让动作钮能缩到内容宽度以下，
+     不把右侧按钮顶出栏外（三页的 scoped 里原来各写一份同样的）。 */
+  .list-row-main {
+    flex: 1;
+    min-width: 0;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text);
+    padding: var(--sp-2) var(--sp-3);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    cursor: pointer;
+  }
+
+  /* D66：行栏左右内距统一 `--sp-2`——原来聊天 8px、任务/智能体 24px
+     （三页行栏各差 16px）。看板模式不走这个组件，保持全局 `.pane-body` 的内距。 */
+  .pane-body {
+    padding-left: var(--sp-2);
+    padding-right: var(--sp-2);
+  }
+      /* ==== END 标准控件 scoped 样式 ==== */
+    </style>
+    <style>
+      /* 只属于这份草稿的排版（产品里没有） */
+      body { background: var(--bg); }
+      .doc { max-width: 84rem; margin: 0 auto; padding: var(--sp-6) var(--sp-5) var(--sp-8); }
+      .doc > h1 { font-size: var(--fs-2xl); margin: 0 0 var(--sp-2); }
+      .doc > h2 {
+        font-size: var(--fs-xl); margin: var(--sp-8) 0 var(--sp-2);
+        padding-bottom: var(--sp-1); border-bottom: 1px solid var(--line);
+      }
+      .doc > h3 { font-size: var(--fs-md); margin: var(--sp-4) 0 var(--sp-1); }
+      .doc > p { margin: 0 0 var(--sp-2); }
+      .doc .lead { color: var(--text-dim); max-width: 64rem; }
+      .doc .tag {
+        display: inline-block; font-size: var(--fs-2xs); padding: 0 var(--sp-2);
+        border-radius: var(--radius-pill); border: 1px solid var(--line-strong);
+        color: var(--text-faint); vertical-align: middle;
+      }
+      .doc .tag.new { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+      .doc table.table { font-size: var(--fs-xs); }
+      .doc table.table td, .doc table.table th { vertical-align: top; }
+      .doc .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); gap: var(--sp-3); }
+      .doc .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--sp-3); }
+      .doc .panel.win { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+
+      /* 1:1 的界面框：真页面是「顶栏 + 侧栏 + 主区」，这里只把**主区**那一块
+         按同样的壳画出来（顶栏/侧栏与本功能无关，画进来只会分散注意力）。 */
+      .mock-frame {
+        height: 40rem;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius);
+        overflow: hidden;
+        background: var(--bg);
+      }
+      .mock-frame > .split-layout { height: 100%; }
+      .mock-frame .pane { min-width: 0; }
+
+      /* 代码编辑器：真实页面是 CodeEditor 组件（语法高亮 + 行号）。设计稿里不重画
+         一个假控件，只画"它在那个位置、大概这么高"。 */
+      .code-mock {
+        margin: 0; padding: var(--sp-3);
+        background: var(--panel); border: 1px solid var(--line);
+        border-radius: var(--radius);
+        font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.7;
+        white-space: pre; overflow: auto; color: var(--text-dim);
+      }
+      .code-mock .k { color: var(--hl-keyword, var(--accent)); }
+      .code-mock .s { color: var(--hl-string, var(--good)); }
+
+      /* 内建智能体那一节的行（产品里用 ListRow 的同款形状；这里是窄一档的
+         "配置行"，与表格的紧凑档同一档间距）。 */
+      .ag-row {
+        display: flex; align-items: center; gap: var(--sp-2);
+        padding: var(--sp-2) var(--sp-3);
+        border: 1px solid var(--line); border-radius: var(--radius);
+        background: var(--surface);
+      }
+      .ag-row + .ag-row { margin-top: var(--sp-1); }
+      .ag-row .ag-name { font-family: var(--font-mono); font-size: var(--fs-sm); }
+      .ag-row .ag-actions { margin-left: auto; display: flex; gap: var(--sp-1); }
+    </style>
+  </head>
+  <body>
+    <div class="doc">
+      <h2>2. 界面（1:1）——屏 ①：详情 + 这一节（有两条内建智能体）</h2>
+      <p class="faint fs-xs">
+        左栏 / 栏头 / 动作 / 代码编辑器都是**今天的样子**，下面那一节是新增的。
+        注意：代码里的 <code class="mono">agent('写作员')</code> 与这一节里的行是同一样东西——
+        名字对得上，所以配完不用去别处"挂载"。
+      </p>
+      <div class="mock-frame">
+        <div class="split-layout with-detail">
+
+            <section class="pane list-pane">
+              <div class="pane-head list-toolbar">
+                <span class="faint fs-xs">3 个编排</span>
+                <input placeholder="搜索编排" autocomplete="off" style="max-width:16rem;align-self:center" />
+              </div>
+              <div class="pane-body">
+                <ul class="list-stack">
+                  <li class="list-row active">
+                    <button type="button" class="list-row-main">
+                      <span class="wf-title ellipsis" style="font-weight:600">周报流水线</span>
+                      <span class="faint fs-xs">手动 · 5 分钟前</span>
+                    </button>
+                  </li>
+                  <li class="list-row">
+                    <button type="button" class="list-row-main">
+                      <span class="wf-title ellipsis" style="font-weight:600">写完自动复查</span>
+                      <span class="faint fs-xs">手动 · 2 小时前</span>
+                    </button>
+                  </li>
+                  <li class="list-row">
+                    <button type="button" class="list-row-main">
+                      <span class="wf-title ellipsis" style="font-weight:600">并行调研</span>
+                      <span class="faint fs-xs">我的模板 · 昨天</span>
+                    </button>
+                  </li>
+                </ul>
+              </div>
+            </section>
+            <!-- 列表与详情之间的把手：真页面由 `paneResize` 动作插进网格第 2 列，
+                 设计稿里照原样写一个（少了它详情会掉进那一列，被压成 6px 宽） -->
+            <button type="button" class="split-grip" role="separator" aria-orientation="vertical" aria-label="拖拽调整列表宽度"></button>
+            <section class="pane detail-pane">
+
+            <header class="detail-head">
+              <!-- 窄屏（<72rem）才出现的返回按钮（真页面由 MainArea 渲染）：设计稿里放着，
+                   宽屏看不见、窄屏才显形——与产品同一份 CSS -->
+              <button type="button" class="btn btn--ghost btn--sm back-to-list">← 返回列表</button>
+              <div class="detail-head-main">
+                <h2>周报流水线</h2>
+                <p class="detail-sub"><span class="badge">手动</span><span class="faint">5 分钟前</span></p>
+              </div>
+              <div class="detail-actions">
+                <button type="button" class="btn btn--secondary">运行</button>
+                <button type="button" class="btn btn--danger">删除</button>
+                <button type="button" class="btn btn--primary">保存</button>
+              </div>
+            </header>
+
+              <div class="pane-body detail-scroll">
+                <div class="field">
+                  <label for="wf-code-1">代码</label>
+<pre class="code-mock"><span class="k">const</span> 草稿 = <span class="k">await</span> agent(<span class="s">'写作员'</span>).run(<span class="s">'按本周要点写周报'</span>)
+<span class="k">const</span> 终稿 = <span class="k">await</span> agent(<span class="s">'审稿员'</span>).run(<span class="s">'挑毛病：'</span> + 草稿)
+<span class="k">return</span> 终稿</pre>
+                </div>
+
+                <!-- ═══════════════════ 新增的一节 ═══════════════════ -->
+                <div class="fold-section" data-mock="wf-agents">
+                  <button type="button" class="fold-head" aria-expanded="true">
+                    <span class="chevron">▾</span>
+                    <span class="fold-title">本编排的智能体</span>
+                    <span class="badge">2</span>
+                    <span class="fold-summary">写作员、审稿员</span>
+                  </button>
+                  <div class="fold-body">
+                    <div class="ag-row">
+                      <span class="ag-name">写作员</span>
+                      <span class="badge">3 个技能</span>
+                      <span class="ag-actions">
+                        <button type="button" class="btn btn--secondary btn--sm">编辑</button>
+                        <button type="button" class="btn btn--danger btn--sm">删除</button>
+                      </span>
+                    </div>
+                    <div class="ag-row">
+                      <span class="ag-name">审稿员</span>
+                      <span class="badge">0 个技能</span>
+                      <span class="badge warn" title="智能体页里也有一条叫「审稿员」的。代码里写这个名字时用的是这一条。">遮蔽同名</span>
+                      <span class="ag-actions">
+                        <button type="button" class="btn btn--secondary btn--sm">编辑</button>
+                        <button type="button" class="btn btn--danger btn--sm">删除</button>
+                      </span>
+                    </div>
+                    <div class="field-row" style="margin-top:var(--sp-2)">
+                      <button type="button" class="btn btn--secondary btn--sm">新建智能体</button>
+                    </div>
+                  </div>
+                </div>
+                <!-- ═══════════════════ 新增的一节（到此） ═══════════════════ -->
+              </div>
+            </section>
+          </div>
+        </div>
+      <h2>3. 屏 ②：就地编辑一条（含"与智能体页同名"的提示与重名错误）</h2>
+      <p class="faint fs-xs">
+        点「编辑」⇒ 这一行展开成表单（**不跳页、不弹框**）。名字改了目录会跟着搬
+        （D232 同一套做法），所以输入框旁边只说清"它现在叫什么"；与智能体页同名时
+        才会多出一句——那句是**条件出现**的，不是常驻说明文字。
+      </p>
+      <div class="mock-frame">
+        <div class="split-layout with-detail">
+
+            <section class="pane list-pane">
+              <div class="pane-head list-toolbar">
+                <span class="faint fs-xs">3 个编排</span>
+                <input placeholder="搜索编排" autocomplete="off" style="max-width:16rem;align-self:center" />
+              </div>
+              <div class="pane-body">
+                <ul class="list-stack">
+                  <li class="list-row active">
+                    <button type="button" class="list-row-main">
+                      <span class="wf-title ellipsis" style="font-weight:600">周报流水线</span>
+                      <span class="faint fs-xs">手动 · 5 分钟前</span>
+                    </button>
+                  </li>
+                  <li class="list-row">
+                    <button type="button" class="list-row-main">
+                      <span class="wf-title ellipsis" style="font-weight:600">写完自动复查</span>
+                      <span class="faint fs-xs">手动 · 2 小时前</span>
+                    </button>
+                  </li>
+                  <li class="list-row">
+                    <button type="button" class="list-row-main">
+                      <span class="wf-title ellipsis" style="font-weight:600">并行调研</span>
+                      <span class="faint fs-xs">我的模板 · 昨天</span>
+                    </button>
+                  </li>
+                </ul>
+              </div>
+            </section>
+            <!-- 列表与详情之间的把手：真页面由 `paneResize` 动作插进网格第 2 列，
+                 设计稿里照原样写一个（少了它详情会掉进那一列，被压成 6px 宽） -->
+            <button type="button" class="split-grip" role="separator" aria-orientation="vertical" aria-label="拖拽调整列表宽度"></button>
+            <section class="pane detail-pane">
+
+            <header class="detail-head">
+              <!-- 窄屏（<72rem）才出现的返回按钮（真页面由 MainArea 渲染）：设计稿里放着，
+                   宽屏看不见、窄屏才显形——与产品同一份 CSS -->
+              <button type="button" class="btn btn--ghost btn--sm back-to-list">← 返回列表</button>
+              <div class="detail-head-main">
+                <h2>周报流水线</h2>
+                <p class="detail-sub"><span class="badge">手动</span><span class="faint">5 分钟前</span></p>
+              </div>
+              <div class="detail-actions">
+                <button type="button" class="btn btn--secondary">运行</button>
+                <button type="button" class="btn btn--danger">删除</button>
+                <button type="button" class="btn btn--primary">保存</button>
+              </div>
+            </header>
+
+              <div class="pane-body detail-scroll">
+                <div class="fold-section" data-mock="wf-agents-editing">
+                  <button type="button" class="fold-head" aria-expanded="true">
+                    <span class="chevron">▾</span>
+                    <span class="fold-title">本编排的智能体</span>
+                    <span class="badge">2</span>
+                    <span class="fold-summary">写作员、审稿员</span>
+                  </button>
+                  <div class="fold-body">
+                    <div class="ag-row">
+                      <span class="ag-name">写作员</span>
+                      <span class="badge">3 个技能</span>
+                      <span class="ag-actions">
+                        <button type="button" class="btn btn--secondary btn--sm">编辑</button>
+                        <button type="button" class="btn btn--danger btn--sm">删除</button>
+                      </span>
+                    </div>
+
+                    <!-- 展开的表单 -->
+                    <div class="panel" style="margin-top:var(--sp-1);padding:var(--sp-3);border:1px solid var(--line-strong);border-radius:var(--radius)">
+                      <div class="field">
+                        <label for="ag-name-edit">名字</label>
+                        <input id="ag-name-edit" value="审稿员" autocomplete="off" />
+                        <p class="hint fs-xs">智能体页里也有叫「审稿员」的——代码里写这个名字时用的是这一条。</p>
+                      </div>
+                      <div class="field">
+                        <label for="ag-ins-edit">指令</label>
+                        <textarea id="ag-ins-edit" rows="6" spellcheck="false">你是这个编排的审稿人：只看三件事——事实有没有来源、结论有没有代价、下一步能不能直接执行。按这三条逐段挑，别重写。</textarea>
+                      </div>
+                      <div class="field">
+                        <label>技能（技能库）</label>
+                        <div class="field-row" style="flex-wrap:wrap;gap:var(--sp-2)">
+                          <label class="field-row" style="gap:var(--sp-1)"><input type="checkbox" checked /> <span class="fs-xs mono">technical-writing-style</span></label>
+                          <label class="field-row" style="gap:var(--sp-1)"><input type="checkbox" checked /> <span class="fs-xs mono">research-and-write-article</span></label>
+                          <label class="field-row" style="gap:var(--sp-1)"><input type="checkbox" /> <span class="fs-xs mono">build-verify-html</span></label>
+                        </div>
+                      </div>
+                      <div class="field">
+                        <label>它目录下的独有技能</label>
+                        <p class="faint fs-xs" style="margin:0">
+                          2 条：<code class="mono">weekly-shape</code>、<code class="mono">tone-check</code>
+                          —— <span class="faint">（这一期只读；写入口与技能页的独有技能同款，二期接）</span>
+                        </p>
+                      </div>
+                      <div class="notice bad" style="margin-top:var(--sp-2)">
+                        本编排里已经有叫「审稿员」的内建智能体了——换一个名字。
+                      </div>
+                      <div class="field-row" style="justify-content:flex-end;margin-top:var(--sp-3)">
+                        <button type="button" class="btn btn--secondary btn--sm">取消</button>
+                        <button type="button" class="btn btn--primary btn--sm">保存</button>
+                      </div>
+                    </div>
+                    <!-- /展开的表单 -->
+
+                    <div class="ag-row">
+                      <span class="ag-name">审稿员</span>
+                      <span class="badge">0 个技能</span>
+                      <span class="badge warn" title="智能体页里也有一条叫「审稿员」的。">遮蔽同名</span>
+                      <span class="ag-actions">
+                        <button type="button" class="btn btn--secondary btn--sm">编辑</button>
+                        <button type="button" class="btn btn--danger btn--sm">删除</button>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      <h3>屏 ③：空态（一条都没有）</h3>
+      <div class="mock-frame" style="height:16rem">
+        <div class="split-layout with-detail">
+
+            <section class="pane list-pane">
+              <div class="pane-head list-toolbar">
+                <span class="faint fs-xs">3 个编排</span>
+                <input placeholder="搜索编排" autocomplete="off" style="max-width:16rem;align-self:center" />
+              </div>
+              <div class="pane-body">
+                <ul class="list-stack">
+                  <li class="list-row active">
+                    <button type="button" class="list-row-main">
+                      <span class="wf-title ellipsis" style="font-weight:600">周报流水线</span>
+                      <span class="faint fs-xs">手动 · 5 分钟前</span>
+                    </button>
+                  </li>
+                  <li class="list-row">
+                    <button type="button" class="list-row-main">
+                      <span class="wf-title ellipsis" style="font-weight:600">写完自动复查</span>
+                      <span class="faint fs-xs">手动 · 2 小时前</span>
+                    </button>
+                  </li>
+                  <li class="list-row">
+                    <button type="button" class="list-row-main">
+                      <span class="wf-title ellipsis" style="font-weight:600">并行调研</span>
+                      <span class="faint fs-xs">我的模板 · 昨天</span>
+                    </button>
+                  </li>
+                </ul>
+              </div>
+            </section>
+            <!-- 列表与详情之间的把手：真页面由 `paneResize` 动作插进网格第 2 列，
+                 设计稿里照原样写一个（少了它详情会掉进那一列，被压成 6px 宽） -->
+            <button type="button" class="split-grip" role="separator" aria-orientation="vertical" aria-label="拖拽调整列表宽度"></button>
+            <section class="pane detail-pane">
+
+            <header class="detail-head">
+              <!-- 窄屏（<72rem）才出现的返回按钮（真页面由 MainArea 渲染）：设计稿里放着，
+                   宽屏看不见、窄屏才显形——与产品同一份 CSS -->
+              <button type="button" class="btn btn--ghost btn--sm back-to-list">← 返回列表</button>
+              <div class="detail-head-main">
+                <h2>周报流水线</h2>
+                <p class="detail-sub"><span class="badge">手动</span><span class="faint">5 分钟前</span></p>
+              </div>
+              <div class="detail-actions">
+                <button type="button" class="btn btn--secondary">运行</button>
+                <button type="button" class="btn btn--danger">删除</button>
+                <button type="button" class="btn btn--primary">保存</button>
+              </div>
+            </header>
+
+              <div class="pane-body detail-scroll">
+                <div class="fold-section" data-mock="wf-agents-empty">
+                  <button type="button" class="fold-head" aria-expanded="true">
+                    <span class="chevron">▾</span>
+                    <span class="fold-title">本编排的智能体</span>
+                    <span class="badge">0</span>
+                    <span class="fold-summary">还没有</span>
+                  </button>
+                  <div class="fold-body">
+                    <p class="faint fs-xs" style="margin:0 0 var(--sp-2)">
+                      代码里写 <code class="mono">agent('名字')</code> 时，这条编排还没有自带的人——
+                      会去智能体页找同名的那条。
+                    </p>
+                    <button type="button" class="btn btn--secondary btn--sm">新建智能体</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <h2>4. 为什么是"右栏的一节"，不是新页面 / 抽屉</h2>
+      <div class="grid2">
+        <div class="panel win"><b>A. 右栏一节 <span class="tag new">推荐</span></b>
+          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
+            内建智能体与编排代码是<b>同一份定义</b>（住在同一个目录里）。改代码与改"这一步谁干"
+            是同一件事的两面，放同一屏少一次记忆负担。零新路由、零新壳。
+          </p>
+        </div>
+        <div class="panel"><b>B. 独立路由 <code class="mono">#/workflows/:id/agents</code></b>
+          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
+            好处是空间大（将来独有技能要文件树时用得上）。代价：多一条路由、多一次"我该去哪一页"，
+            而这一节今天只有三个字段。
+          </p>
+        </div>
+        <div class="panel"><b>C. 顶栏动作 → 居中对话框</b>
+          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
+            对话框遮住代码——而"我在改哪一行代码引用了谁"恰恰是配它的理由。列表 + 编辑塞进一个框也会很挤。
+          </p>
+        </div>
+      </div>
+
+      <h2>5. 交互与文案（逐条可验收）</h2>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>场景</th><th>行为</th><th>文案 / 落点</th></tr></thead>
+          <tbody>
+            <tr><td>段头</td><td>标题 + 计数 + 摘要（名字用「、」连）；整行真按钮可折叠</td><td>「本编排的智能体」/「3」/「写作员、审稿员」</td></tr>
+            <tr><td>空</td><td>一句说清"代码里写名字会去智能体页找"，下面是唯一的主操作</td><td>见屏 ③</td></tr>
+            <tr><td>新建</td><td>就地展开一张空表单（名字空、指令空、技能不勾）</td><td>「新建智能体」</td></tr>
+            <tr><td>名字</td><td>本编排内唯一；<b>与智能体页同名允许</b>（内建优先）</td><td>与全局同名时补一句条件提示（见屏 ②）</td></tr>
+            <tr><td>重名</td><td>保存时被拒 ⇒ 表单里一条 <code class="mono">notice bad</code>，原话照给</td><td>「本编排里已经有叫「审稿员」的内建智能体了——换一个名字。」</td></tr>
+            <tr><td>技能</td><td>技能库多选（<code class="mono">skillIds</code>）；独有技能只读显示名字与条数</td><td>一期只读，二期接写入口</td></tr>
+            <tr><td>保存</td><td>写盘（PATCH/POST 已有接口）⇒ 回到列表 + toast；改名时服务端搬目录</td><td>「已保存」</td></tr>
+            <tr><td>删除</td><td>居中确认框（<code class="mono">askConfirm</code>）；代码里还引用着时在框里点名</td><td>「删掉「审稿员」？代码里还在用这个名字的地方会失效。」</td></tr>
+            <tr><td>遮蔽</td><td>与智能体页同名 ⇒ 行尾徽标，悬停说清用的是哪条</td><td>「遮蔽同名」</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2>6. 探针判据（草案，10 条）</h2>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>#</th><th>量什么</th><th>钉住什么</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>详情右栏有这一节，计数 == <code class="mono">GET /api/workflows/:id/agents</code> 的条数</td><td>界面的数字不是抄来的</td></tr>
+            <tr><td>2</td><td>空态那句在，且「新建智能体」是这一节里唯一的主操作（折叠段头本身也是按钮，不算）</td><td>空态有落点</td></tr>
+            <tr><td>3</td><td>点「新建」⇒ 表单出现且名字框聚焦</td><td>就地编辑是真的</td></tr>
+            <tr><td>4</td><td>名字空时「保存」禁用；填上就可用</td><td>不给一个必然被拒的按钮</td></tr>
+            <tr><td>5</td><td>保存后<b>接口上</b>真的多一条（不是只把行画出来）</td><td>界面跟着数据走</td></tr>
+            <tr><td>6</td><td>本编排内重名 ⇒ 表单里出现那句原话，且接口条数不变</td><td>错误原文不被前端改写</td></tr>
+            <tr><td>7</td><td>与智能体页同名 ⇒ 徽标在；不同名 ⇒ 徽标不在（成对）</td><td>遮蔽必须可见，且不虚报</td></tr>
+            <tr><td>8</td><td>改名保存后：行上的名字变了、且服务端 <code class="mono">agents/</code> 目录跟着搬</td><td>改名不是只改显示</td></tr>
+            <tr><td>9</td><td>删除走确认框，确认后接口上没了、行也没了</td><td>不留"看起来删了"</td></tr>
+            <tr><td>10</td><td>窗口收到 1000px（窄屏）：这一节仍在正文流里可达（不横滚、不被挤出视口）</td><td>窄屏不是另一个产品</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2>7. 这一期明确不做</h2>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>不做</th><th>为什么</th></tr></thead>
+          <tbody>
+            <tr><td>独有技能的写入口（新建/编辑/删除文件资产）</td><td>存储与注入已就绪（D235），但它是"文件树 + 编辑器"那一档的活；这一期只读显示条数，不开半截入口</td></tr>
+            <tr><td>代码编辑器里的名字自动补全 / 点名字跳到智能体</td><td>真有用，但要改 CodeEditor 的内核；先把配置那一半落地</td></tr>
+            <tr><td>把"内建智能体"升格成普通智能体（提升到智能体页）</td><td>两套生命周期（编排删它连目录一起删）混起来会出半个孤儿；要做单独设计</td></tr>
+            <tr><td>编排模板里预置内建智能体</td><td>模板现在是纯代码；带人就要定义"模板怎么带人"，不是这一期的范围</td></tr>
+            <tr><td>新建时一次性问"用哪个模型 / runtime"</td><td>内建智能体没有 runtime 字段（今天用默认），加字段要另议</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2>8. 落地顺序（做完就是一次提交）</h2>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>#</th><th>做什么</th><th>落在哪</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>接口：<code class="mono">POST/PATCH/DELETE /api/workflows/:id/agents[/:agentId]</code> 已经在了，前端只消费</td><td><code class="mono">apps/web/src/lib/api.ts</code></td></tr>
+            <tr><td>2</td><td>新组件 <code class="mono">WorkflowAgents.svelte</code>（列表 + 表单 + 确认框）</td><td><code class="mono">apps/web/src/components/</code></td></tr>
+            <tr><td>3</td><td>挂进编排详情右栏，代码编辑器下面</td><td><code class="mono">apps/web/src/views/Workflows.svelte</code></td></tr>
+            <tr><td>4</td><td>i18n 词条（<code class="mono">workflows.agents*</code>）</td><td><code class="mono">packages/i18n/src/web/workflows.ts</code></td></tr>
+            <tr><td>5</td><td>探针 10 条 + 夹具（两条内建，其中一条与全局同名）</td><td><code class="mono">tools/layout-probe/{probe.html,run.mjs}</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </body>
+</html>
