@@ -783,12 +783,17 @@ export class FileStore implements Store {
 
     // ── D229：独有技能目录 `SKILL/` → `skills/`（大小写 + 幂等，见 agent-dirs.ts）──
     {
-      const { renamed, conflicts } = await store.#agentsMutex.run(() =>
+      const { renamed, conflicts, failed } = await store.#agentsMutex.run(() =>
         migrateExclusiveSkillsDirCase(dataDir),
       )
       if (renamed.length > 0) {
         store.#onInfo(
           `独有技能目录已改为小写：${renamed.length} 个智能体的 SKILL/ → skills/`,
+        )
+      }
+      for (const f of failed) {
+        store.#onInfo(
+          `⚠️ 智能体 ${f.id} 的 SKILL/ 改名失败（目录被占用？数据没动，下次启动会再试）：${f.error}`,
         )
       }
       for (const id of conflicts) {

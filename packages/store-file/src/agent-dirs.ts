@@ -146,18 +146,25 @@ async function dirExists(path: string): Promise<boolean> {
  *      （比如从备份里拷回来一份）**不合并、不动手**，把 id 报给调用方去喊人——
  *      合并技能目录是"猜哪一份对"，本仓库不做这种事。
  *
- * @returns 改名的智能体 id（调用方拿去打日志）；需要人看的冲突也在这份里
+ * @returns 改名的智能体 id（调用方拿去打日志）；需要人看的冲突 / 失败也在这份里
+ *
+ * ⚠️ **单个智能体改名失败不抛**（Windows 上文件被占用是常态）：收进 `failed` 让调用方
+ *    报出来，别的照改。迁移是"顺手把它改对"，不该因为一个目录被占用就让整个 daemon
+ *    起不来——那是把装饰性的活当成了启动前提。
  */
-export async function migrateExclusiveSkillsDirCase(
-  dataDir: string,
-): Promise<{ renamed: string[]; conflicts: string[] }> {
+export async function migrateExclusiveSkillsDirCase(dataDir: string): Promise<{
+  renamed: string[]
+  conflicts: string[]
+  failed: Array<{ id: string; error: string }>
+}> {
   const renamed: string[] = []
   const conflicts: string[] = []
+  const failed: Array<{ id: string; error: string }> = []
   let ids: string[]
   try {
     ids = await readdir(agentsRoot(dataDir))
   } catch {
-    return { renamed, conflicts } // 还没有 agents/ ⇒ 没什么可迁
+    return { renamed, conflicts, failed } // 还没有 agents/ ⇒ 没什么可迁
   }
   for (const id of ids) {
     if (id.startsWith('.')) continue
@@ -173,11 +180,21 @@ export async function migrateExclusiveSkillsDirCase(
       continue
     }
     const tmp = `${lower}.tmp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
-    await rename(upper, tmp)
-    await rename(tmp, lower)
-    renamed.push(id)
+    try {
+      await rename(upper, tmp)
+      await rename(tmp, lower)
+      renamed.push(id)
+    } catch (err) {
+      failed.push({ id, error: String(err) })
+      // 尽力把半途的临时目录还原回去，免得盘上多一个 `skills.tmp-*`
+      try {
+        await rename(tmp, upper)
+      } catch {
+        // 还原也失败 ⇒ 原样留着（数据没动，只是名字怪），由调用方点名
+      }
+    }
   }
-  return { renamed, conflicts }
+  return { renamed, conflicts, failed }
 }
 
 /** 列出这个目录下的独有技能（slug + 正文）。目录由调用方按来源解析（D228）。 */
