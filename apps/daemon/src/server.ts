@@ -29,6 +29,7 @@ import {
   type TemplateBlock,
 } from '@agentdeck/agent-core'
 import {
+  agentSkillOwner,
   aggregateCost,
   exportAudit,
   type Store,
@@ -64,7 +65,7 @@ import {
   type WorkspaceId,
   type MemoryEntry,
 } from '@agentdeck/protocol'
-import { FileStore } from '@agentdeck/store-file'
+import { agentExclusiveSkillsDir, FileStore } from '@agentdeck/store-file'
 import { resolveReviewStandard } from './review-standard.ts'
 import { readAgentDraftArtifacts, parseAgentDraft } from './agent-maker.ts'
 import {
@@ -165,7 +166,8 @@ import {
   probeGit,
   readMineRevision,
 } from './run-hooks/skill-mine.ts'
-import { loadAgentInjectableSkills } from './agent-injectable-skills.ts'
+import { loadInjectableSkills, skillSourcesOfAgent } from './agent-injectable-skills.ts'
+import { workflowAgentExclusiveSkillsDir } from './workflows-dirs.ts'
 import {
   builtinDefaultsOf,
   describeBuiltinAgent,
@@ -1350,6 +1352,17 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     fsync: options.fsync ?? true,
     skillsRoot,
     skillsMineRoot,
+    /*
+     * ★ D228：**独有技能"在哪"的解析**——两种来源各归自己的拥有者：
+     *   · `agent` → `agents/<id>/SKILL/`（形状归 store-file 的 `agent-dirs.ts`）；
+     *   · `workflow-agent` → `workflows/<wid>/agents/<aid>/SKILL/`（形状归
+     *     `workflows-dirs.ts`，也就是这个 daemon 自己）。
+     *   注入这一层因此只需要一个目录，不需要知道有两类来源（同一份注入实现）。
+     */
+    exclusiveSkillsDir: (owner) =>
+      owner.kind === 'agent'
+        ? agentExclusiveSkillsDir(options.dataDir, owner.agentId)
+        : workflowAgentExclusiveSkillsDir(options.dataDir, owner.workflowId, owner.agentId),
   })
 
   // ══════════════════════════════════════════════════════════════════
@@ -4062,7 +4075,7 @@ async function injectedSkillsOf(
         sendJson(res, 404, { error: `agent 不存在：${agentId}` })
         return
       }
-      const rows = await store.listExclusiveSkills(agentId)
+      const rows = await store.listExclusiveSkills(agentSkillOwner(agentId))
       const skills = rows.map((row) => {
         const meta = extractSkillMeta(row.body)
         return {
@@ -4121,7 +4134,7 @@ async function injectedSkillsOf(
           })
           return
         }
-        await store.writeExclusiveSkill(agentId, skillSlug, validated.body)
+        await store.writeExclusiveSkill(agentSkillOwner(agentId), skillSlug, validated.body)
         sendJson(res, 200, { slug: skillSlug })
         return
       }
@@ -4138,7 +4151,7 @@ async function injectedSkillsOf(
           })
           return
         }
-        const removed = await store.removeExclusiveSkill(agentId, skillSlug)
+        const removed = await store.removeExclusiveSkill(agentSkillOwner(agentId), skillSlug)
         if (!removed) {
           sendJson(res, 404, { error: `这个智能体没有独有技能「${skillSlug}」` })
           return
@@ -8401,7 +8414,7 @@ async function injectedSkillsOf(
       }
       await store.insertAgent(agent)
       for (const s of exclusiveSkills) {
-        await store.writeExclusiveSkill(agent.id, s.slug, s.body)
+        await store.writeExclusiveSkill(agentSkillOwner(agent.id), s.slug, s.body)
       }
       info(
         `生成智能体「${agent.name}」（内置配套技能 ${exclusiveSkills.length} 条）` +
@@ -8814,7 +8827,9 @@ async function injectedSkillsOf(
         const agent = await store.getAgent(body.agentRef.id as Agent['id'])
         // ★ 2026-11（D111）：按 agent 配置解析 = 共享（skillIds）∪ 独有（目录文件），
         //   与聊天/审核/返工同一份（`agent-injectable-skills.ts`）。
-        const configured = agent ? await loadAgentInjectableSkills(store, agent) : []
+        const configured = agent
+          ? await loadInjectableSkills(store, skillSourcesOfAgent(agent))
+          : []
         if (skills !== undefined && configured.length > 0) {
           warn(
             `run ${body.runId} 显式传了空 skills，但 agent ${agent?.name ?? body.agentRef.id} ` +

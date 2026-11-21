@@ -25,7 +25,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { resolvePayloadEntry } from '@agentdeck/skill-source'
 import type { WorkspaceId } from '@agentdeck/protocol'
-import type { Store } from '@agentdeck/domain'
+import { agentSkillOwner, type Store } from '@agentdeck/domain'
 import { platformMemberOf } from './platform-slots.ts'
 import { ensureBuiltinAgentMaker } from './builtin-drafter.ts'
 
@@ -70,7 +70,7 @@ export async function ensureBuiltinAgentMakerSkills(
   if (!maker) return { agentId: null, seeded: [], skipped: [] }
 
   const existing = new Set(
-    (await store.listExclusiveSkills(maker.id)).map((s) => s.slug),
+    (await store.listExclusiveSkills(agentSkillOwner(maker.id))).map((s) => s.slug),
   )
   const seeded: string[] = []
   const skipped: string[] = []
@@ -79,7 +79,7 @@ export async function ensureBuiltinAgentMakerSkills(
     try {
       const body = await readBundledSkillMd(slug)
       const validated = resolvePayloadEntry({ slug, body, sourceRef: AGENT_MAKER_SKILL_SOURCE_REF })
-      await store.writeExclusiveSkill(maker.id, slug, validated.body)
+      await store.writeExclusiveSkill(agentSkillOwner(maker.id), slug, validated.body)
       seeded.push(slug)
     } catch (err) {
       skipped.push(`${slug}（${err instanceof Error ? err.message : String(err)}）`)
@@ -115,9 +115,9 @@ export async function migratePlatformSkillsToExclusive(
   const moved: string[] = []
   for (const skill of platform) {
     // 已有同 slug 的独有技能 ⇒ 不覆盖（老库那份先来，播种那份在后面补缺）
-    const existing = await store.getExclusiveSkill(maker.id, skill.slug)
+    const existing = await store.getExclusiveSkill(agentSkillOwner(maker.id), skill.slug)
     if (existing === null) {
-      await store.writeExclusiveSkill(maker.id, skill.slug, skill.body)
+      await store.writeExclusiveSkill(agentSkillOwner(maker.id), skill.slug, skill.body)
     }
     moved.push(skill.slug)
     await store.deleteSkill(skill.id)

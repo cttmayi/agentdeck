@@ -43,9 +43,21 @@ function instructionsMdPath(dataDir: string, id: AgentId | string): string {
   return join(agentDirPath(dataDir, id), 'instructions.md')
 }
 
-/** 独有技能根（这个智能体自己的技能文件）。 */
+/**
+ * 独有技能根（这个智能体自己的技能文件）。
+ *
+ * ★ D228：`agent` 这一种来源的路径由**本文件**负责（它拥有智能体目录的形状）；
+ *   另一种来源（编排内建智能体，`workflows/<wid>/agents/<aid>/SKILL/`）的形状归
+ *   `apps/daemon/src/workflows-dirs.ts`，由 daemon 在装配时把解析函数注入进来
+ *   （`FileStoreOptions.exclusiveSkillsDir`）。这样"谁知道路径"仍然只有一处。
+ */
 function skillsDir(dataDir: string, id: AgentId | string): string {
   return join(agentDirPath(dataDir, id), 'SKILL')
+}
+
+/** 导出给 `FileStore` 拼 `owner.kind === 'agent'` 的目录（别的包别自己拼）。 */
+export function agentExclusiveSkillsDir(dataDir: string, id: AgentId | string): string {
+  return skillsDir(dataDir, id)
 }
 
 function skillMdPath(dataDir: string, id: AgentId | string, slug: string): string {
@@ -108,14 +120,13 @@ export async function removeAgentDir(dataDir: string, id: AgentId | string): Pro
 
 // ── 独有技能（Agent SKILL/ 下的文件资产，不进技能库）──
 
-/** 列出这个智能体的独有技能（slug + 正文）。 */
-export async function listExclusiveSkillBodies(
-  dataDir: string,
-  id: AgentId | string,
+/** 列出这个目录下的独有技能（slug + 正文）。目录由调用方按来源解析（D228）。 */
+export async function listExclusiveSkillBodiesIn(
+  skillsDirectory: string,
 ): Promise<Array<{ slug: string; body: string }>> {
   let slugs: string[]
   try {
-    slugs = await readdir(skillsDir(dataDir, id))
+    slugs = await readdir(skillsDirectory)
   } catch {
     return []
   }
@@ -123,7 +134,7 @@ export async function listExclusiveSkillBodies(
   for (const slug of slugs) {
     if (slug.startsWith('.')) continue
     try {
-      const body = await readFile(skillMdPath(dataDir, id, slug), 'utf8')
+      const body = await readFile(join(skillsDirectory, slug, 'SKILL.md'), 'utf8')
       out.push({ slug, body })
     } catch {
       // 某个 SKILL.md 缺失 ⇒ 跳过（独有技能不是共享技能，缺一个不该让整个列表失败）
@@ -132,36 +143,41 @@ export async function listExclusiveSkillBodies(
   return out
 }
 
-export async function getExclusiveSkillBody(
-  dataDir: string,
-  id: AgentId | string,
+/*
+ * ★ D228：下面三个（连同上面的 list）改成**吃目录**的 "In" 版。
+ *
+ * 原先是 `(dataDir, agentId, slug)`——路径在里面拼死。改成吃目录之后，
+ * "这份技能文件属于谁、它的目录在哪"由调用方（`FileStore`）按
+ * `ExclusiveSkillOwner` 解析：账号智能体走 `agents/<id>/SKILL/`，
+ * 编排内建智能体走 `workflows/<wid>/agents/<aid>/SKILL/`——**同一份实现**
+ * 服务两种来源，路径形状仍然只有各自的拥有者知道。
+ */
+export async function getExclusiveSkillBodyIn(
+  skillsDirectory: string,
   slug: string,
 ): Promise<string | null> {
   try {
-    return await readFile(skillMdPath(dataDir, id, slug), 'utf8')
+    return await readFile(join(skillsDirectory, slug, 'SKILL.md'), 'utf8')
   } catch {
     return null
   }
 }
 
-export async function writeExclusiveSkillBody(
-  dataDir: string,
-  id: AgentId | string,
+export async function writeExclusiveSkillBodyIn(
+  skillsDirectory: string,
   slug: string,
   body: string,
 ): Promise<void> {
-  await ensureDir(skillsDir(dataDir, id))
-  await ensureDir(join(skillsDir(dataDir, id), slug))
-  await atomicWrite(skillMdPath(dataDir, id, slug), body)
+  await ensureDir(join(skillsDirectory, slug))
+  await atomicWrite(join(skillsDirectory, slug, 'SKILL.md'), body)
 }
 
-export async function removeExclusiveSkillBody(
-  dataDir: string,
-  id: AgentId | string,
+export async function removeExclusiveSkillBodyIn(
+  skillsDirectory: string,
   slug: string,
 ): Promise<boolean> {
-  const had = await exists(skillMdPath(dataDir, id, slug))
-  await removeQuietly(join(skillsDir(dataDir, id), slug))
+  const had = await exists(join(skillsDirectory, slug, 'SKILL.md'))
+  await removeQuietly(join(skillsDirectory, slug))
   return had
 }
 

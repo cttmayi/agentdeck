@@ -10,6 +10,7 @@ import {
   type ExecOptions,
 } from '@agentdeck/agent-core'
 import { FileStore } from '@agentdeck/store-file'
+import { agentSkillOwner } from '@agentdeck/domain'
 import { wsId } from '@agentdeck/domain/testing'
 import type { Agent, Skill } from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
@@ -20,7 +21,7 @@ import {
   ensureBuiltinAgentMakerSkills,
   migratePlatformSkillsToExclusive,
 } from './agent-maker-skills.ts'
-import { loadAgentInjectableSkills } from './agent-injectable-skills.ts'
+import { loadInjectableSkills, skillSourcesOfAgent } from './agent-injectable-skills.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 import { ensureTestWorkspace } from './testing/test-workspace.ts'
 
@@ -169,7 +170,7 @@ describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）',
       assert.deepEqual([...first.seeded].sort(), [...AGENT_MAKER_SKILL_SLUGS].sort())
 
       const maker = (await platformMemberOf(store, WS, 'agent-maker'))!
-      const exclusive = await store.listExclusiveSkills(maker.id)
+      const exclusive = await store.listExclusiveSkills(agentSkillOwner(maker.id))
       assert.equal(exclusive.length, AGENT_MAKER_SKILL_SLUGS.length)
       for (const slug of AGENT_MAKER_SKILL_SLUGS) {
         const skill = exclusive.find((e) => e.slug === slug)
@@ -184,7 +185,7 @@ describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）',
       // 幂等：再跑一遍 = 什么都不写（目录里已有）
       const again = await ensureBuiltinAgentMakerSkills(store, WS)
       assert.deepEqual(again.seeded, [])
-      assert.equal((await store.listExclusiveSkills(maker.id)).length, AGENT_MAKER_SKILL_SLUGS.length)
+      assert.equal((await store.listExclusiveSkills(agentSkillOwner(maker.id))).length, AGENT_MAKER_SKILL_SLUGS.length)
     } finally {
       await store.close()
       await cleanup(dir)
@@ -251,7 +252,7 @@ describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）',
       assert.deepEqual([...first.moved].sort(), [...AGENT_MAKER_SKILL_SLUGS].sort())
       // 库清空；正文原样搬进独有目录；skillIds 清掉
       assert.deepEqual(await store.listSkills(WS), [])
-      const exclusive = await store.listExclusiveSkills('maker-1' as Agent['id'])
+      const exclusive = await store.listExclusiveSkills(agentSkillOwner('maker-1' as Agent['id']))
       assert.equal(exclusive.length, AGENT_MAKER_SKILL_SLUGS.length)
       for (const slug of AGENT_MAKER_SKILL_SLUGS) {
         const e = exclusive.find((x) => x.slug === slug)
@@ -331,9 +332,9 @@ describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）',
         createdAt: Date.now(),
         updatedAt: Date.now(),
       })
-      await store.writeExclusiveSkill('exec-1' as Agent['id'], 'shared-x', '# 独有X\n\n## When to Use\n独有\n## Procedure\n用独有这份。')
+      await store.writeExclusiveSkill(agentSkillOwner('exec-1' as Agent['id']), 'shared-x', '# 独有X\n\n## When to Use\n独有\n## Procedure\n用独有这份。')
 
-      const payloads = await loadAgentInjectableSkills(store, agent)
+      const payloads = await loadInjectableSkills(store, skillSourcesOfAgent(agent))
       const refs = payloads.map((p) => ({ slug: p.ref.slug, source: p.ref.source }))
       assert.deepEqual(
         refs.sort((a, b) => (a.slug < b.slug ? -1 : 1)),

@@ -2,6 +2,7 @@ import { readFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   ACTIVE_RUN_STATUSES,
+  type ExclusiveSkillOwner,
   assertRunTransition,
   type IssueQuery,
   type Page,
@@ -54,14 +55,15 @@ import {
   agentDirExists,
   agentDirPath,
   agentsRoot,
-  getExclusiveSkillBody,
+  agentExclusiveSkillsDir,
+  getExclusiveSkillBodyIn,
   listAgentDirs,
-  listExclusiveSkillBodies,
+  listExclusiveSkillBodiesIn,
   readAgentDir,
   removeAgentDir,
-  removeExclusiveSkillBody,
+  removeExclusiveSkillBodyIn,
   writeAgentDir,
-  writeExclusiveSkillBody,
+  writeExclusiveSkillBodyIn,
   writeLegacyAgentDir,
 } from './agent-dirs.ts'
 
@@ -171,6 +173,18 @@ export interface FileStoreOptions {
    * 的测试不会在使用者家目录里造目录。
    */
   skillsRoot?: string
+  /**
+   * **独有技能的目录解析**（D228）——`owner → 目录`。
+   *
+   * 缺省只认 `kind: 'agent'`（`agents/<id>/SKILL/`，形状归 `agent-dirs.ts`）。
+   * 另一种来源（编排内建智能体）的目录形状归 daemon 的 `workflows-dirs.ts`，
+   * 所以由 daemon 在装配时把整张解析函数注入进来（与 `skillsRoot` 同一个套路）：
+   * **谁拥有路径，谁提供解析**——而不是让两个包各拼一遍、迟早分叉。
+   *
+   * 缺省实现遇到 `kind: 'workflow-agent'` 会**明确报错**：没注入解析却去读，
+   * 说明装配漏了一处，静默返回空数组会让"编排自带技能坏了"变成"它本来就没有技能"。
+   */
+  exclusiveSkillsDir?: (owner: ExclusiveSkillOwner) => string
   /**
    * **使用者提炼**技能（D80）的落点（`source: 'mine'` 的技能正文）。
    *
@@ -461,6 +475,8 @@ export class FileStore implements Store {
   readonly #skillsRoot: string
   /** 使用者提炼技能（D80）的落点——与 `#skillsRoot` 物理分离，见 `FileStoreOptions`。 */
   readonly #mineRoot: string
+  /** 独有技能目录解析（D228）：`owner → 目录`。见 `FileStoreOptions.exclusiveSkillsDir`。 */
+  readonly #exclusiveDirOf: (owner: ExclusiveSkillOwner) => string
   /**
    * ★ 2026-11（D226）：workspace 记录**不是日志**，是一个普通 JSON 数组文件
    *   （`<dataDir>/workspaces.json`）——见 `#loadWorkspaces` 上面那段。
@@ -485,6 +501,7 @@ export class FileStore implements Store {
     skillsRoot: string,
     mineRoot: string,
     onInfo: (message: string) => void = () => {},
+    exclusiveSkillsDir?: (owner: ExclusiveSkillOwner) => string,
   ) {
     this.#dataDir = dataDir
     this.#fsync = fsync
@@ -492,6 +509,15 @@ export class FileStore implements Store {
     this.#skillsRoot = skillsRoot
     this.#mineRoot = mineRoot
     this.#onInfo = onInfo
+    this.#exclusiveDirOf =
+      exclusiveSkillsDir ??
+      ((owner) => {
+        if (owner.kind === 'agent') return agentExclusiveSkillsDir(dataDir, owner.agentId)
+        throw new Error(
+          '独有技能目录没配解析函数（`exclusiveSkillsDir`）——' +
+            `装配处漏了 ${owner.kind} 那一种来源。别静默当"没有技能"`,
+        )
+      })
   }
 
   /* ══════════════════════════════════════════════════════════════════
@@ -718,7 +744,15 @@ export class FileStore implements Store {
       await atomicWrite(join(dataDir, 'meta.json'), JSON.stringify(meta, null, 2))
     }
 
-    const store = new FileStore(dataDir, meta, fsync, skillsRoot, mineRoot, options.onInfo ?? (() => {}))
+    const store = new FileStore(
+      dataDir,
+      meta,
+      fsync,
+      skillsRoot,
+      mineRoot,
+      options.onInfo ?? (() => {}),
+      options.exclusiveSkillsDir,
+    )
     // 锁必须在读日志之前拿到，否则第二个进程会先读到一半状态
     store.#releaseLock = await acquireLock(dataDir)
     await store.#loadWorkspaces()
@@ -1096,28 +1130,38 @@ export class FileStore implements Store {
     })
   }
 
-  // ── Agent 的独有技能（D111：`agents/<id>/SKILL/<slug>/SKILL.md` 文件资产）──
+  // ── 独有技能（D111 文件资产；D228 起按**来源**定位，不按 agentId）──
 
   // 两类技能的分界（设计定稿 `docs/design/agent-directory.md` §4）：
-  //   · **独有** = 这个智能体目录里的文件——不进技能库、不进技能页、不可卸载，
-  //     删智能体连目录一起删。这里四个方法管的就是它们。
-  //   · **共享** = 技能库里的资产，智能体用 `skillIds` 引用（下面 `Skill` 一节）。
+  //   · **独有** = 跟着某个实体目录走的文件——不进技能库、不进技能页、不可卸载，
+  //     删掉那个实体就连文件一起删。这里四个方法管的就是它们。
+  //   · **共享** = 技能库里的资产，用 `skillIds` 引用（下面 `Skill` 一节）。
+  //
+  // ★ D228：参数从 `agentId` 换成 `ExclusiveSkillOwner`——目录由 `#exclusiveDirOf`
+  //   解析（`agent` 那一种的路径归 `agent-dirs.ts`，`workflow-agent` 的由 daemon 注入）。
+  //   四个方法因此对"账号智能体"和"编排内建智能体"是**同一份实现**。
 
-  /** 列出这个智能体的独有技能（slug + 正文）。 */
-  async listExclusiveSkills(agentId: AgentId): Promise<Array<{ slug: string; body: string }>> {
-    return listExclusiveSkillBodies(this.#dataDir, agentId)
+  /** 列出这个来源的独有技能（slug + 正文）。 */
+  async listExclusiveSkills(
+    owner: ExclusiveSkillOwner,
+  ): Promise<Array<{ slug: string; body: string }>> {
+    return listExclusiveSkillBodiesIn(this.#exclusiveDirOf(owner))
   }
 
-  async getExclusiveSkill(agentId: AgentId, slug: string): Promise<string | null> {
-    return getExclusiveSkillBody(this.#dataDir, agentId, slug)
+  async getExclusiveSkill(owner: ExclusiveSkillOwner, slug: string): Promise<string | null> {
+    return getExclusiveSkillBodyIn(this.#exclusiveDirOf(owner), slug)
   }
 
-  async writeExclusiveSkill(agentId: AgentId, slug: string, body: string): Promise<void> {
-    await this.#agentsMutex.run(() => writeExclusiveSkillBody(this.#dataDir, agentId, slug, body))
+  async writeExclusiveSkill(
+    owner: ExclusiveSkillOwner,
+    slug: string,
+    body: string,
+  ): Promise<void> {
+    await this.#agentsMutex.run(() => writeExclusiveSkillBodyIn(this.#exclusiveDirOf(owner), slug, body))
   }
 
-  async removeExclusiveSkill(agentId: AgentId, slug: string): Promise<boolean> {
-    return this.#agentsMutex.run(() => removeExclusiveSkillBody(this.#dataDir, agentId, slug))
+  async removeExclusiveSkill(owner: ExclusiveSkillOwner, slug: string): Promise<boolean> {
+    return this.#agentsMutex.run(() => removeExclusiveSkillBodyIn(this.#exclusiveDirOf(owner), slug))
   }
 
   /*

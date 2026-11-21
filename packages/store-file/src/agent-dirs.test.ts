@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { exists } from './fs-utils.ts'
 import { join } from 'node:path'
+import { agentSkillOwner } from '@agentdeck/domain'
 import { makeAgent, wsId } from '@agentdeck/domain/testing'
 import type { Agent, MemoryEntry, Workspace } from '@agentdeck/protocol'
 import { FileStore } from './file-store.ts'
@@ -99,19 +100,19 @@ describe('一个智能体 = 一个目录（D111）', () => {
     const id = 'a-exclusive' as Agent['id']
     await store.insertAgent(mk(id))
     const body = '---\nname: 私有笔记格式\ndescription: 三段式\n---\n## When to Use\n私有笔记\n## Procedure\n写三段。'
-    await store.writeExclusiveSkill(id, 'private-notes', body)
-    await store.writeExclusiveSkill(id, 'second-one', '# 第二条\n\n正文。')
+    await store.writeExclusiveSkill(agentSkillOwner(id), 'private-notes', body)
+    await store.writeExclusiveSkill(agentSkillOwner(id), 'second-one', '# 第二条\n\n正文。')
 
-    const listed = await store.listExclusiveSkills(id)
+    const listed = await store.listExclusiveSkills(agentSkillOwner(id))
     assert.deepEqual(listed.map((s) => s.slug).sort(), ['private-notes', 'second-one'])
     assert.equal(listed.find((s) => s.slug === 'private-notes')?.body, body)
-    assert.equal(await store.getExclusiveSkill(id, 'private-notes'), body)
-    assert.equal(await store.getExclusiveSkill(id, 'missing'), null)
+    assert.equal(await store.getExclusiveSkill(agentSkillOwner(id), 'private-notes'), body)
+    assert.equal(await store.getExclusiveSkill(agentSkillOwner(id), 'missing'), null)
 
     // 删：记录在 ⇒ true；再删 ⇒ false（幂等）
-    assert.equal(await store.removeExclusiveSkill(id, 'second-one'), true)
-    assert.equal(await store.removeExclusiveSkill(id, 'second-one'), false)
-    const rest = await store.listExclusiveSkills(id)
+    assert.equal(await store.removeExclusiveSkill(agentSkillOwner(id), 'second-one'), true)
+    assert.equal(await store.removeExclusiveSkill(agentSkillOwner(id), 'second-one'), false)
+    const rest = await store.listExclusiveSkills(agentSkillOwner(id))
     assert.deepEqual(rest.map((s) => s.slug), ['private-notes'])
 
     // ★ 与技能库**完全无关**：库里一条都没有
@@ -121,7 +122,7 @@ describe('一个智能体 = 一个目录（D111）', () => {
   test('★ 删智能体 = 删整个目录（连独有技能文件一起）', async () => {
     const id = 'a-remove' as Agent['id']
     await store.insertAgent(mk(id))
-    await store.writeExclusiveSkill(id, 'gone-with-me', '# 陪葬技能')
+    await store.writeExclusiveSkill(agentSkillOwner(id), 'gone-with-me', '# 陪葬技能')
     assert.equal(await store.deleteAgent(id), true)
     assert.equal(await store.getAgent(id), null)
     // 目录真的没了（连 SKILL/ 一起）

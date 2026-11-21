@@ -159,6 +159,30 @@ export const ACTIVE_RUN_STATUSES = [
 // 端口
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * **独有技能的来源**（D228）——"这份文件资产是谁的"。
+ *
+ * 说清"是谁"，**不说"在哪个目录"**：目录是存储实现的事（路径词汇不许进端口，
+ * 见 `tests/port-purity` 那条判据）。文件适配器按这个描述符解析出目录；
+ * 其它实现（SQLite）可以如实拒绝（独有技能本来就是文件资产）。
+ *
+ * 两种来源今天都真实存在：
+ *   · `agent` —— 智能体页里那条记录（`agents/<id>/SKILL/`）；
+ *   · `workflow-agent` —— 编排内建智能体（`workflows/<wid>/agents/<aid>/SKILL/`），
+ *     它**不在智能体库里**，所以没有 `AgentId` 可用——这正是这一层存在的理由。
+ */
+export type ExclusiveSkillOwner =
+  | { kind: 'agent'; agentId: AgentId }
+  | { kind: 'workflow-agent'; workflowId: string; agentId: string }
+
+/**
+ * 常见那一种来源的构造器——**别在调用点手写 `{ kind: 'agent', agentId }`**：
+ * 一百处手写就有一百处能写错 kind，而写错的表现是"技能读不到"，不会报错。
+ */
+export function agentSkillOwner(agentId: AgentId): ExclusiveSkillOwner {
+  return { kind: 'agent', agentId }
+}
+
 export interface Store {
   // ── 生命周期 ──
 
@@ -209,23 +233,35 @@ export interface Store {
    */
   deleteAgent(id: AgentId): Promise<boolean>
 
-  // ── Agent 的独有技能（D111：`agents/<id>/SKILL/<slug>/SKILL.md` 文件资产）──
+  // ── 独有技能（D111：`agents/<id>/SKILL/<slug>/SKILL.md` 这类文件资产）──
 
   // 两类技能的分界（设计定稿 `docs/design/agent-directory.md` §4）：
-  //   · **独有** = 这个智能体目录里的文件——不进技能库、不进技能页、不可卸载，
-  //     删智能体连目录一起删。下面四个方法管的就是它们。
-  //   · **共享** = 技能库里的资产，智能体用 `skillIds` 引用（见 `Skill` 一节）。
+  //   · **独有** = 跟着某个实体目录走的文件——不进技能库、不进技能页、不可卸载，
+  //     删掉那个实体就连文件一起删。下面四个方法管的就是它们。
+  //   · **共享** = 技能库里的资产，用 `skillIds` 引用（见 `Skill` 一节）。
   //
   // ⚠️ 独有技能**没有库 id**：run 的 `skillRefs` 里它们长这样——
   //    `{ id: null, slug, source: 'agent' }`（`SkillRef.id` 可空，D111）。
-  /** 列出这个智能体的独有技能（slug + 正文）。正文 = `SKILL.md` 原文。 */
-  listExclusiveSkills(agentId: AgentId): Promise<Array<{ slug: string; body: string }>>
+  //
+  // ★ 2026-11（D228）：**"谁的技能"从 `AgentId` 换成一个来源描述符**。
+  //
+  //   改之前这四个方法的第一个参数是 `agentId`——于是"独有技能放在哪"这件事
+  //   被硬绑在"智能体在库里有一条记录"上。后果是：**编排内建智能体**（只属于
+  //   一条编排、不在库里）没法带独有技能，而它恰恰最需要（"这条编排自带的参考资料"）。
+  //
+  //   现在参数是 `ExclusiveSkillOwner`：说清"这是谁的文件"，不说"它在哪个目录"。
+  //   目录从哪来由**存储实现**决定（文件适配器按 owner 解析；路径词汇不许进端口，
+  //   `FR-STOR-03` 那条机器判据盯着）。
+  /** 列出这个来源的独有技能（slug + 正文）。正文 = `SKILL.md` 原文。 */
+  listExclusiveSkills(
+    owner: ExclusiveSkillOwner,
+  ): Promise<Array<{ slug: string; body: string }>>
   /** 读一条独有技能的正文；没有返回 null（**不是错误**）。 */
-  getExclusiveSkill(agentId: AgentId, slug: string): Promise<string | null>
+  getExclusiveSkill(owner: ExclusiveSkillOwner, slug: string): Promise<string | null>
   /** 写一条独有技能（覆盖同 slug）。校验（slug/正文规则）由调用方做。 */
-  writeExclusiveSkill(agentId: AgentId, slug: string, body: string): Promise<void>
+  writeExclusiveSkill(owner: ExclusiveSkillOwner, slug: string, body: string): Promise<void>
   /** 删一条独有技能。真的删到了返回 true；本来就没有返回 false（**不是错误**）。 */
-  removeExclusiveSkill(agentId: AgentId, slug: string): Promise<boolean>
+  removeExclusiveSkill(owner: ExclusiveSkillOwner, slug: string): Promise<boolean>
 
   /*
    * ⚠️ 2026-11（S3）：这里原来是**智能体组**那一组端口（`getGroup` / `listGroups` /

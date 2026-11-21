@@ -5,6 +5,7 @@ import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import {
   ACTIVE_RUN_STATUSES,
   assertRunTransition,
+  type ExclusiveSkillOwner,
   type IssueQuery,
   type Page,
   type RunPatch,
@@ -1036,20 +1037,24 @@ export class SqliteStore implements Store {
   //    daemon 用的是 store-file，独有技能只会落到文件上。写死返回/抛错，比
   //    假装能存更诚实——真接线时（SQLite 管文件路径？）再重新设计。
   async listExclusiveSkills(
-    _agentId: AgentId,
+    _owner: ExclusiveSkillOwner,
   ): Promise<Array<{ slug: string; body: string }>> {
     throw new Error('store-sqlite 不支持智能体的独有技能（D111）：独有技能是文件资产，请用 store-file')
   }
 
-  async getExclusiveSkill(_agentId: AgentId, _slug: string): Promise<string | null> {
+  async getExclusiveSkill(_owner: ExclusiveSkillOwner, _slug: string): Promise<string | null> {
     throw new Error('store-sqlite 不支持智能体的独有技能（D111）：独有技能是文件资产，请用 store-file')
   }
 
-  async writeExclusiveSkill(_agentId: AgentId, _slug: string, _body: string): Promise<void> {
+  async writeExclusiveSkill(
+    _owner: ExclusiveSkillOwner,
+    _slug: string,
+    _body: string,
+  ): Promise<void> {
     throw new Error('store-sqlite 不支持智能体的独有技能（D111）：独有技能是文件资产，请用 store-file')
   }
 
-  async removeExclusiveSkill(_agentId: AgentId, _slug: string): Promise<boolean> {
+  async removeExclusiveSkill(_owner: ExclusiveSkillOwner, _slug: string): Promise<boolean> {
     throw new Error('store-sqlite 不支持智能体的独有技能（D111）：独有技能是文件资产，请用 store-file')
   }
 

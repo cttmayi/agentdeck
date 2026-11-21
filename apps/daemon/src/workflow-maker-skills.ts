@@ -26,7 +26,7 @@ import { platformMemberOf } from './platform-slots.ts'
 import { ensureBuiltinWorkflowMaker } from './builtin-drafter.ts'
 import { WORKFLOW_PRIMITIVES, validateWorkflowCode } from './workflow-maker.ts'
 import type { WorkspaceId } from '@agentdeck/protocol'
-import type { Store } from '@agentdeck/domain'
+import { agentSkillOwner, type Store } from '@agentdeck/domain'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { resolvePayloadEntry } from '@agentdeck/skill-source'
@@ -64,7 +64,7 @@ export async function ensureBuiltinWorkflowMakerSkills(
   const maker = await platformMemberOf(store, workspaceId, 'workflow-maker')
   if (!maker) return { agentId: null, seeded: [], skipped: [] }
 
-  const existing = new Set((await store.listExclusiveSkills(maker.id)).map((s) => s.slug))
+  const existing = new Set((await store.listExclusiveSkills(agentSkillOwner(maker.id))).map((s) => s.slug))
   const seeded: string[] = []
   const skipped: string[] = []
   for (const slug of WORKFLOW_MAKER_SKILL_SLUGS) {
@@ -76,7 +76,7 @@ export async function ensureBuiltinWorkflowMakerSkills(
         body,
         sourceRef: WORKFLOW_MAKER_SKILL_SOURCE_REF,
       })
-      await store.writeExclusiveSkill(maker.id, slug, validated.body)
+      await store.writeExclusiveSkill(agentSkillOwner(maker.id), slug, validated.body)
       seeded.push(slug)
     } catch (err) {
       skipped.push(`${slug}（${err instanceof Error ? err.message : String(err)}）`)

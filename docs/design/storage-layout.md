@@ -68,7 +68,9 @@
 │   ├── main.js                   编排代码本体
 │   └── agents/<agentId>/         **编排内建智能体**（只在编排里有效）——与 agents/<id>/ 同形：
 │       ├── agent.json            name / runtimeKey / skillIds …（不含指令）
-│       └── instructions.md       它的话
+│       ├── instructions.md       它的话
+│       └── SKILL/<slug>/SKILL.md 它的独有技能（D228：注入通道按**来源**取目录，
+│                                  不再要求"这个智能体在库里有一条 AgentId"）
 │       ⚠️ 这一层**功能尚未落地**（`Workflow.inlineAgents` 字段已在、原语没接）；
 │          落地的位置就是这里，别在别处再造一套"编排专用智能体"的存法
 │
@@ -140,7 +142,25 @@
 | `agent.json` | `writeAgentDir()`（`packages/store-file/src/agent-dirs.ts`） | `readAgentDir()` | 结构化信息；**永远不含 `instructions`** |
 | `instructions.md` | 同上 | 同上（读回时拼成一条 `Agent.instructions`） | 组装**前**正文 |
 | `memory.jsonl` | store 端口 `insertMemoryEntry` | `listMemoryEntries` | 记忆的**权威** |
-| `SKILL/<slug>/SKILL.md` | store 端口 `writeExclusiveSkillBody` | `listExclusiveSkillBodies` | 这个智能体独有的技能 |
+| `SKILL/<slug>/SKILL.md` | store 端口 `writeExclusiveSkill(owner, …)` | `listExclusiveSkills(owner)` | 这个智能体独有的技能（**按来源定位**，见下） |
+
+**独有技能按「来源」定位，不按 `agentId`**（D228，2026-11）：
+
+| 来源 | 目录 | 谁能用 |
+|---|---|---|
+| `{ kind: 'agent' }` | `agents/<id>/SKILL/` | 智能体页里的那条记录 |
+| `{ kind: 'workflow-agent' }` | `workflows/<wid>/agents/<aid>/SKILL/` | **编排内建智能体**（不在库里、没有 AgentId） |
+
+改之前端口上那四个方法第一个参数就是 `agentId`——于是"独有技能放在哪"被硬绑在
+"这个智能体在库里有一条记录"上，编排内建智能体就无法带独有技能（而它恰恰最需要）。
+现在参数是 `ExclusiveSkillOwner`（描述符），**目录由存储实现解析**：
+`agent` 那一种的形状归 `agent-dirs.ts`，`workflow-agent` 的归 `workflows-dirs.ts`，
+daemon 在装配 `FileStore` 时把"owner → 目录"的解析函数注入进去
+（`FileStoreOptions.exclusiveSkillsDir`）。**路径词汇不进端口**（FR-STOR-03 那条机器判据）。
+
+注入那一层（`apps/daemon/src/agent-injectable-skills.ts`）也因此只剩**一份实现**：
+入参从"一个 `Agent`"改成 `SkillSources`（工作区 + 库 id 清单 + 独有技能来源），
+两种来源读出来的 payload 逐字相同——判据在 `apps/daemon/src/agent-injectable-skills.test.ts`。
 
 **为什么 `agent.json` 不含指令**：人打开目录看到的应该是"这个智能体自己的话"（`.md`），
 机器要的是字段（`.json`）。混在一起，改一句话就得动结构，而且 diff 出来满屏 JSON。

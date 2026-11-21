@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import { FileStore } from '@agentdeck/store-file'
+import { agentSkillOwner } from '@agentdeck/domain'
 import { wsId } from '@agentdeck/domain/testing'
 import { ensureBuiltinAgents } from './builtin-drafter.ts'
 import { platformMemberOf } from './platform-slots.ts'
-import { loadAgentInjectableSkills } from './agent-injectable-skills.ts'
+import { loadInjectableSkills, skillSourcesOfAgent } from './agent-injectable-skills.ts'
 import {
   WORKFLOW_MAKER_SKILL_SLUGS,
   checkSkillSamples,
@@ -55,7 +56,7 @@ describe('编排生成者的平台技能：播种', () => {
 
       const maker = (await platformMemberOf(store, WS, 'workflow-maker'))!
       assert.ok(maker, '启动对账里要有编排生成者')
-      const exclusive = await store.listExclusiveSkills(maker.id)
+      const exclusive = await store.listExclusiveSkills(agentSkillOwner(maker.id))
       assert.equal(exclusive.length, WORKFLOW_MAKER_SKILL_SLUGS.length)
       assert.ok(exclusive[0]!.body.includes('## When to Use'), '正文要完整（含 When to Use）')
 
@@ -65,7 +66,7 @@ describe('编排生成者的平台技能：播种', () => {
 
       const again = await ensureBuiltinWorkflowMakerSkills(store, WS)
       assert.deepEqual(again.seeded, [], '第二遍不再写')
-      assert.equal((await store.listExclusiveSkills(maker.id)).length, 1)
+      assert.equal((await store.listExclusiveSkills(agentSkillOwner(maker.id))).length, 1)
     } finally {
       await store.close()
       await cleanup(dir)
@@ -81,7 +82,7 @@ describe('编排生成者的平台技能：播种', () => {
       await ensureBuiltinAgents(store, WS)
       await ensureBuiltinWorkflowMakerSkills(store, WS)
       const maker = (await platformMemberOf(store, WS, 'workflow-maker'))!
-      const payloads = await loadAgentInjectableSkills(store, maker)
+      const payloads = await loadInjectableSkills(store, skillSourcesOfAgent(maker))
       const refs = payloads.map((p) => ({ slug: p.ref.slug, source: p.ref.source, id: p.ref.id }))
       assert.deepEqual(refs, [{ slug: 'orchestration-authoring', source: 'agent', id: null }])
       assert.ok(payloads[0]!.body.includes('## When to Use'))

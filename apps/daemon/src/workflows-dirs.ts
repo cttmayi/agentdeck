@@ -58,6 +58,24 @@ function workflowCodePath(dir: string, id: string): string {
   return join(workflowDirPath(dir, id), 'main.js')
 }
 
+/**
+ * **编排内建智能体的独有技能目录**（D228）。
+ *
+ * `workflows/<id>/agents/<agentId>/SKILL/` —— 与 `agents/<id>/SKILL/` 逐字同形，
+ * 这样技能注入那一层不需要知道两种来源的差别（它只拿到一个目录）。
+ *
+ * ⚠️ 这个形状归本文件（workflow 目录的拥有者）；daemon 在装配 `FileStore` 时
+ *   把"owner → 目录"的解析函数注入进去，store-file 只认目录、不认 workflow
+ *   的布局（`packages/domain` 的端口里也不许出现路径词汇，见 FR-STOR-03）。
+ */
+export function workflowAgentExclusiveSkillsDir(
+  dir: string,
+  workflowId: string,
+  agentId: string,
+): string {
+  return join(workflowDirPath(dir, assertSafeId(workflowId)), 'agents', assertSafeId(agentId), 'SKILL')
+}
+
 /** 运行记录的根（`<dataDir>/workflow-runs`）。 */
 export function workflowRunsRoot(dir: string): string {
   return join(dir, 'workflow-runs')

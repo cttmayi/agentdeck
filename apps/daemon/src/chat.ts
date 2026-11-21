@@ -10,7 +10,7 @@ import type {
 import { ulid } from '@agentdeck/protocol'
 import type { RunExecutor } from './executor.ts'
 import { resolveWorkDir } from './workdir.ts'
-import { loadAgentInjectableSkills } from './agent-injectable-skills.ts'
+import { loadInjectableSkills, skillSourcesOfAgent } from './agent-injectable-skills.ts'
 import { effectiveInstructions } from './builtin-drafter.ts'
 
 /**
@@ -104,7 +104,8 @@ async function loadTurnSkills(
   agent: Agent,
   conversationSkillIds: readonly string[],
 ): Promise<SkillPayload[]> {
-  return loadAgentInjectableSkills(store, agent, conversationSkillIds)
+  // ★ D228：来源 = "这个账号智能体" + 对话自己选的库技能 id
+  return loadInjectableSkills(store, skillSourcesOfAgent(agent, conversationSkillIds))
 }
 
 /**
