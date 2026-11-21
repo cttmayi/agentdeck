@@ -4559,6 +4559,26 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           // ⚠️ 记 `position` 的**原文**（不是布尔）：这一条要的是"它不是浮层"，
           //    而"它到底是什么"在报告里要看得见（第一版记成布尔，判据却按字符串比 ⇒ 假红）
           facts['template.formPosition'] = form ? getComputedStyle(form).position : null
+          /**
+           * ★★ D187：**"两列排法"只有一条规则**。新建智能体表单的卡片是"字段对"
+           *   ⇒ 两**等宽**列 + gap 12（全局 `.pair-field`）。改之前这条栅格在四处
+           *   各写一份（`.card-grid` 16、NewAgentForm 12、AgentDetail 里又抄一份 12、
+           *   沉淀页的 `minmax(0,1fr) minmax(0,1fr)` 等价写法）。
+           */
+          facts['grid.pairField'] = (() => {
+            const card = d().querySelector('#new-agent-form .card.agent-card')
+            if (!card) return null
+            const c = getComputedStyle(card)
+            const cols = c.gridTemplateColumns.split(/\s+/).map((v) => Math.round(parseFloat(v)))
+            const kids = [...card.children].map((k) => Math.round(k.getBoundingClientRect().width))
+            return {
+              列: cols,
+              间距: c.gap,
+              用全局类: card.classList.contains('pair-field'),
+              子宽: kids.slice(0, 4),
+              卡片宽: Math.round(card.getBoundingClientRect().width),
+            }
+          })()
           facts['template.listStaysVisible'] = !!d().querySelector('.list-row-main')
           // 宽度：右栏正文是"填满栏"的，不是某个固定抽屉宽度（416 / 480 那种）
           const formBox = form ? box(form) : null

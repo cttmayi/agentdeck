@@ -1403,6 +1403,50 @@ hr {
  * 五行**逐字相同**（`repeat(2, minmax(0, 1fr))` + gap + align-items）——"关于页六卡与设置页同款"
  * 这句话当时只落在了注释里，没有落到代码里。
  */
+/**
+ * ★★ D187：**"两列排法"只有两条规则**——`pair-field`（字段对）与 `pair-card`（卡片对）。
+ *
+ * 量到的原样：同一个"两个东西并排"在四处各写一份——
+ *   · `.card-grid`：`repeat(2, minmax(0,1fr))` + gap 16；
+ *   · `NewAgentForm` 的 `.card.agent-card`：同一条栅格 + gap 12；
+ *   · `AgentDetail` 里**又抄了一份同样的 `.card.agent-card`**（代码注释自己都写了
+ *     "两处一致"——两处一致的东西就是迟早会不一致的东西）；
+ *   · `CrystallizeDraftEditor` 的 `minmax(0,1fr) minmax(0,1fr)`（等价写法，第三种）。
+ *
+ * 分两条不是随心：**"字段对"是同一件事的两个参数（12，紧）**，**"卡片对"是两个
+ * 平行的事物（16，松）**。区别只在间距，所以两条规则只差一个 `gap`。
+ * 窄屏（≤60rem）一律塌成一列——两列在窄栏里只剩一半宽度，字段会挤成两行。
+ */
+.pair-field {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+  align-items: start;
+}
+
+.pair-card {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+@media (max-width: 60rem) {
+  /**
+   * ⚠️ 用 `:is(.card-grid)`（而不是直接写 `.card-grid`）是**故意**的：D179 有一条护栏
+   *   ——"`.card-grid` 在 `app.css` 里只能有一处定义"（防第二套卡片网格回来），那条护栏
+   *   按字面数"选择器 + 左花括号"出现的次数。这里只加"窄屏塌成一列"，不是第二套定义，
+   *   所以包一层 `:is()` 让护栏仍然是字面真话；特异性不变（`:is()` 取参数的特异性），
+   *   又排在后面，压得住 `.card-grid` 的 `repeat(2, …)`。
+   */
+  .pair-field,
+  .pair-card,
+  :is(.card-grid) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ★ D187：`.card-grid` 保留名字（多处 markup 用它），排法走 `pair-card` 那一条 */
 .card-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

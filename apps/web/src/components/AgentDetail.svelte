@@ -1131,7 +1131,7 @@
     <div class="notice bad">{error}</div>
   {/if}
 
-  <section class="card agent-card">
+  <section class="card agent-card pair-field">
     <!-- ★ 第 269 批：内置徽标移到**标题栏**（名字旁边），卡片里不再画一遍 -->
     <!--
       ★ 2026-11（D153）：**「类型 / 岗位」那一格整格删掉了**。
@@ -1917,11 +1917,10 @@
    * 与 `MemberSlotForm.svelte` 里「新建私有」的 `.grid-form` 同一套布局——
    * 名字 / CLI 一行，指令 / 技能一行；角色（编辑态）与记忆占整行。
    */
+  /* ★ D187：**两列栅格不在这里**——它就是全局 `.pair-field`（与 `NewAgentForm` 一份）。
+     原来这一条与 `NewAgentForm.svelte` 里那一条**逐字相同**（注释自己都写着"两处一致"），
+     现在只剩"卡片这张皮"。 */
   .card.agent-card {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--sp-3);
-    align-items: start;
     margin: 0;
     padding: var(--sp-4);
     border: 1px solid var(--line);

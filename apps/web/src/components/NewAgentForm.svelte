@@ -193,7 +193,8 @@
          对齐组里「新建私有」的 `.grid-form`）。角色在卡片第一行（占整行），
          名字 / CLI 一行，指令 / 技能一行。（行动权限那一行 2026-11 随动作能力退场删了。）
     -->
-    <section class="card agent-card">
+    <!-- ★ D187：两列排法用全局 `.pair-field`（字段对：等宽两列 + gap 12） -->
+    <section class="card agent-card pair-field">
       <!--
         ⚠️ 2026-11（S4，D127）：这里原来有两个大按钮让使用者"选边"（执行 / 审核）。
         **角色退场** ⇒ 新建一个 agent 不再问它是哪一种；这一页从"选角色 + 填名字"变成
@@ -354,11 +355,10 @@
    *    名字 / CLI 一行，指令 / 技能一行。（行动权限那一行 2026-11 随动作能力退场删了。）
    *    `.card.agent-card` 的规则在 `AgentDetail.svelte` 里也有一份，两处一致。
    */
+  /* ★ D187：**两列栅格不再写在这里**——它就是全局 `.pair-field`（字段对，gap 12）。
+     这里只剩"卡片这张皮"（内距 / 描边 / 圆角）。`.agent-card` 另一份副本在
+     `AgentDetail.svelte` 里也有，两处都改成一个 class，不再各写一条 `grid-template-columns`。 */
   .card.agent-card {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--sp-3);
-    align-items: start;
     margin: 0;
     padding: var(--sp-4);
     border: 1px solid var(--line);
