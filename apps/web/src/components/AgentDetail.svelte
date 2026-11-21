@@ -2400,8 +2400,12 @@
     padding: var(--sp-4) var(--sp-5);
     border-bottom: 1px solid var(--line);
   }
+  /**
+   * ★ D179：这里原来把 h2 压回 `--fs-lg`（全局 h2 曾是 22px）——现在全局就是 17px，
+   * 这一条和另外三处同款覆盖一起删了（同一个值写四遍 = 层级没定义）。
+   */
   .mem-preview-head h2 {
-    font-size: var(--fs-lg);
+    margin: 0;
   }
   .mem-preview-head .spacer {
     flex: 1;

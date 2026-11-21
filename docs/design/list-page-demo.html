@@ -283,9 +283,22 @@ h1, h2, h3, h4 {
   font-weight: 600;
 }
 
-h2 { font-size: var(--fs-xl); }
+/**
+ * ★ D179：**标题层级只有一处定义**（`ui-style.md` §2.9）。四级 + 一档标签：
+ *   · `h1.page-name` 页名 —— 15px/500/dim（顶栏退后一层，见 §2.9 的理由）；
+ *   · `h2` 这一块的名字（栏头 / 面板卡片头 / 正文里的块名）—— 17px/600/正文色；
+ *   · `h3` 分段（`.drawer-section` 那种）—— 17px/600；
+ *   · `h4` 段内小节 —— 13px/600/`--text-dim`（**这一档以前只有"在 `.drawer-section` 里才是
+ *     13px/dim"**，出了那个容器就变回 15px → 于是三个组件各自写一套"小节"样式，见 §2.9）；
+ *   · 标签档（`label` / `.cell-label` / 看板列头）**不是标题**，不进这四级。
+ *
+ * `h2` 从 `--fs-xl`(22px) 降到 `--fs-lg`(17px)：22px 那一档只用过一次，而"把 h2 压回 17px"
+ * 这件事在 `.detail-head` / `.pane-head` / `.main-panel-head` / `.mem-preview-head` 四处
+ * 各写了一遍——同一个值写四遍，就是"层级没定义、各拼各的"。
+ */
+h2 { font-size: var(--fs-lg); }
 h3 { font-size: var(--fs-lg); }
-h4 { font-size: var(--fs-md); }
+h4 { font-size: var(--fs-sm); color: var(--text-dim); }
 
 p { margin: 0 0 var(--sp-3); }
 
@@ -1230,10 +1243,6 @@ hr {
   border-bottom: 1px solid var(--line);
 }
 
-.pane-head h2 {
-  font-size: var(--fs-lg);
-}
-
 .pane-actions {
   display: flex;
   gap: var(--sp-2);
@@ -1314,6 +1323,19 @@ hr {
    它**不是**对话框（`.drawer` / `.modal`）：没有 `position: fixed`、没有遮罩、
    也没有 `z-index`——它随页面滚，是被"换进主区"的内容。所以风格上也就不该借用
    `.drawer-*` 那几个类：借了之后下一次有人调抽屉宽度，会把这一块一起改掉。 */
+/**
+ * ★ D179：页面上的**卡片网格只有一份**（`.card-grid`）。
+ * 它原来在 `Settings.svelte`（`.set-grid`）与 `About.svelte`（`.ab-grid`）各写一遍，
+ * 五行**逐字相同**（`repeat(2, minmax(0, 1fr))` + gap + align-items）——"关于页六卡与设置页同款"
+ * 这句话当时只落在了注释里，没有落到代码里。
+ */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+  align-items: start;
+}
+
 .main-panel {
   display: flex;
   flex-direction: column;
@@ -1329,10 +1351,6 @@ hr {
   gap: var(--sp-3);
   padding: var(--sp-4) var(--sp-5) var(--sp-3);
   border-bottom: 1px solid var(--line);
-}
-
-.main-panel-head h2 {
-  font-size: var(--fs-lg);
 }
 
 /* ⚠️ 返回入口必须**一直可见**（它是这一块唯一的"怎么回去"）。
@@ -1356,8 +1374,10 @@ hr {
 }
 
 /* 详情/建任务的栏头（D69.15 由 MainArea 渲染，scoped 样式打不进来，放这里）：
-   与 `.pane-head` 同一套指标——留白、下边框、标题字号 fs-lg（全局 h2 是 fs-xl
-   22px，不钉字号标题就会比聊天栏头大 5px——使用者当场抓到的"Title 高度不一样"） */
+   与 `.pane-head` 同一套指标——留白、下边框、标题字号。
+   ⚠️ 这里原来还有一句 `font-size: var(--fs-lg)`（因为全局 h2 当时是 22px，不钉就会
+   "比聊天栏头大 5px"——使用者当场抓到的"Title 高度不一样"）。★ D179 起全局 h2 就是
+   17px，这一句和另外三处同款覆盖一起删了——同一个值写四遍，等于层级没定义。 */
 /**
  * 详情栏头：**左列 = 标题 + 副题，右列 = 动作**。
  *
@@ -1380,7 +1400,6 @@ hr {
 }
 
 .detail-head h2 {
-  font-size: var(--fs-lg);
   /* ★ 314 批（使用者："标题字色"有差别）：标题字色**显式**钉成正文色。
      原来是继承——聊天那一栏的容器与任务那一栏不是同一个，继承链不同，
      同一颗 h2 就会落成 `--text` 与 `--text-dim` 两种，看着就是"颜色不一样"。 */
@@ -2648,6 +2667,9 @@ a > button { width: 100%; }
 .markdown h1 { font-size: var(--fs-xl); }
 .markdown h2 { font-size: var(--fs-lg); }
 .markdown h3 { font-size: var(--fs-md); }
+/* ★ D179：agent 产出的正文里 h4 仍是 15px + 正文色（它不属于界面标题层级——
+   全局 `h4` 现在是 13px/dim 的"段内小节"档，不改这一条会把正文的小标题也压小） */
+.markdown h4 { font-size: var(--fs-md); color: var(--text); }
 
 .markdown p { margin: 0 0 var(--sp-3); }
 

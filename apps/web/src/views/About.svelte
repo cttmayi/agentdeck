@@ -44,175 +44,192 @@
 {:else}
   {@const id = $identity}
 
-  <!-- ★ 2026-11（使用者拍板"关于也改成 2 列"）：六卡流式两列，与设置页同款规则 -->
-  <div class="ab-grid">
+  <!-- ★ 2026-11（使用者拍板"关于也改成 2 列"）：六卡流式两列。
+       ★ D179：网格与卡片外壳都改用全局的（`.card-grid` + `.main-panel`）——当时"与设置页
+       同款"只写在这行注释里：网格在页面里各写了一份逐字相同的 `.ab-grid`/`.set-grid`，
+       卡片外壳一个是页面私有的 `.ab-card`（标题 15px、边框还拿填充档 `--surface-2` 当线），
+       另一个是全局 `.main-panel`（标题 17px、边框 `--line`）。 -->
+  <div class="card-grid">
 
   <!-- ① 应用 -->
-  <section class="ab-card" data-ab-app>
-    <h2>{$t('about.app')}</h2>
-    <div class="ab-row"><span class="ab-k">{$t('about.appName')}</span></div>
-    <div class="ab-row">
-      <span class="ab-k">{$t('about.protocolVersion')}</span>
-      <span class="ab-v"><code>v{id.protocolVersion ?? tx('about.unknown')}</code></span>
-    </div>
-    <div class="ab-row">
-      <span class="ab-k">{$t('about.device')}</span>
-      <span class="ab-v">{id.deviceName} <span class="ab-badge ab-badge--good">{$t('about.currentDevice')}</span></span>
-    </div>
-    <div class="ab-row">
-      <span class="ab-k">{$t('about.locale')}</span>
-      <span class="ab-v">{localeName(id.locale)}</span>
+  <section class="main-panel" data-ab-app>
+    <header class="main-panel-head">
+      <h2>{$t('about.app')}</h2>
+    </header>
+    <div class="main-panel-body">
+      <div class="ab-row"><span class="ab-k">{$t('about.appName')}</span></div>
+      <div class="ab-row">
+        <span class="ab-k">{$t('about.protocolVersion')}</span>
+        <span class="ab-v"><code>v{id.protocolVersion ?? tx('about.unknown')}</code></span>
+      </div>
+      <div class="ab-row">
+        <span class="ab-k">{$t('about.device')}</span>
+        <span class="ab-v">{id.deviceName} <span class="ab-badge ab-badge--good">{$t('about.currentDevice')}</span></span>
+      </div>
+      <div class="ab-row">
+        <span class="ab-k">{$t('about.locale')}</span>
+        <span class="ab-v">{localeName(id.locale)}</span>
+      </div>
     </div>
   </section>
 
   <!-- ② 运行环境：罗列侦测到的 CLI（不强调"当前"） -->
-  <section class="ab-card" data-ab-env>
-    <h2>{$t('about.env')}</h2>
-    {#if id.runtimes.length > 0}
-      <div class="ab-row">
-        <span class="ab-k">{$t('about.runtimesLabel')}</span>
-        <span class="ab-v">
-          {#each id.runtimes as rt (rt.key)}
-            <span class="ab-cli">
-              {cliLine(rt).cmd}
-              {#if cliLine(rt).version}<code>{cliLine(rt).version}</code>{/if}
-              <span class:ab-badge--good={cliLine(rt).ok} class:ab-badge--bad={!cliLine(rt).ok} class="ab-badge">
-                {cliLine(rt).state}
-              </span>
-            </span>
-          {/each}
-        </span>
-      </div>
-    {/if}
-    {#if id.nodeVersion || id.platform}
-      <div class="ab-row">
-        <span class="ab-k">{$t('about.nodePlatform')}</span>
-        <span class="ab-v">{id.nodeVersion ?? tx('about.unknown')} · {id.platform ?? tx('about.unknown')}</span>
-      </div>
-    {/if}
-    <div class="ab-row">
-      <span class="ab-k">{$t('about.envPreflight')}</span>
-      <span class="ab-v">
-        {#if id.environment && id.environment.issues.length > 0}
-          <span class="ab-badge ab-badge--warn">{$t('about.envIssuesCount', { n: id.environment.issues.length })}</span>
-        {:else}
-          <span class="ab-badge ab-badge--good">{$t('about.envNoIssues')}</span>
-        {/if}
-      </span>
-    </div>
-    {#if id.environment && id.environment.issues.length > 0}
-      <ul class="ab-issues">
-        {#each id.environment.issues as issue (issue.subject)}
-          <li class:ab-issue--err={issue.severity === 'error'}>
-            <span class="ab-issue-subj">{issue.subject}</span> — {issue.summary}
-            {#if issue.action}
-              <div class="ab-issue-act">{$t('about.issueAction')}{issue.action}</div>
-            {/if}
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </section>
-
-  <!-- ③ 存储与目录 -->
-  <section class="ab-card" data-ab-storage>
-    <h2>{$t('about.storage')}</h2>
-    {#if id.workDir}
-      <div class="ab-row"><span class="ab-k">{$t('about.workDir')}</span><span class="ab-v"><code>{id.workDir}</code></span></div>
-    {/if}
-    {#if id.dataDir}
-      <div class="ab-row"><span class="ab-k">{$t('about.dataDir')}</span><span class="ab-v"><code>{id.dataDir}</code></span></div>
-    {/if}
-    {#if id.skillsDir}
-      <div class="ab-row"><span class="ab-k">{$t('about.skillsDir')}</span><span class="ab-v"><code>{id.skillsDir}</code></span></div>
-    {/if}
-    <div class="ab-row">
-      <span class="ab-k">{$t('about.sync')}</span>
-      <span class="ab-v">
-        {#if $syncStatus?.error}
-          {$t('about.syncError')}
-        {:else if $syncStatus}
-          {$t('about.syncReported', { n: $syncStatus.reported })}
-          {#if $syncStatus.queued > 0}· {$t('about.syncQueued', { n: $syncStatus.queued })}{/if}
-        {:else}
-          {$t('about.syncNever')}
-        {/if}
-      </span>
-    </div>
-  </section>
-
-  <!-- ④ 安全边界（静态文案，原文在根 README） -->
-  <section class="ab-card" data-ab-security>
-    <h2>{$t('about.security')}</h2>
-    <p class="ab-lead">{$t('about.securityLead')}</p>
-    <div class="ab-row"><span class="ab-k">{$t('about.securityFiles')}</span><span class="ab-v">{$t('about.securityFilesValue')}</span></div>
-    <div class="ab-row"><span class="ab-k">{$t('about.securityIsolation')}</span><span class="ab-v">{$t('about.securityIsolationValue')}</span></div>
-    <div class="ab-row"><span class="ab-k">{$t('about.securityVerdict')}</span><span class="ab-v">{$t('about.securityVerdictValue')}</span></div>
-  </section>
-
-  <!-- ⑤ 诊断（默认折叠：排查版本错位才看） -->
-  <section class="ab-card" data-ab-diagnostics>
-    <h2>{$t('about.diagnostics')}</h2>
-    <details>
-      <summary class="hint" style="cursor:pointer">{$t('about.diagnosticsNote')}</summary>
-      <div class="ab-row" style="margin-top:var(--sp-2)">
-        <span class="ab-k">{$t('about.webBuildLabel')}</span>
-        <span class="ab-v"><code data-web-build>{id.webBuild ?? tx('about.unknown')}</code></span>
-      </div>
-      <div class="ab-row">
-        <span class="ab-k">{$t('about.protocolVersion')}</span>
-        <span class="ab-v"><code>{id.protocolVersion ?? tx('about.unknown')}</code></span>
-      </div>
-      {#if id.capabilities && id.capabilities.length > 0}
+  <section class="main-panel" data-ab-env>
+    <header class="main-panel-head">
+      <h2>{$t('about.env')}</h2>
+    </header>
+    <div class="main-panel-body">
+      {#if id.runtimes.length > 0}
         <div class="ab-row">
-          <span class="ab-k">{$t('about.capabilitiesLabel')}</span>
+          <span class="ab-k">{$t('about.runtimesLabel')}</span>
           <span class="ab-v">
-            {#each id.capabilities as cap (cap)}
-              <span class="ab-chip">{cap}</span>
+            {#each id.runtimes as rt (rt.key)}
+              <span class="ab-cli">
+                {cliLine(rt).cmd}
+                {#if cliLine(rt).version}<code>{cliLine(rt).version}</code>{/if}
+                <span class:ab-badge--good={cliLine(rt).ok} class:ab-badge--bad={!cliLine(rt).ok} class="ab-badge">
+                  {cliLine(rt).state}
+                </span>
+              </span>
             {/each}
           </span>
         </div>
       {/if}
-    </details>
+      {#if id.nodeVersion || id.platform}
+        <div class="ab-row">
+          <span class="ab-k">{$t('about.nodePlatform')}</span>
+          <span class="ab-v">{id.nodeVersion ?? tx('about.unknown')} · {id.platform ?? tx('about.unknown')}</span>
+        </div>
+      {/if}
+      <div class="ab-row">
+        <span class="ab-k">{$t('about.envPreflight')}</span>
+        <span class="ab-v">
+          {#if id.environment && id.environment.issues.length > 0}
+            <span class="ab-badge ab-badge--warn">{$t('about.envIssuesCount', { n: id.environment.issues.length })}</span>
+          {:else}
+            <span class="ab-badge ab-badge--good">{$t('about.envNoIssues')}</span>
+          {/if}
+        </span>
+      </div>
+      {#if id.environment && id.environment.issues.length > 0}
+        <ul class="ab-issues">
+          {#each id.environment.issues as issue (issue.subject)}
+            <li class:ab-issue--err={issue.severity === 'error'}>
+              <span class="ab-issue-subj">{issue.subject}</span> — {issue.summary}
+              {#if issue.action}
+                <div class="ab-issue-act">{$t('about.issueAction')}{issue.action}</div>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
+  </section>
+
+  <!-- ③ 存储与目录 -->
+  <section class="main-panel" data-ab-storage>
+    <header class="main-panel-head">
+      <h2>{$t('about.storage')}</h2>
+    </header>
+    <div class="main-panel-body">
+      {#if id.workDir}
+        <div class="ab-row"><span class="ab-k">{$t('about.workDir')}</span><span class="ab-v"><code>{id.workDir}</code></span></div>
+      {/if}
+      {#if id.dataDir}
+        <div class="ab-row"><span class="ab-k">{$t('about.dataDir')}</span><span class="ab-v"><code>{id.dataDir}</code></span></div>
+      {/if}
+      {#if id.skillsDir}
+        <div class="ab-row"><span class="ab-k">{$t('about.skillsDir')}</span><span class="ab-v"><code>{id.skillsDir}</code></span></div>
+      {/if}
+      <div class="ab-row">
+        <span class="ab-k">{$t('about.sync')}</span>
+        <span class="ab-v">
+          {#if $syncStatus?.error}
+            {$t('about.syncError')}
+          {:else if $syncStatus}
+            {$t('about.syncReported', { n: $syncStatus.reported })}
+            {#if $syncStatus.queued > 0}· {$t('about.syncQueued', { n: $syncStatus.queued })}{/if}
+          {:else}
+            {$t('about.syncNever')}
+          {/if}
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 安全边界（静态文案，原文在根 README） -->
+  <section class="main-panel" data-ab-security>
+    <header class="main-panel-head">
+      <h2>{$t('about.security')}</h2>
+    </header>
+    <div class="main-panel-body">
+      <p class="ab-lead">{$t('about.securityLead')}</p>
+      <div class="ab-row"><span class="ab-k">{$t('about.securityFiles')}</span><span class="ab-v">{$t('about.securityFilesValue')}</span></div>
+      <div class="ab-row"><span class="ab-k">{$t('about.securityIsolation')}</span><span class="ab-v">{$t('about.securityIsolationValue')}</span></div>
+      <div class="ab-row"><span class="ab-k">{$t('about.securityVerdict')}</span><span class="ab-v">{$t('about.securityVerdictValue')}</span></div>
+    </div>
+  </section>
+
+  <!-- ⑤ 诊断（默认折叠：排查版本错位才看） -->
+  <section class="main-panel" data-ab-diagnostics>
+    <header class="main-panel-head">
+      <h2>{$t('about.diagnostics')}</h2>
+    </header>
+    <div class="main-panel-body">
+      <details>
+        <summary class="hint" style="cursor:pointer">{$t('about.diagnosticsNote')}</summary>
+        <div class="ab-row" style="margin-top:var(--sp-2)">
+          <span class="ab-k">{$t('about.webBuildLabel')}</span>
+          <span class="ab-v"><code data-web-build>{id.webBuild ?? tx('about.unknown')}</code></span>
+        </div>
+        <div class="ab-row">
+          <span class="ab-k">{$t('about.protocolVersion')}</span>
+          <span class="ab-v"><code>{id.protocolVersion ?? tx('about.unknown')}</code></span>
+        </div>
+        {#if id.capabilities && id.capabilities.length > 0}
+          <div class="ab-row">
+            <span class="ab-k">{$t('about.capabilitiesLabel')}</span>
+            <span class="ab-v">
+              {#each id.capabilities as cap (cap)}
+                <span class="ab-chip">{cap}</span>
+              {/each}
+            </span>
+          </div>
+        {/if}
+      </details>
+    </div>
   </section>
 
   <!-- ⑥ 文档与决策 -->
-  <section class="ab-card" data-ab-docs>
-    <h2>{$t('about.docs')}</h2>
-    <div class="ab-row"><span class="ab-k">{$t('about.docsDeveloper')}</span><span class="ab-v">{$t('about.docsDeveloperHint')}</span></div>
-    <div class="ab-row"><span class="ab-k">{$t('about.docsDecisions')}</span><span class="ab-v">{$t('about.docsDecisionsHint')}</span></div>
-    <div class="ab-row"><span class="ab-k">{$t('about.docsSecurity')}</span><span class="ab-v">{$t('about.docsSecurityHint')}</span></div>
-    <div class="ab-row"><span class="ab-k">{$t('about.docsUiStyle')}</span><span class="ab-v">{$t('about.docsUiStyleHint')}</span></div>
-    <p class="ab-note">{$t('about.docsNote')}</p>
+  <section class="main-panel" data-ab-docs>
+    <header class="main-panel-head">
+      <h2>{$t('about.docs')}</h2>
+    </header>
+    <div class="main-panel-body">
+      <div class="ab-row"><span class="ab-k">{$t('about.docsDeveloper')}</span><span class="ab-v">{$t('about.docsDeveloperHint')}</span></div>
+      <div class="ab-row"><span class="ab-k">{$t('about.docsDecisions')}</span><span class="ab-v">{$t('about.docsDecisionsHint')}</span></div>
+      <div class="ab-row"><span class="ab-k">{$t('about.docsSecurity')}</span><span class="ab-v">{$t('about.docsSecurityHint')}</span></div>
+      <div class="ab-row"><span class="ab-k">{$t('about.docsUiStyle')}</span><span class="ab-v">{$t('about.docsUiStyleHint')}</span></div>
+      <p class="ab-note">{$t('about.docsNote')}</p>
+    </div>
   </section>
 
   </div>
 {/if}
 
 <style>
-  /* 关于页布局（页面专属；控件样式不进这里——见 ui-style.md §2） */
-  .ab-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--sp-4);
-    align-items: start;
-  }
-  .ab-card {
-    background: var(--surface);
-    border: 1px solid var(--surface-2);
-    border-radius: var(--radius);
-    padding: var(--sp-4) var(--sp-5);
-  }
-  .ab-card h2 {
-    font-size: var(--fs-md);
-    margin-bottom: var(--sp-3);
-  }
+  /**
+   * 关于页布局（页面专属；控件样式不进这里——见 ui-style.md §2）。
+   * ★ D179：`.ab-grid` / `.ab-card` / `.ab-card h2` 三条**已删**——网格用全局 `.card-grid`，
+   *   卡片外壳用全局 `.main-panel`（与设置页同一套）。顺带修掉一条同 D174 的错：边框原来写的
+   *   是 `border: 1px solid var(--surface-2)`（拿填充档当线），现在是 `.main-panel` 里的 `--line`。
+   */
   .ab-row {
     display: flex;
     justify-content: space-between;
     gap: var(--sp-4);
     padding: var(--sp-2) 0;
-    border-bottom: 1px solid var(--surface-2);
+    border-bottom: 1px solid var(--line);
   }
   .ab-row:last-child { border-bottom: 0; }
   .ab-k { color: var(--text-dim); white-space: nowrap; }
@@ -245,7 +262,7 @@
     gap: var(--sp-2);
   }
   .ab-issues li {
-    border: 1px solid var(--surface-2);
+    border: 1px solid var(--line);
     border-left: 3px solid var(--warn);
     border-radius: var(--radius-xs);
     padding: var(--sp-2) var(--sp-3);

@@ -328,7 +328,7 @@ import ListRow from '../components/ListRow.svelte'
           方向**。放在列表上方（而不是藏在某个详情里）比让使用者去猜便宜得多。
         -->
         <section class="env-issues">
-          <h3 class="warn">{$t('agents.envIssuesTitle')}</h3>
+          <h4 class="warn">{$t('agents.envIssuesTitle')}</h4>
           {#each envIssues as issue}
             <div class="notice warn stack">
               <strong>{issue.summary}</strong>
@@ -598,8 +598,11 @@ import ListRow from '../components/ListRow.svelte'
     margin-bottom: var(--sp-5);
   }
 
-  .env-issues h3 {
-    font-size: var(--fs-sm);
+  /**
+   * ★ D179：块内小节 —— 标签原来是 `h3` 却把字号压成 13px（与"分段 17px"撞车：
+   * 同一个标签两种重量）。现在标签就是 `h4`，字号由全局给，这里只剩间距。
+   */
+  .env-issues h4 {
     margin-bottom: var(--sp-2);
   }
 

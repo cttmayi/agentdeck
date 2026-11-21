@@ -220,7 +220,7 @@
       -->
       {#if noOutputMode}
         <section class="artifact-checks">
-          <h3 class="artifact-sub">{$t('crystallize.artifactChecks')}</h3>
+          <h4 class="artifact-sub">{$t('crystallize.artifactChecks')}</h4>
           <p class="faint fs-xs">{$t('crystallize.artifactNoOutputNote')}</p>
         </section>
       {:else if problems.length > 0}
@@ -262,9 +262,12 @@
     gap: var(--sp-3);
   }
 
+  /**
+   * ★ D179：原来是 `<h3 class="artifact-sub">` **却按"段内小节"的字号写样式**
+   * （13px + dim）——标签说"分段"、样式说"小节"，是这一级四写法里最拧的一个。
+   * 现在标签就是 `h4`（字号/字色由全局给），这里只剩排布。
+   */
   .artifact-sub {
-    font-size: var(--fs-sm);
-    color: var(--text-dim);
     margin-bottom: var(--sp-1);
     display: flex;
     align-items: baseline;

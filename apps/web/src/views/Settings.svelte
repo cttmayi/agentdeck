@@ -123,7 +123,7 @@
   <p>{$t('settings.headIntro')}</p>
 </div>
 
-<div class="set-grid">
+<div class="card-grid">
   <!-- ══════════ 通用 ══════════ -->
   <!-- ★ D174：外壳用 `.main-panel`（与三个设置面板同一个壳，见 ui-style.md §2 "主区面板"），
        原来是页面私有的 `.set-card`（边框还误用了填充档 `--surface-2`）。 -->
@@ -398,15 +398,10 @@
   /* 设置页布局（页面专属；控件样式在 app.css，见 ui-style.md §2） */
   /* ★ 2026-11（使用者拍板"分左右 2 列"）：固定两列——三卡排法为
      通用 | 成本 第一行，远端能力（登录表单 + 同步说明，内容最多）跨满整行。 */
-  .set-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--sp-4);
-    align-items: start;
-  }
   /* ★ D174：`.set-card` / `.set-block` 两套页面私有的样式已删——卡片改用全局 `.main-panel`
      （与三个设置面板同一个壳），分段改用全局 `.drawer-section`（面板里那 9 段同一个定义）。
-     这里只剩**页面布局**（两列网格 + 远端卡跨行），符合"页面只决定放什么、放在哪"。 */
+     ★ D179：`.set-grid` 也删了——两列网格是全局 `.card-grid`（关于页那份逐字相同，两份并成一份）。
+     这里只剩**页面自己的摆放**（哪张卡跨行），符合"页面只决定放什么、放在哪"。 */
   [data-set-remote] {
     grid-column: 1 / -1;
   }

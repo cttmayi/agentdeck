@@ -1808,7 +1808,7 @@
              （它量的是"起草时能看到目标摘要与素材"），但它现在不是"过程 tab"的内容了。 -->
         <div class="process-pane" data-process-pane="evidence">
             <div class="proc-block">
-              <div class="proc-head">{$t('crystallize.stepTarget')}</div>
+              <h4 class="proc-head">{$t('crystallize.stepTarget')}</h4>
               {@render targetSummary()}
             </div>
             <div class="proc-block">
@@ -2463,12 +2463,14 @@
     flex-direction: column;
     gap: var(--sp-2);
   }
+  /**
+   * ★ D179：这是**段内小节**那一档 —— 标签换成 `<h4>`（字号/字重/字色由全局 `h4` 给），
+   * 这里只剩排布（`proc-head` 里可能带右侧的小徽标）。
+   */
   .proc-head {
     display: flex;
     align-items: center;
     gap: var(--sp-2);
-    font-size: var(--fs-sm);
-    font-weight: 600;
   }
 
   .conclusion-block {

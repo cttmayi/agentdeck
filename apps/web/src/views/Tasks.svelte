@@ -819,10 +819,12 @@ import ListRow from '../components/ListRow.svelte'
               <!-- 一列可以收多档（「待处理」收 awaiting_review 与 needs_human） -->
               {@const items = staged.filter((x) => col.ids.includes(x.info.stage))}
               <div class="column">
-                <h4>
+                <!-- ★ D179：看板列头**不是标题**（它是标签档：12px 大写 + faint），标签换成
+                     div —— 原来用 `<h4>` 却把字号压到 12px，与"段内小节 13px"撞车。 -->
+                <div class="column-label">
                   <span>{$t(col.titleId)} <span class="faint">{items.length}</span></span>
                   <span class="col-hint">{$t(col.hintId)}</span>
-                </h4>
+                </div>
 
                 {#if items.length === 0}
                   <p class="col-empty faint fs-xs">{$t('tasks.columnEmpty')}</p>
@@ -1604,7 +1606,8 @@ import ListRow from '../components/ListRow.svelte'
     margin-top: 2px;
   }
 
-  .column h4 {
+  .column-label {
+    display: flex;
     flex-direction: column;
     align-items: flex-start;
     gap: 0;
@@ -1661,7 +1664,8 @@ import ListRow from '../components/ListRow.svelte'
     min-height: 5rem;
   }
 
-  .column h4 {
+  /* 标签档：12px 大写 + faint（不是标题层级里的任何一级，见 ui-style.md §2.9） */
+  .column-label {
     font-size: var(--fs-xs);
     text-transform: uppercase;
     letter-spacing: 0.04em;

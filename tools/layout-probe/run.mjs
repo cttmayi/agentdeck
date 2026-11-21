@@ -4353,6 +4353,46 @@ const CHECKS = [
         ? v.map((c) => `${c.title}: 栏头 ${JSON.stringify(c.headButtons)}`).join('　')
         : JSON.stringify(v),
   },
+  {
+    view: '设置页',
+    key: 'headings.levels',
+    /**
+     * ★★ D179：标题梯子（真 Chrome 里量字号，不是读 CSS）——
+     * 页名 h1 **15px / 500 / 淡一档**＜ 卡片头 h2 **17px / 600 / 正文色** = 分段 h3 **17px**
+     * ＞ 段内小节 h4 **13px / 淡一档**。
+     * "页名比卡片头小"是有意的（顶栏那条退后一层，别跟内容抢）；"h2 与 h3 同字号"也有意
+     * （两者的区别是位置，不是大小）。这两句理由以前不在任何地方，于是四大类容器各写了一遍
+     * "把 h2 压回 17px"。
+     */
+    label: '★★ 标题梯子：页名 15px(淡) ＜ 卡片头 / 分段 17px ＞ 段内小节 13px(淡)',
+    ok: (v) =>
+      !!v &&
+      v.page === 15 &&
+      v.card === 17 &&
+      v.section === 17 &&
+      v.sub === 13 &&
+      v.pageWeight === '500' &&
+      v.cardWeight === '600' &&
+      v.page !== v.card &&
+      v.pageColor !== v.cardColor &&
+      v.subColor !== v.cardColor,
+    show: (v) =>
+      `页名 ${String(v.page)}px/${String(v.pageWeight)} · 卡片头 ${String(v.card)}px/${String(v.cardWeight)} · ` +
+      `分段 ${String(v.section)}px · 小节 ${String(v.sub)}px`,
+  },
+  {
+    view: '关于页',
+    key: 'headings.aboutCards',
+    /**
+     * ★★ D179：**卡片只有一套壳**——关于页六卡与设置页同一套（`.card-grid` + `.main-panel`），
+     * 每张卡都有 head + body，标题与设置页卡片头同字号。
+     * 这一条同时钉住"两份逐字相同的旧网格（`.ab-grid` / `.set-grid`）不许回来"的**结果**
+     * （源码那一半在 `tests/ui-headings.test.ts`）。
+     */
+    label: '★★ 关于页六卡 = 设置页同一套壳（`.card-grid` + `.main-panel`，每张都有 head/body）',
+    ok: (v) => !!v && v.cards === 6 && v.withBody === 6 && v.gridCols === 2 && v.heads.every((n) => n === 17),
+    show: (v) => `${String(v.cards)} 张卡，带 body ${String(v.withBody)}，两列 ${String(v.gridCols)}，标题 ${v.heads.join('/')}px`,
+  },
 
   // ── 新建任务 ──
   { view: '新建任务', key: 'new.hasContent', label: '建任务那一栏渲染出来了（表单在右栏里 + 左边清单还在）', ok: (v) => v === true },

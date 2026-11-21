@@ -707,8 +707,8 @@
     border-left: 2px solid color-mix(in srgb, var(--accent) 35%, var(--line));
   }
 
+  /* ★ D179：字号已由全局 `h4`（段内小节档）给，这里只剩间距 */
   .sub-block h4 {
-    font-size: var(--fs-sm);
     margin: 0 0 var(--sp-1);
   }
 

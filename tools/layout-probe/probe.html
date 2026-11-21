@@ -2702,10 +2702,10 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
           click(toBoard)
           await until(() => d().querySelectorAll('.column').length > 0)
           facts['tasks.boardColumnCount'] = d().querySelectorAll('.column').length
-          facts['tasks.boardHasOngoingColumn'] = [...d().querySelectorAll('.column h4')].some((h) =>
+          facts['tasks.boardHasOngoingColumn'] = [...d().querySelectorAll('.column-label')].some((h) =>
             (h.textContent ?? '').includes('进行中'),
           )
-          facts['tasks.boardColumns'] = [...d().querySelectorAll('.column h4')].map((h) =>
+          facts['tasks.boardColumns'] = [...d().querySelectorAll('.column-label')].map((h) =>
             (h.textContent ?? '').trim().split('\n')[0].trim(),
           )
         }
@@ -4339,7 +4339,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
 
         // ① 六个区都在（应用/运行环境/存储/安全/诊断/文档）
         // ★ 2026-11（使用者拍板"关于也改成 2 列"）：六卡流式两列（与设置页同款）
-        const aboutGrid = d().querySelector('.ab-grid')
+        const aboutGrid = d().querySelector('.card-grid')
         facts['about.twoColumns'] = !!(
           aboutGrid &&
           getComputedStyle(aboutGrid).gridTemplateColumns.split(' ').length === 2
@@ -4348,6 +4348,24 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           '[data-ab-app]', '[data-ab-env]', '[data-ab-storage]',
           '[data-ab-security]', '[data-ab-diagnostics]', '[data-ab-docs]',
         ].every((sel) => !!d().querySelector(sel))
+        /**
+         * ★★ D179：**卡片只有一套壳**——关于页六卡与设置页同一套（`.card-grid` + `.main-panel`）。
+         * 量在**这一页已经打开的时候**（这一段本来就要量网格）：另起一次 `#/about` 往返会把
+         * 虚拟时钟烧掉一大截（探针后面 136 项全成"没量到"——这个错犯过一次）。
+         */
+        facts['headings.aboutCards'] = (() => {
+          const cards = [...d().querySelectorAll('.card-grid .main-panel')]
+          const heads = cards.map((c) => {
+            const h = c.querySelector('.main-panel-head h2')
+            return h ? Math.round(parseFloat(cs(h).fontSize)) : null
+          })
+          return {
+            cards: cards.length,
+            withBody: cards.filter((c) => c.querySelector('.main-panel-body') !== null).length,
+            heads,
+            gridCols: aboutGrid ? cs(aboutGrid).gridTemplateColumns.split(' ').length : 0,
+          }
+        })()
         if (!facts['about.sections']) {
           errors.push('关于页六个区不齐（应用/运行环境/存储/安全/诊断/文档）')
         }
@@ -5110,7 +5128,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               !!d().querySelector('[data-set-costs]') &&
               !!d().querySelector('[data-set-remote]')
             // ★ 2026-11（使用者拍板"分左右 2 列"）：三卡两列——远端卡跨满整行
-            const setGrid = d().querySelector('.set-grid')
+            const setGrid = d().querySelector('.card-grid')
             facts['settings.twoColumns'] = !!(
               setGrid &&
               getComputedStyle(setGrid).gridTemplateColumns.split(' ').length === 2
@@ -5651,7 +5669,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             // `h4` 里是「标题 + 计数 + 说明」三段，只取**标题**那一段：读整个 `h4`
             // 会得到 "Executing 2 the agent is working"（`text()` 会把换行压成空格，
             // 所以按 `\n` 切那一版是错的——第一次跑就是这么红的）。
-            facts['lang.boardColumnsInEn'] = [...d().querySelectorAll('.column h4')].map((h) =>
+            facts['lang.boardColumnsInEn'] = [...d().querySelectorAll('.column-label')].map((h) =>
               (h.querySelector('span')?.firstChild?.textContent ?? '').trim(),
             )
             facts['lang.boardHintsInEn'] = [...d().querySelectorAll('.col-hint')].map((h) =>
@@ -5689,6 +5707,46 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               ...panelActionPlace(card),
             }),
           )
+
+          // ⚠️ 设置页这一段要等 h3/h4 真的在屏上再量：第一版直接查，
+          //    页面还在渲染（只在 `card` 那一条有值、`section`/`sub` 是 null）⇒ 探针超时。
+          await until(
+            () =>
+              !!d().querySelector('.card-grid .drawer-section h3') &&
+              !!d().querySelector('.card-grid .main-panel-body h4'),
+            10,
+          )
+          facts['headings.levels'] = (() => {
+            const px = (el) => (el ? Math.round(parseFloat(cs(el).fontSize)) : null)
+            const h1 = d().querySelector('.topbar .page-name')
+            const cardH2 = d().querySelector('.card-grid .main-panel-head h2')
+            const h3 = d().querySelector('.card-grid .drawer-section h3')
+            // ⚠️ h4 这一处（远端卡的「同步」）**不在** `.drawer-section` 里——它直接挂在卡片 body
+            //   上。这正好是这一批要证明的事：h4 的字号/字色**出了 `drawer-section` 也成立**
+            //   （以前只有藏在那个容器里才是 13px/dim，出了就变回 15px，于是三个组件各自写一套）。
+            const h4 = d().querySelector('.card-grid .main-panel-body h4')
+            return {
+              page: px(h1),
+              card: px(cardH2),
+              section: px(h3),
+              sub: px(h4),
+              pageWeight: h1 ? cs(h1).fontWeight : null,
+              cardWeight: cardH2 ? cs(cardH2).fontWeight : null,
+              subColor: h4 ? cs(h4).color : null,
+              pageColor: h1 ? cs(h1).color : null,
+              cardColor: cardH2 ? cs(cardH2).color : null,
+            }
+          })()
+          /**
+           * ★★ D179：**标题的梯子只有一处定义**（`ui-style.md` §2.9），这里在真 Chrome 里
+           * 把四级都量一遍——设置页同时有四样东西在屏上：
+           *   · 顶栏页名（`h1.page-name`）＝ 15px / 500 / `--text-dim`；
+           *   · 卡片头（`.main-panel-head h2`）＝ 17px / 600 / 正文色；
+           *   · 分段（`.drawer-section h3`）＝ 17px / 600；
+           *   · 段内小节（`.drawer-section h4`）＝ 13px / 600 / `--text-dim`。
+           * 外加两条关系：**页名比卡片头小**（顶栏退后一层）、**h2 与 h3 同字号**
+           * （"这一块的名字"与"分段名"差的是位置不是字号，见 §2.9 的理由）。
+           */
           const langSelectZh = langSelectOf()
           if (!langSelectZh) errors.push('语言组：切回中文时抽屉里的语言 select 不见了')
           else {
@@ -5705,6 +5763,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             .then((r) => r.json())
             .catch(() => null)
           facts['lang.savedOnServer'] = saved ? saved.locale : null
+
         }
 
         // ★ 2026-10：语言组开着的设置抽屉要关掉——后面那几组（三步链等）量的是
