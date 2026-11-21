@@ -685,7 +685,7 @@
                       <span class="chevron" aria-hidden="true">{openDirs[dir.path] ? '▾' : '▸'}</span>
                       <span class="cat-label">{dirToolLabel(dir.id)}</span>
                       <span class="faint fs-xs cat-count">{dir.skills.length}</span>
-                      <span class="faint fs-xs dir-group-path" title={dir.path}>{dir.path}</span>
+                      <span class="faint fs-xs dir-group-path ellipsis" title={dir.path}>{dir.path}</span>
                     </button>
                   </td>
                 </tr>
@@ -702,7 +702,7 @@
                       <!-- ★ 「来源」在这一列是**技能在目录里的相对位置**：目录本身已经
                            在组标题里了，逐条再写一遍那串路径只是重复。 -->
                       <td class="faint fs-xs">
-                        <span class="list-source" title={s.rel}>{s.rel}</span>
+                        <span class="list-source ellipsis" title={s.rel}>{s.rel}</span>
                       </td>
                       <td class="faint fs-xs">
                         {#if s.description}
@@ -944,7 +944,7 @@
                           <!-- ★ 来源是**安装方法**本身（GitHub 链接或本地路径），原样显示：
                                使用者要能核对"我点的这条到底从哪儿装"。长链接单行省略，
                                全文在 title 里。 -->
-                          <span class="faint fs-xs list-source" title={e.source.value}>{e.source.value}</span>
+                          <span class="faint fs-xs list-source ellipsis" title={e.source.value}>{e.source.value}</span>
                         </td>
                         <td class="faint fs-xs">
                           {e.summary}
@@ -1297,11 +1297,9 @@
   /* 本地清单的「来源」列：一条 GitHub 链接或本地路径可能很长。单行省略、全文在
      title 里——列表是用来扫的，一行被撑成十行就扫不动了。 */
   .list-source {
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     display: inline-block;
     max-width: 20rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     vertical-align: bottom;
   }
 
@@ -1335,11 +1333,9 @@
   /* 目录组标题里的路径（与「本地清单」的类别标题行是同一套 `.cat-toggle`）：靠右、
      单行省略，全文在 `title` 里——工具名就在旁边，扫描时看名字即可。 */
   .dir-group-path {
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     min-width: 0;
     max-width: 50%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     font-family: var(--font-mono);
   }
   /* "跳过了什么"缩进一行：它是对上面那个目录的补充，不是另一个目录 */

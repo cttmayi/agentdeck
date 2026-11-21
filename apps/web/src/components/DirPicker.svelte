@@ -195,13 +195,13 @@
             onclick={() => void load(entry.path)}
           >
             <span class="glyph" aria-hidden="true">▸</span>
-            <span class="name mono">{entry.name}</span>
+            <span class="name mono ellipsis">{entry.name}</span>
           </button>
         {:else}
           <!-- 文件不可选：列出来只为了让人确认"这个目录里确实是我的东西" -->
           <span class="row file" title={entry.path} data-dir-entry="file">
             <span class="glyph" aria-hidden="true">·</span>
-            <span class="name mono">{entry.name}</span>
+            <span class="name mono ellipsis">{entry.name}</span>
           </span>
         {/if}
       {:else}
@@ -219,7 +219,7 @@
     {/if}
 
     <div class="actions">
-      <code class="mono now" data-dir-picker-current>{listing?.path ?? ''}</code>
+      <code class="mono now ellipsis" data-dir-picker-current>{listing?.path ?? ''}</code>
       <button type="button" class="btn btn--ghost" onclick={() => (open = false)}>{$t('common.cancel')}</button>
       <button
         type="button"
@@ -309,9 +309,7 @@
     color: var(--text-faint);
   }
   .row .name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
   }
   .empty {
     margin: var(--sp-2);
@@ -323,11 +321,9 @@
     margin-top: var(--sp-1);
   }
   .actions .now {
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     flex: 1 1 0;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     color: var(--text-dim);
   }
 </style>

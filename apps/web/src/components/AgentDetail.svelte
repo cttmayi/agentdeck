@@ -1014,7 +1014,7 @@
       />
     {:else}
       <h2>
-        <span class="agent-head-name" data-agent-head-name>{draft.name}</span>
+        <span class="agent-head-name ellipsis" data-agent-head-name>{draft.name}</span>
         <!--
           ⚠️ 2026-11（D155）：这里原来给自建的智能体挂一枚「智能体」徽标。使用者："智能体的
           徽标就不显示了吧，**都是智能体**"——一枚人人都有的徽标不区分任何东西，纯噪点。
@@ -1549,7 +1549,7 @@
                       autocomplete="off"
                     />
                   {:else}
-                    <span class="mem-text" title={memTitleFor(row)}>{row.text}</span>
+                    <span class="mem-text ellipsis" title={memTitleFor(row)}>{row.text}</span>
                   {/if}
                   <span class="mem-meta">{memMetaFor(row)}</span>
                   <span class="mem-actions">
@@ -1888,9 +1888,7 @@
     row-gap: var(--sp-1);
   }
   .agent-head-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     min-width: 0;
   }
   .agent-rename-input {
@@ -2316,11 +2314,9 @@
   .mem-kind[data-kind='lesson'] { color: var(--warn); }
   .mem-kind[data-kind='fact'] { color: var(--accent); }
   .mem-text {
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     flex: 1 1 auto;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .mem-text-input {
     flex: 1 1 auto;

@@ -397,7 +397,7 @@ import ListRow from '../components/ListRow.svelte'
               {/if}
             </span>
             <span class="list-row-sub agent-notes faint fs-xs">
-              <span class="agent-notes-trunc">
+              <span class="agent-notes-trunc ellipsis">
                 {a.instructions.trim()
                   ? a.instructions.slice(0, 48) + (a.instructions.length > 48 ? '…' : '')
                   : $t('agents.noInstructions')}
@@ -576,11 +576,10 @@ import ListRow from '../components/ListRow.svelte'
   }
 
   .agent-notes-trunc {
+
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     flex: 1;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .mem-count {

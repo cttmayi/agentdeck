@@ -199,7 +199,7 @@
         title={$remoteAccount?.email ?? ''}
       >
         <span class="avatar">{$remoteAccount?.displayName?.slice(0, 1)?.toUpperCase() ?? '?'}</span>
-        <span class="account-name"
+        <span class="account-name ellipsis"
           >{$remoteAccount?.displayName ?? $t('shell.signedIn')}</span
         >
       </button>
@@ -264,10 +264,9 @@
   }
 
   .account-name {
+
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     max-width: 8rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   /* 未登录时给它一点强调色：这是一个**待完成**的动作，不是普通导航 */

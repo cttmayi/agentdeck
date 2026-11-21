@@ -186,7 +186,7 @@
         <div class="skill-card">
           <div class="skill-head">
             <strong>{skill.slug}</strong>
-            <span class="hint">{skill.name}{skill.description ? ` · ${skill.description}` : ''}</span>
+            <span class="hint ellipsis">{skill.name}{skill.description ? ` · ${skill.description}` : ''}</span>
             <button class="btn btn--ghost btn--sm" onclick={() => (skill.removed = true)}>
               {$t('chat.agentMakerRemoveSkill')}
             </button>
@@ -257,11 +257,9 @@
     margin-bottom: 0.5rem;
   }
   .skill-head .hint {
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     flex: 1;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .warn-note {
     font-size: var(--fs-sm);

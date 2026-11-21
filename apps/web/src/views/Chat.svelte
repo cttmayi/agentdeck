@@ -1116,7 +1116,7 @@
               }}
             >{activeConversation.title}</h2>
           {/if}
-          <span class="detail-sub">
+          <span class="detail-sub ellipsis">
             {agentOfActive?.name ?? '—'} ·
             {activeConversation.turnCount === 0
               ? $t('chat.neverUsed')
@@ -1289,9 +1289,9 @@
               <p class="mem-note" data-mem-note>
                 <span class="mem-note-k">{$t('chat.memorySaved')}</span>
                 {#if memNotes[turn.id]!.text !== ''}
-                  <span class="mem-note-t">「{memNotes[turn.id]!.text}」</span>
+                  <span class="mem-note-t ellipsis">「{memNotes[turn.id]!.text}」</span>
                 {:else}
-                  <span class="mem-note-t">{$t('chat.memorySavedMany', { n: String(memNotes[turn.id]!.ids.length) })}</span>
+                  <span class="mem-note-t ellipsis">{$t('chat.memorySavedMany', { n: String(memNotes[turn.id]!.ids.length) })}</span>
                 {/if}
                 <button type="button" class="btn btn--link btn--quiet" data-mem-undo onclick={() => void undoMemory(turn.id)}>
                   {$t('chat.memoryUndo')}
@@ -1349,7 +1349,7 @@
         {#if tidyNote !== null}
           <p class="mem-note" data-mem-note-tidy>
             <span class="mem-note-k">{$t('chat.memorySaved')}</span>
-            <span class="mem-note-t">{$t('chat.memorySavedMany', { n: String(tidyNote.count) })}</span>
+            <span class="mem-note-t ellipsis">{$t('chat.memorySavedMany', { n: String(tidyNote.count) })}</span>
             <button type="button" class="btn btn--link btn--quiet" data-mem-undo-tidy onclick={() => void undoTidy()}>
               {$t('chat.memoryUndo')}
             </button>
@@ -1440,7 +1440,7 @@
       {#if pendingVoiceSend !== null}
         <div class="mem-chip" data-voice-autosend>
           <span class="mem-chip-k">{$t('chat.voiceAutoSendLabel', { s: String(AUTO_SEND_SECONDS) })}</span>
-          <span class="mem-chip-t" data-voice-autosend-text>「{pendingVoiceSend.text}」</span>
+          <span class="mem-chip-t ellipsis" data-voice-autosend-text>「{pendingVoiceSend.text}」</span>
           <button
             type="button"
             class="btn btn--ghost btn--sm"
@@ -1452,7 +1452,7 @@
       {#if ruleAsk !== null}
         <div class="mem-chip" data-voice-rule-chip>
           <span class="mem-chip-k">{$t('chat.voiceRuleLabel')}</span>
-          <span class="mem-chip-t" data-voice-rule-pair
+          <span class="mem-chip-t ellipsis" data-voice-rule-pair
             >「{ruleAsk.from}」→「{ruleAsk.to}」</span
           >
           <button type="button" class="btn btn--ghost btn--sm" data-voice-rule-save onclick={() => void rememberRule()}
@@ -1469,7 +1469,7 @@
       {#if memCandidate !== null && memSkip !== memCandidate.text && memAgentId !== ''}
         <div class="mem-chip" data-mem-chip>
           <span class="mem-chip-k">{$t('chat.memoryChipLabel')}</span>
-          <span class="mem-chip-t" data-mem-chip-text>「{memCandidate.text}」</span>
+          <span class="mem-chip-t ellipsis" data-mem-chip-text>「{memCandidate.text}」</span>
           <button
             type="button"
             class="btn btn--ghost btn--sm"
@@ -1582,10 +1582,8 @@
     color: var(--accent);
   }
   .mem-note-t {
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   /* 记忆 chip（分批第 240 批）：贴在输入条上方，一眼看出"这一句会被记住" */
   .mem-chip {
@@ -1605,11 +1603,9 @@
     white-space: nowrap;
   }
   .mem-chip-t {
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     flex: 1 1 auto;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     color: var(--text-dim);
   }
 
@@ -1678,11 +1674,9 @@
 
   /* 辅助信息（执行者 · 轮数 · 技能）：强制换到第二行 */
   .chat-head-main > .detail-sub {
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     flex: 0 0 100%;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .chat-head-main > h2 {

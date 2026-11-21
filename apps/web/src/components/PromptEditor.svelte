@@ -148,7 +148,7 @@
       <header class="pe-head">
         <div class="pe-head-title">
           <span class="pe-head-mark">✎</span>
-          <h3>{title}</h3>
+          <h3 class="ellipsis">{title}</h3>
         </div>
         <div class="pe-head-right">
           <button type="button" class="pe-close" title={$t('common.close')} onclick={cancel}>✕</button>
@@ -247,12 +247,10 @@
     flex-shrink: 0;
   }
   .pe-head h3 {
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     margin: 0;
     font-size: var(--fs-base);
     font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .pe-head-right {
     display: flex;

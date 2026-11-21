@@ -265,7 +265,7 @@
               >
                 <span class="skill-head">
                   <!-- 名字是主角；万一那条记录没有名字，退回 slug / id——绝不能只剩一个徽标 -->
-                  <span class="skill-name" title={optionLabel(option)}>{optionLabel(option)}</span>
+                  <span class="skill-name ellipsis" title={optionLabel(option)}>{optionLabel(option)}</span>
                   <span
                     class="skill-badge"
                     data-skill-source={option.source}
@@ -333,7 +333,7 @@
           <ul class="mat-list" data-blank-materials>
             {#each blankMaterials as item (item.id)}
               <li>
-                <span class="mat-text">{item.text.length > 60 ? `${item.text.slice(0, 60)}…` : item.text}</span>
+                <span class="mat-text ellipsis">{item.text.length > 60 ? `${item.text.slice(0, 60)}…` : item.text}</span>
                 <button
                   type="button"
                   class="btn btn--ghost btn--sm"
@@ -450,13 +450,11 @@
   .skill-choice { width: 100%; gap: 0.15rem; min-height: 3.9rem; justify-content: center; }
   .skill-head { display: flex; align-items: baseline; gap: var(--sp-2); width: 100%; }
   .skill-name {
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     font-family: var(--font-mono);
     font-weight: 600;
     font-size: var(--fs-base);
     color: var(--text);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     min-width: 0;
   }
   /* 徽标：极淡的胶囊，一眼分得清「你的 / 安装的」而不抢名字 */
@@ -524,10 +522,9 @@
   }
 
   .mat-text {
+
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     flex: 1;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 </style>

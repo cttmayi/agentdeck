@@ -121,7 +121,7 @@
     </button>
     {#if path !== ''}
       <!-- 省略号截左边太多不好认 ⇒ 用 `text-overflow` 截尾，完整路径在 `title` 里 -->
-      <code class="foot-files-path mono" data-workdir-path title={path}>{path}</code>
+      <code class="foot-files-path mono ellipsis" data-workdir-path title={path}>{path}</code>
     {/if}
     {#if actions}{@render actions()}{/if}
     {#if onreveal && revealLabel !== ''}
@@ -184,9 +184,7 @@
     flex: 1 1 0;
     min-width: 0;
     text-align: right;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     color: var(--text-dim);
     font-size: var(--fs-xs);
   }

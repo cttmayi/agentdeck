@@ -1585,7 +1585,7 @@
               class:active={materialPick === item.relPath}
               onclick={() => (materialPick = item.relPath)}
             >
-              <span class="file-name mono">{item.relPath}</span>
+              <span class="file-name mono ellipsis">{item.relPath}</span>
               <span class="faint fs-xs">{Math.max(1, Math.round(item.bytes / 1024))} KB</span>
             </button>
           </li>
@@ -2623,11 +2623,10 @@
   }
 
   .file-name {
+
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     flex: 1;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     font-size: var(--fs-sm);
   }
 

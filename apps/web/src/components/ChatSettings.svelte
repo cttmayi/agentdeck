@@ -397,7 +397,7 @@
         不能用时**原因 + 修法**一起给（下载模型 / 换机器 / 去系统设置勾权限）——
         "点了没反应"是这个功能最想避免的那种失败。
     -->
-    <p class="voice-status" data-voice-status>
+    <p class="voice-status ellipsis" data-voice-status>
       {#if capability === null}
         <span class="faint fs-xs">{$t('chat.voiceSettingsChecking')}</span>
       {:else if capability.available}
@@ -594,7 +594,7 @@
       <p class="voice-label">{$t('chat.voiceVocabRuleLabel')}</p>
       <div class="voice-rules" data-voice-rules>
         {#each vocab.rules as rule, i (rule.from + rule.to)}
-          <span class="voice-rule">
+          <span class="voice-rule ellipsis">
             <span class="mono">{rule.from}</span>
             <span class="faint">→</span>
             <span class="mono">{rule.to}</span>
@@ -766,15 +766,13 @@
    *     把全文放进 `title`——这一节的第一件事是"我现在能不能用"。
    */
   .voice-status {
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     display: flex;
     align-items: center;
     gap: var(--sp-2);
     margin: var(--sp-2) 0;
     font-size: var(--fs-xs);
     color: var(--text-dim);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
   .ok-dot,
   .bad-dot {
@@ -815,13 +813,11 @@
     margin-bottom: var(--sp-2);
   }
   .voice-rule {
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     display: inline-flex;
     align-items: center;
     gap: var(--sp-1);
     font-size: var(--fs-xs);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
   /* 下载进度条：与按钮同一行，吃掉剩下的宽度 */
   .voice-progress {

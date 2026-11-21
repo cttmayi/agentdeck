@@ -56,7 +56,7 @@
                 class:del={row.change === 'D'}
               >{changeLabel(row.change)}</span>
             {/if}
-            <span class="file-name mono">{row.rel}</span>
+            <span class="file-name mono ellipsis">{row.rel}</span>
             {#if row.change !== 'D'}
               {@const d = editor.diffByRel.get(row.rel)}
               {#if d && (d.added > 0 || d.removed > 0)}
@@ -175,7 +175,7 @@
               <span class="num-tag add">+{editor.selectedDiff.added}</span>
               <span class="num-tag del">−{editor.selectedDiff.removed}</span>
             {/if}
-            <span class="diff-head-file mono">{editor.selectedFile}</span>
+            <span class="diff-head-file mono ellipsis">{editor.selectedFile}</span>
             <span class="diff-head-right">
               {#if editor.artifacts !== null && (editor.artifacts.revisedFrom !== null || editor.artifacts.baseline !== null)}
                 <button
@@ -363,11 +363,10 @@
   }
 
   .file-name {
+
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     flex: 1;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     font-size: var(--fs-sm);
   }
 
@@ -521,11 +520,10 @@
   }
 
   .diff-head-file {
+
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     font-size: var(--fs-xs);
     color: var(--text-faint);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     max-width: 12rem;
   }
 

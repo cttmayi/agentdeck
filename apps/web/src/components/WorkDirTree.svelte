@@ -189,7 +189,7 @@
         {#if entry.kind === 'dir'}
           <button
             type="button"
-            class="wd-dir"
+            class="wd-dir ellipsis"
             class:managed={entry.managed}
             title={entry.path}
             onclick={() => toggleDir(entry)}
@@ -210,7 +210,7 @@
           -->
           <button
             type="button"
-            class="wd-file"
+            class="wd-file ellipsis"
             class:managed={entry.managed}
             title={entry.path}
             onclick={() => (viewing = entry)}
@@ -262,9 +262,8 @@
        flex-shrink:1 让名字收缩省略，大小/动作项不被压缩。 */
     min-width: 0;
     flex-shrink: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    /* D191：截断三条收进全局 `.ellipsis`（markup 已带）；这里留 min-width/flex-shrink，
+       它们说的是"这个名字要肯缩"，`.ellipsis` 里的 `min-width:0` 管"能缩到 0"。 */
   }
 
   .wd-dir:hover {
@@ -279,6 +278,8 @@
   }
 
   .wd-file {
+
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     background: none;
     border: 0;
     padding: 0;
@@ -289,9 +290,6 @@
     /* 2026-11 同批：min-width:0 + flex-shrink:1（见 .wd-dir 的注释） */
     min-width: 0;
     flex-shrink: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   /* 2026-11 同批：文件大小这一项不许收缩、不许折行——「16.3KB」保持一行 */

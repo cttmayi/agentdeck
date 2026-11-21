@@ -388,7 +388,7 @@
             -->
             {#if row.from !== null}
               <span
-                class="tidy-from"
+                class="tidy-from ellipsis"
                 class:bad={!row.grounded}
                 data-tidy-from
                 title={row.grounded
@@ -403,13 +403,13 @@
                 </span>
               </span>
             {:else}
-              <span class="tidy-from bad" data-tidy-from title={$t('chat.tidyNoFrom')}>
+              <span class="tidy-from bad ellipsis" data-tidy-from title={$t('chat.tidyNoFrom')}>
                 <span class="tidy-from-mark" aria-hidden="true">⚠</span>
                 <span class="tidy-from-t">{$t('chat.tidyNoFrom')}</span>
               </span>
             {/if}
             {#if row.replacesIds.length > 0}
-              <span class="tidy-from" data-tidy-replaces title={$t('chat.tidyReplacesHint')}>
+              <span class="tidy-from ellipsis" data-tidy-replaces title={$t('chat.tidyReplacesHint')}>
                 <span class="tidy-from-mark" aria-hidden="true">↻</span>
                 <span class="tidy-from-t">
                   {$t('chat.tidyReplaces', {
@@ -420,7 +420,7 @@
               </span>
             {/if}
             {#if row.forgetId !== null}
-              <span class="tidy-from bad" data-tidy-forget title={row.why ?? ''}>
+              <span class="tidy-from bad ellipsis" data-tidy-forget title={row.why ?? ''}>
                 <span class="tidy-from-mark" aria-hidden="true">🗑</span>
                 <span class="tidy-from-t">
                   {$t('chat.tidyForget', { old: row.forgetText ?? '' })}
@@ -428,7 +428,7 @@
               </span>
             {/if}
             {#if row.sameSourceCount > 0}
-              <span class="tidy-from bad" data-tidy-same-source title={row.sameSourceTexts.join('\n')}>
+              <span class="tidy-from bad ellipsis" data-tidy-same-source title={row.sameSourceTexts.join('\n')}>
                 <span class="tidy-from-mark" aria-hidden="true">⚠</span>
                 <span class="tidy-from-t">
                   {$t('chat.tidySameSource', {
@@ -439,13 +439,13 @@
               </span>
             {/if}
             {#if row.alreadyExists}
-              <span class="tidy-from" data-tidy-exists title={$t('chat.tidyExistsHint')}>
+              <span class="tidy-from ellipsis" data-tidy-exists title={$t('chat.tidyExistsHint')}>
                 <span class="tidy-from-mark" aria-hidden="true">✓✓</span>
                 <span class="tidy-from-t">{$t('chat.tidyExists')}</span>
               </span>
             {/if}
             {#if row.subjectSpecific}
-              <span class="tidy-from bad" data-tidy-subject title={$t('chat.tidySubjectHint')}>
+              <span class="tidy-from bad ellipsis" data-tidy-subject title={$t('chat.tidySubjectHint')}>
                 <span class="tidy-from-mark" aria-hidden="true">⚠</span>
                 <span class="tidy-from-t">
                   {$t('chat.tidySubject', { term: row.subjectTerm ?? '' })}
@@ -585,13 +585,11 @@
   }
   /* 出处：**一行**，超出省略（全文在 title 里） */
   .tidy-from {
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     display: block;
     font-size: var(--fs-xs);
     color: var(--text-faint);
     padding-left: 4px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
   .tidy-from.bad {
     color: var(--warn);

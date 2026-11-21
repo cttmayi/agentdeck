@@ -55,7 +55,7 @@
     <span class="list-group-name">{label}</span>
     <span class="list-group-tail">
       {#if note !== ''}
-        <span class="faint fs-xs list-group-note">{note}</span>
+        <span class="faint fs-xs list-group-note ellipsis">{note}</span>
       {/if}
       {#if count !== ''}
         <span class="list-group-count">{count}</span>
@@ -75,9 +75,8 @@
   }
 
   .list-group-note {
+
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 </style>

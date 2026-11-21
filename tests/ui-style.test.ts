@@ -406,7 +406,8 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
    *   ① **不许再写** `max-width: 100%` + 那三条的组合（必须用 `.ellipsis`）；
    *   ② 只剩三条（不带 `max-width`）的旧写法**只许少不许增**（棘轮：现在是 27 处）。
    *      它们大多是 flex 子项自己的 `flex` / `min-width` 配套，收进 `.ellipsis` 要一条条
-   *      改 markup；棘轮保证"不会再多出第 28 份"，同时不假装这件事已经做完。
+   *      改 markup。**D191 把剩下的 25 处全收了**（棘轮从 27 降到 0）——所以这条现在
+   *      是"一处都不许"，不是"别再多"。
    */
   test('★★★ 截断的长文字只有一个写法（全局 `.ellipsis`），旧写法只许少不许增', async () => {
     const files = await load()
@@ -415,7 +416,7 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
     for (const need of ['text-overflow: ellipsis', 'white-space: nowrap', 'overflow: hidden', 'max-width: 100%', 'min-width: 0']) {
       assert.ok(css.includes(need), "`.ellipsis` 少了一行：" + need)
     }
-    const RATCHET = 27
+    const RATCHET = 0
     const offenders: string[] = []
     let trioOnly = 0
     for (const [rel, text] of files) {
@@ -429,9 +430,11 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
       }
     }
     assert.deepEqual(offenders, [], `这套截断写法请改用全局 \`.ellipsis\`（markup 里加 class）：\n${offenders.join('\n')}`)
-    assert.ok(
-      trioOnly <= RATCHET,
-      `只剩"三条"的旧截断写法涨到 ${trioOnly} 处（上限 ${RATCHET}）：能收的就收进 \`.ellipsis\`；真要新增一处，先把上限往上调并想清楚为什么`,
+    assert.equal(
+      trioOnly,
+      0,
+      `还有 ${trioOnly} 处在页面 \`<style>\` 里各写一遍截断三条（三条加不加 \`max-width:100%\` 都算）：` +
+        '一律改成全局 \`.ellipsis\`（markup 里加 class，页面样式只留自己的 display/flex/字号）',
     )
   })
 

@@ -352,7 +352,7 @@
 >
   {#if entry !== null}
     <div class="fv-bar">
-      <span class="fv-path mono faint fs-xs" title={entry.path}>
+      <span class="fv-path mono faint fs-xs ellipsis" title={entry.path}>
         {#if parts.dir !== ''}<span class="fv-dir">{parts.dir}</span>{/if}{parts.name}
       </span>
       {#if sizeText !== ''}
@@ -556,9 +556,8 @@
   }
 
   .fv-path {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     max-width: 46%;
   }
 

@@ -63,7 +63,7 @@
       {#if stepKind !== null}
         <span class="kind">{$t(workflowStepKindKey(stepKind))}</span>
       {/if}
-      <span class="card-title">{title}</span>
+      <span class="card-title ellipsis">{title}</span>
       {#if runId !== null}
         <span class="mono faint fs-xs">{runId.slice(-8)}</span>
       {/if}
@@ -133,10 +133,8 @@
     white-space: nowrap;
   }
   .card-title {
+  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     font-weight: 600;
   }
   .card-toggle {

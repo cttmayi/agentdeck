@@ -232,10 +232,19 @@
 
 用法：markup 上加 `class="… ellipsis"`；页面 `<style>` 里只留自己的东西（`display: block`、`font-weight`、`flex`）。
 
-判据（`tests/ui-style.test.ts`）两档：
+判据（`tests/ui-style.test.ts`）：页面 `<style>` 里**一处都不许**再写那三条（带不带 `max-width: 100%` 都算），一律用全局 `.ellipsis`。
 
-1. 页面里**不许**再出现 `max-width: 100%` + 那三条的组合（已有 8 处收进 `.ellipsis`）；
-2. 只剩三条（不带 `max-width`）的旧写法**只许少不许增**（棘轮，现在 27 处）——它们多是 flex 子项自己的配套，收进 `.ellipsis` 要逐条改 markup，棘轮只保证"不会再多出第 28 份"，不假装这件事做完了。
+> ★ **D191 把剩下的 25 处也收了**：D190 当时用棘轮（"只许少不许增，现在 27"）是为了不假装做完了；
+> 现在棘轮已经**降到 0**。收法一律是两步——页面规则里删掉那三条（`flex` / `min-width` /
+> `font-weight` / `display` 留下，那是这个元素自己的事），markup 上 `class="… ellipsis"`。
+> 收的过程中遇到两类"看起来一样、其实不一样"的：
+> · `.fv-table th/td` 用的是 `white-space: pre`（要保留空格）而不是 `nowrap` ⇒ 它不是这一族，
+>   `text-overflow` 在那儿配合 `max-width: 24rem` 单独成立，**没动**；
+> · `WorkDirTree` 的 `.wd-dir` / `.wd-file` 靠 `min-width: 0` + `flex-shrink: 1` 让名字肯缩，
+>   这两行留在原处（`.ellipsis` 里的 `min-width: 0` 管"能缩到 0"，是另一件事）。
+>
+> 验证：五个页面（任务 / 智能体 / 聊天 / 技能 / 编排）逐元素量 `text-overflow` / `white-space` /
+> `overflow`，没有一处从 `ellipsis` 掉回 `clip`；探针「长名字裁切」仍是 `裁住 true`。
 
 #### 2.9.4 元素自己的宽度（D190）
 
