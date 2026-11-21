@@ -220,6 +220,42 @@
     }
 
       /**
+       * ★★ D201：**圆角只有五个值**（0 / 4 / 6 / 8 / 12 / 999），外加 `50%`（圆）。
+       *
+       * 令牌的名字原来还是反的（6px 叫 `--radius-xs`、4px 叫 `--radius-sm`），改的只是名字、
+       * 像素一个没动。这条判据扫 computed `border-radius`，任何令牌之外的**新值**都报红——
+       * 不管它是裸 px 还是"某个组件自己算出来的"。
+       */
+      function sweepRadius(label) {
+        const doc = d()
+        const win = f.contentWindow
+        const acc = facts['radius.values'] ?? { pages: [], seen: {}, unexpected: [] }
+        const ALLOWED = new Set(['0px', '4px', '6px', '8px', '12px', '999px', '50%'])
+        let counted = 0
+        for (const el of doc.querySelectorAll('*')) {
+          const st = win.getComputedStyle(el)
+          if (st.display === 'none') continue
+          const raw = st.borderRadius
+          if (raw === '' || raw === '0px') continue
+          counted += 1
+          for (const part of raw.split(/\s+/)) {
+            if (part === '') continue
+            acc.seen[part] = (acc.seen[part] ?? 0) + 1
+            if (ALLOWED.has(part)) continue
+            const cls =
+              String(el.className || el.tagName)
+                .split(/\s+/)
+                .filter((c) => c !== '' && !c.startsWith('svelte-'))
+                .slice(0, 2)
+                .join('.') || el.tagName
+            acc.unexpected.push(`${label}:${cls}=${part}`)
+          }
+        }
+        if (counted > 0) acc.pages.push(`${label}(${String(counted)})`)
+        facts['radius.values'] = acc
+      }
+
+      /**
        * ★★ D200：**元素之间的间距只有四类来源**，这条把它们分开量。
        *
        * 已知的四种：
@@ -2074,6 +2110,7 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
         // ── 行高：长标题不许把一行撑高 ──
         sweepCtl('任务页')
         sweepGap('任务页')
+        sweepRadius('任务页')
         facts['tasks.rowHeights'] = need('各行高度', () =>
           rows.map((r) => Math.round(r.getBoundingClientRect().height)),
         )
@@ -2864,6 +2901,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         await wait(500)
         sweepCtl('技能页')
         sweepGap('技能页')
+        sweepRadius('技能页')
         facts['skills.title'] = need('技能页标题', () => text(d().querySelector('.page-name')))
         // ⚠️ 两代老结构都不该再存在，各自是**不同**的一课：
         //   · `.install-panel`（最早那版"插在页头和列表之间的正文面板"）——它
@@ -5962,6 +6000,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           })()
           sweepCtl('设置页')
           sweepGap('设置页')
+          sweepRadius('设置页')
           facts['headings.levels'] = (() => {
             const px = (el) => (el ? Math.round(parseFloat(cs(el).fontSize)) : null)
             const h1 = d().querySelector('.topbar .page-name')

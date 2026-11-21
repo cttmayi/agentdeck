@@ -2012,7 +2012,7 @@
     flex-wrap: wrap;
     margin: 0 0 var(--sp-2);
     padding: var(--sp-2) var(--sp-3);
-    border-radius: var(--radius-xs);
+    border-radius: var(--radius-md);
     background: var(--surface-2, #f4f4f5);
     font-size: var(--fs-xs);
   }

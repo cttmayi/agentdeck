@@ -264,7 +264,7 @@
   .ab-issues li {
     border: 1px solid var(--line);
     border-left: 3px solid var(--warn);
-    border-radius: var(--radius-xs);
+    border-radius: var(--radius-md);
     padding: var(--sp-2) var(--sp-3);
     font-size: var(--fs-sm);
   }

@@ -562,7 +562,7 @@
     line-height: 1.45;
     background: transparent;
     border: 1px solid transparent;
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
     padding: 0 var(--sp-1);
     color: var(--text-dim);
     field-sizing: content;

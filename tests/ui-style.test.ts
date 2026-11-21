@@ -394,6 +394,61 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
   })
 
   /**
+   * ★★★ D201：**圆角令牌"名字里的序"必须等于"数值的序"**，且组件里不许写裸 px 圆角。
+   *
+   * 查下来的一处真错：6px 那个叫 `--radius-xs`、4px 那个叫 `--radius-sm`——**名字是反的**
+   *   （`xs` 比 `sm` 还大）。这种错不会让界面坏掉，但它让"挑哪个令牌"变成猜：
+   *   下一个人在 4 与 6 之间选时，看名字只会选错。改的只是名字（`--radius-xs` → `--radius-md`），
+   *   像素一个没动 ⇒ 视觉零变化；这条判据钉住以后不许再反。
+   */
+  test('★★★ 圆角令牌的名字顺序 = 数值顺序（none < sm < md < 默认 < lg < pill）', async () => {
+    const files = await load()
+    const css = files.get('packages/ui/src/styles/app.css') ?? ''
+    // `--radius-none` 的值是 `0`（不带单位），其余是 `Npx` ⇒ 两种都收
+    const read = (name: string): number => {
+      const m = css.match(new RegExp(`${name}:\\s*(\\d+)(?:px)?;`))
+      assert.ok(m, `app.css 里没有 ${name}`)
+      return Number(m[1])
+    }
+    const ladder: Array<[string, number]> = [
+      ['--radius-none', read('--radius-none')],
+      ['--radius-sm', read('--radius-sm')],
+      ['--radius-md', read('--radius-md')],
+      ['--radius', read('--radius')],
+      ['--radius-lg', read('--radius-lg')],
+      ['--radius-pill', read('--radius-pill')],
+    ]
+    const names = ladder.map(([n]) => n)
+    const values = ladder.map(([, v]) => v)
+    assert.deepEqual(
+      values,
+      [...values].sort((a, b) => a - b),
+      `圆角令牌的数值必须按名字顺序递增：${names.map((n, i) => `${n}=${String(values[i])}`).join(' < ')}`,
+    )
+    assert.equal(new Set(values).size, values.length, '圆角令牌不许有两个同值（那就是一个令牌两种叫法）')
+
+    // 组件里不许写裸 px 圆角（允许：50%（圆）、var(--radius*)、calc(...)、以及"某几个角用令牌"的分角写法）
+    const bare: string[] = []
+    for (const [rel, text] of files) {
+      if (!rel.endsWith('.svelte')) continue
+      const at = text.indexOf('<style')
+      if (at < 0) continue
+      const style = text.slice(at).replace(/\/\*[^]*?\*\//g, '')
+      for (const m of style.matchAll(/border-radius:\s*([^;]+);/g)) {
+        const v = (m[1] ?? '').trim()
+        if (/var\(--radius|50%|calc\(/.test(v)) continue
+        bare.push(`${rel} → border-radius: ${v}`)
+      }
+    }
+    assert.deepEqual(
+      bare,
+      [],
+      '圆角走令牌（--radius-sm / --radius-md / --radius / --radius-lg / --radius-pill），不写裸值：\n' +
+        bare.join('\n'),
+    )
+  })
+
+  /**
    * ★★★ D193：**标题层级只有一套定义（在 app.css）**，页面不许给 `h1`–`h4` 写字号 / 字重 / 字色。
    *
    * 量到的现状（六页逐页量 computed style）：标题族**只有一处**在改动——

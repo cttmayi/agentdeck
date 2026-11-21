@@ -4607,6 +4607,19 @@ const CHECKS = [
       (v.unexpected.length ? ` · ✗ 没归类 ${v.unexpected.join(' ')}` : ''),
   },
   {
+    key: 'radius.values',
+    /**
+     * ★★ D201：**圆角只有五个值 + 圆**：0 / 4 / 6 / 8 / 12 / 999 / 50%。
+     * 扫任务 / 设置 / 技能三页所有元素的 computed `border-radius`，令牌外出现新值即红。
+     */
+    label: '★★ 圆角只有五个值（0/4/6/8/12/999）+ 圆（50%）',
+    ok: (v) =>
+      !!v && Array.isArray(v.unexpected) && v.unexpected.length === 0 && Array.isArray(v.pages) && v.pages.length >= 3,
+    show: (v) =>
+      `${v.pages.join(' ')} · 见到的圆角：${Object.keys(v.seen).sort((a, b) => parseFloat(a) - parseFloat(b)).join(' / ')}` +
+      (v.unexpected.length ? ` · ✗ 令牌外 ${v.unexpected.join(' ')}` : ''),
+  },
+  {
     key: 'gap.values',
     /**
      * ★★ D200：**间距只有四类来源**——令牌刻度（4/8/12/16/24/32/48）、紧贴档 2px

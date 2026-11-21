@@ -98,10 +98,14 @@
   --lh-tight: 1.3;
   --lh-base: 1.6;
 
-  --radius-sm: 4px;
-  /* ★ 298 批：圆角的全部取值（原来组件里散着 0/5px/6px/100px 这些裸值） */
+  /* ★ 圆角的全部取值（原来组件里散着 0/5px/6px/100px 这些裸值）。
+     **命名按数值从小到大**：none(0) < sm(4) < md(6) < `--radius`(8) < lg(12) < pill(999)。
+     ⚠️ D201：原来 6px 那个叫 `--radius-xs`、4px 那个叫 `--radius-sm`——**名字是反的**
+     （xs 比 sm 还大）。改的只是名字：`--radius-xs` → `--radius-md`，像素一个没动，
+     所以视觉零变化。加了一条判据（`tests/ui-style.test.ts`）钉住"名字的序必须等于值的序"。 */
   --radius-none: 0;
-  --radius-xs: 6px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
   --radius-pill: 999px;
   /**
    * ★ D181（使用者："按钮的类型差别大，一般按钮和顶栏的按钮差异太大，风格不一致"）：
@@ -412,7 +416,7 @@ hr {
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb {
   background: var(--line-strong);
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-md);
   border: none;
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
@@ -604,7 +608,7 @@ hr {
 .topbar .page-actions button {
   height: var(--ctl-h);
   padding: 0 var(--sp-3);
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-dim);
   display: inline-flex;
@@ -1399,7 +1403,7 @@ hr {
   height: var(--ctl-h);
   padding: 0 var(--sp-3);
   border: 0;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-dim);
   display: inline-flex;
@@ -1623,7 +1627,7 @@ hr {
   height: var(--ctl-h);
   padding: 0 var(--sp-3);
   border: 0;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-dim);
   display: inline-flex;
@@ -1672,7 +1676,7 @@ hr {
 .source-toggle button {
   height: var(--ctl-h);
   padding: 0 var(--sp-3);
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-md);
   border: none;
   background: transparent;
   color: var(--text-dim);
