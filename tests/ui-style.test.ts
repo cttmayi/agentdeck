@@ -233,10 +233,10 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
      * ★ 2026-11（D145）：从「只盯列表页范例」扩到**所有带标记的设计稿**——新增的
      *   `platform-members-design.html` 同样逐字嵌了 `app.css`。新增一份时：在两段 CSS
      *   前后加 `==== BEGIN/END ==== ` 标记，并把它加进下面这个清单。
-     *   同步命令：`node tools/ui-demo/sync-list-demo.mjs`。
+     *   同步命令：`node tools/ui-demo/sync-demo.mjs`。
      */
     for (const rel of [
-      'docs/design/list-page-demo.html',
+      'docs/design/ui-demo.html',
       'docs/design/platform-members-design.html',
     ]) {
     /*
@@ -266,7 +266,7 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
     )
     assert.ok(
       same(appCss, demoApp),
-      `${rel} 里的 app.css 与真文件不一致——跑 node tools/ui-demo/sync-list-demo.mjs`,
+      `${rel} 里的 app.css 与真文件不一致——跑 node tools/ui-demo/sync-demo.mjs`,
     )
 
     const scopedOf = async (rel: string): Promise<string> => {
@@ -397,7 +397,7 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
    * ★★★ D210：**退场的类名不许再出现在标记里**。
    *
    * 踩到的实例：`.workdir-row`（"输入 + 浏览…"那一行）在 D174 被并进了 `.field-row`，
-   *   app.css 里**规则已经删了**、只剩注释提到它；但 `docs/design/list-page-demo.html`
+   *   app.css 里**规则已经删了**、只剩注释提到它；但 `docs/design/ui-demo.html`
    *   里还留着 3 处 `class="workdir-row"`。于是那几行退化成普通块：
    *     · `<input>` 吃到全局 `input, select { width: 100% }` ⇒ 占满整行；
    *     · 「浏览…」是行内块 ⇒ 被挤到**下一行**（使用者报"『浏览』和编辑框分成 2 行"）。
@@ -428,7 +428,7 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
       // ② 标记里不许再用它。⚠️ `load()` 只扫 apps/packages，**不含 `docs/`** ——
       //    设计稿正是踩坑的地方（演示稿里那 3 处就是这么漏掉的），所以这里额外读 docs/design。
       const targets: Array<[string, string]> = [...files]
-      for (const rel of ['docs/design/list-page-demo.html', 'docs/design/platform-members-design.html']) {
+      for (const rel of ['docs/design/ui-demo.html', 'docs/design/platform-members-design.html']) {
         targets.push([rel, await readFile(join(REPO_ROOT, rel), 'utf8')])
       }
       for (const [rel, raw] of targets) {

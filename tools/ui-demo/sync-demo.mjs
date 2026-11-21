@@ -1,6 +1,9 @@
 /**
  * 把 `docs/design/` 里那些**逐字嵌入**了 `app.css` 的设计页重新同步成真文件的样子。
  *
+ * ⚠️ 2026-11（D211）：文件名从 `sync-list-demo.mjs` 改成 `sync-demo.mjs`——它同步的
+ *   从来不止"列表页"那一份（还有 `platform-members-design.html`）。
+ *
  * 为什么要这个脚本：那份 HTML 范例的第一段 `<style>` 是 `app.css`（含两个标准控件的
  * scoped 样式）的**逐字副本**——这样范例里的颜色/字号/行高就是产品里的样子，而不是
  * "照着调得像"。但它会过期：`app.css` 一改，范例就该跟着变。
@@ -8,7 +11,7 @@
  * `tests/ui-style.test.ts` 有一条判据专门盯着"两段是不是逐字相同"（不一样就红）。
  * 红了就跑这一条：
  *
- *     node tools/ui-demo/sync-list-demo.mjs
+ *     node tools/ui-demo/sync-demo.mjs
  *
  * 然后刷新浏览器里的范例页。标记（`==== BEGIN/END ==== `）本身不许改——判据靠它们定位。
  */
@@ -22,7 +25,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
  * ⚠️ 新增一份就先在两段 CSS 前后加 `==== BEGIN/END ==== ` 标记，再来这里加一行。
  */
 const DEMOS = [
-  join(ROOT, 'docs/design/list-page-demo.html'),
+  join(ROOT, 'docs/design/ui-demo.html'),
   join(ROOT, 'docs/design/platform-members-design.html'),
 ]
 const APP_CSS = join(ROOT, 'packages/ui/src/styles/app.css')
