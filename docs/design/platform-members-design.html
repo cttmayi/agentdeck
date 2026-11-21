@@ -601,9 +601,21 @@ hr {
  *    写下的同一套惯例。
  */
 .topbar .page-actions button.btn--primary {
+  /**
+   * ★ D189：**字重 600 已经收进 `.btn--primary` 基类**，这里不再重复声明。
+   *
+   * ⚠️ 但**底色与字色必须留在这里**，不能也"收进基类"就完事：上面那条
+   *   `.topbar .page-actions button` 把每一格的底色压成 `transparent`、字色压成
+   *   `--text-dim`，它的特异性 (0,2,1) 高于基类 `.btn--primary` 的 (0,1,0)。这条规则
+   *   的作用就是**把顶栏的主操作从那层"格子默认长相"里捞出来**。
+   *
+   * 这不是理论担心：D189 第一版把这三行删得只剩字重"收进基类"的说明，于是顶栏那颗
+   *   「新建任务」变成透明底 + 淡字——探针当场红（`btn.uniform` 报
+   *   `顶栏格子 底 rgba(0,0,0,0)`）。**"收进基类"能收的是"基类本来就能定的值"，
+   *   而不是"需要比别人特异性更高的覆盖"。**
+   */
   background: var(--accent-dim);
   color: var(--on-accent);
-  font-weight: 600;
 }
 
 /**
@@ -613,9 +625,14 @@ hr {
  */
 .detail-head .detail-actions > button.btn--primary,
 .pane-actions button.btn--primary {
+  /**
+   * ★ D189：**字重 600 收进基类了**，这里不重复。
+   * ⚠️ 底色与字色**必须留**：`.detail-head .detail-actions > button` 把轨道里每一颗按钮
+   *   的颜色都压成 `--text-dim` + 透明底（"格子"的默认长相），这条选择器的作用是
+   *   **把主操作从那层压制里捞出来**。删掉它，栏头的主操作就又会变回一颗 ghost。
+   */
   background: var(--accent-dim);
   color: var(--on-accent);
-  font-weight: 600;
 }
 
 /* 当前那一格（呈现模式 / 正在建任务）：实心底，一排里最重的信号 */
@@ -1907,9 +1924,23 @@ button:disabled,
  * `DirPicker` 的目录行……）**不属于按钮族**：它们自带形状，只借基类的
  * `font: inherit` / 指针。清单见 `docs/design/ui-style.md`。
  */
+/**
+ * ★★ D189：**"主操作"的三个特征都写在基类里**——实心 accent 底 + 白字 + 字重 600。
+ *
+ * 由来：D181 喊的是"主操作处处实心 + 白字 + 600"，但**600 只写在了两条轨道规则里**
+ *   （`.topbar .page-actions button.btn--primary` 与 `.detail-head .detail-actions >
+ *   button.btn--primary`），基类这条只有底色与字色。于是同一个 `btn--primary` 在
+ *   顶栏/栏头是 600，在**面板底栏、模态框底栏、表单底栏、抽屉脚**里是 400——
+ *   "主操作只有一个长相"其实还是两个长相，差在字重。
+ *
+ * 是谁发现的：`docs/design/list-page-demo.html` 里新加的「排版七条速查」自检⑥
+ * （那块量的是"主操作长相"，量到 `fontWeight: 400` 当场红）。产品页面里之所以没暴雷，
+ * 是因为那几处 primary 恰好都长在顶栏/栏头两条轨道上。
+ */
 .btn--primary {
   background: var(--accent-dim);
   color: var(--on-accent);
+  font-weight: 600;
 }
 
 .btn--secondary {

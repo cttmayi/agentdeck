@@ -272,16 +272,19 @@ const CHECKS = [
       const hs = keys.map((k) => v[k]?.['高'])
       const fs = keys.map((k) => v[k]?.['字号'])
       if (hs.some((h) => h !== 30) || fs.some((f) => f !== '13px')) return false
+      // ★ D189：主操作**三个特征**都要在（实心底 + 白字 + 600）。原来只量了底和字色，
+      //   于是"顶栏 600 / 面板底栏 400"这种"同一颗按钮两个长相"漏了过去——补上字重。
       for (const k of ['顶栏格子', '表单底栏', '模态框底栏']) {
         if (v[k]?.['底'] === 'rgba(0, 0, 0, 0)') return false
         if (v[k]?.['字色'] !== 'rgb(255, 255, 255)') return false
+        if (v[k]?.['字重'] !== '600') return false
       }
       return true
     },
     show: (v) =>
       v
         ? ['顶栏格子', '表单底栏', '模态框底栏', '模态框关闭']
-            .map((k) => `${k} ${String(v[k]?.['高'])}px/${String(v[k]?.['字号'])}`)
+            .map((k) => `${k} ${String(v[k]?.['高'])}px/${String(v[k]?.['字号'])}/${String(v[k]?.['字重'])}`)
             .join('　')
         : '没量到',
   },

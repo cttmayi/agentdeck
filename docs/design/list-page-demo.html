@@ -614,9 +614,21 @@ hr {
  *    写下的同一套惯例。
  */
 .topbar .page-actions button.btn--primary {
+  /**
+   * ★ D189：**字重 600 已经收进 `.btn--primary` 基类**，这里不再重复声明。
+   *
+   * ⚠️ 但**底色与字色必须留在这里**，不能也"收进基类"就完事：上面那条
+   *   `.topbar .page-actions button` 把每一格的底色压成 `transparent`、字色压成
+   *   `--text-dim`，它的特异性 (0,2,1) 高于基类 `.btn--primary` 的 (0,1,0)。这条规则
+   *   的作用就是**把顶栏的主操作从那层"格子默认长相"里捞出来**。
+   *
+   * 这不是理论担心：D189 第一版把这三行删得只剩字重"收进基类"的说明，于是顶栏那颗
+   *   「新建任务」变成透明底 + 淡字——探针当场红（`btn.uniform` 报
+   *   `顶栏格子 底 rgba(0,0,0,0)`）。**"收进基类"能收的是"基类本来就能定的值"，
+   *   而不是"需要比别人特异性更高的覆盖"。**
+   */
   background: var(--accent-dim);
   color: var(--on-accent);
-  font-weight: 600;
 }
 
 /**
@@ -626,9 +638,14 @@ hr {
  */
 .detail-head .detail-actions > button.btn--primary,
 .pane-actions button.btn--primary {
+  /**
+   * ★ D189：**字重 600 收进基类了**，这里不重复。
+   * ⚠️ 底色与字色**必须留**：`.detail-head .detail-actions > button` 把轨道里每一颗按钮
+   *   的颜色都压成 `--text-dim` + 透明底（"格子"的默认长相），这条选择器的作用是
+   *   **把主操作从那层压制里捞出来**。删掉它，栏头的主操作就又会变回一颗 ghost。
+   */
   background: var(--accent-dim);
   color: var(--on-accent);
-  font-weight: 600;
 }
 
 /* 当前那一格（呈现模式 / 正在建任务）：实心底，一排里最重的信号 */
@@ -1920,9 +1937,23 @@ button:disabled,
  * `DirPicker` 的目录行……）**不属于按钮族**：它们自带形状，只借基类的
  * `font: inherit` / 指针。清单见 `docs/design/ui-style.md`。
  */
+/**
+ * ★★ D189：**"主操作"的三个特征都写在基类里**——实心 accent 底 + 白字 + 字重 600。
+ *
+ * 由来：D181 喊的是"主操作处处实心 + 白字 + 600"，但**600 只写在了两条轨道规则里**
+ *   （`.topbar .page-actions button.btn--primary` 与 `.detail-head .detail-actions >
+ *   button.btn--primary`），基类这条只有底色与字色。于是同一个 `btn--primary` 在
+ *   顶栏/栏头是 600，在**面板底栏、模态框底栏、表单底栏、抽屉脚**里是 400——
+ *   "主操作只有一个长相"其实还是两个长相，差在字重。
+ *
+ * 是谁发现的：`docs/design/list-page-demo.html` 里新加的「排版七条速查」自检⑥
+ * （那块量的是"主操作长相"，量到 `fontWeight: 400` 当场红）。产品页面里之所以没暴雷，
+ * 是因为那几处 primary 恰好都长在顶栏/栏头两条轨道上。
+ */
 .btn--primary {
   background: var(--accent-dim);
   color: var(--on-accent);
+  font-weight: 600;
 }
 
 .btn--secondary {
@@ -3003,6 +3034,29 @@ a > button { width: 100%; }
       .demo-frame { max-width: 76rem; margin: 0 auto; padding: var(--sp-5) var(--sp-4) var(--sp-8); }
       .demo-h1 { font-size: var(--fs-xl); margin: 0 0 var(--sp-2); }
       .demo-lead { color: var(--text-dim); margin: 0 0 var(--sp-4); max-width: 60rem; }
+      /* 「最后结果」那一小节的标题：它演示的是产品里 `h4` 那一档（13px / 600 / dim，D179） */
+      .demo-subhead { margin: var(--sp-4) 0 var(--sp-2); }
+
+      /* ── 排版七条速查（主屏之外那一块）── */
+      .demo-rules { display: flex; flex-direction: column; gap: var(--sp-5); margin-bottom: var(--sp-5); }
+      .demo-rule {
+        padding: var(--sp-4) var(--sp-5);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+      }
+      .demo-rule h3 { margin: 0 0 var(--sp-2); }
+      .demo-rule-note { margin: 0 0 var(--sp-3); color: var(--text-dim); font-size: var(--fs-sm); }
+      /* 这一块的宽度是**刻意**给的 1000px：要让"正文 640 上限"看得出来（栏必须比上限宽） */
+      .demo-ruler { width: 1000px; max-width: 100%; }
+      .demo-rule-frames,
+      .demo-rule-pairs { display: flex; gap: var(--sp-4); align-items: flex-start; flex-wrap: wrap; }
+      .demo-rule-frames > * { flex: 1 1 18rem; min-width: 0; }
+      .demo-rule-pairs > * { flex: 1 1 20rem; min-width: 0; }
+      /* 速查块里的静态浮层：不要阴影/遮罩，它只是"一块有头体脚的东西" */
+      .demo-rule .modal { box-shadow: none; }
+      .demo-rule-weights { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
+      .demo-rule .field { margin-bottom: 0; }
       .demo-toolbar {
         display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center;
         padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-4);
@@ -3339,7 +3393,6 @@ a > button { width: 100%; }
                       </p>
                     </div>
                   </div>
-                </div>
 
                 <!-- ④ 没选中时的那一屏（`MainArea` 的 empty：说"选一个"，不是一片空白） -->
                 <div class="pane-body" hidden data-demo-empty>
@@ -3465,6 +3518,138 @@ a > button { width: 100%; }
           </div>
         </div>
       </div>
+
+      <!-- ══════════════════ 排版七条速查（主屏之外：这里要量"尺寸本身"）══════════════════ -->
+      <!--
+        这一块是**主屏装不下的那几条**：控件同高、两列并排、内距四级、密度两档、
+        正文档与行宽上限、主操作的长相。
+
+        ⚠️ 为什么单独开一块而不是塞进上面那一屏：主屏的 `.demo-screen` 是**固定高度**
+           （52rem，为了像"一屏截图"），塞进 640px 宽的正文会把它的自检项
+           「首屏装得下」撑红；而且主屏的详情栏只有 640px 宽 ⇒ **行宽上限根本显不出来**
+           （上限 640，栏也 640）。所以这一块的宽度是刻意给的：`.demo-ruler` 是 1000px 宽，
+           里面那段正文仍然是 640px。
+      -->
+      <h2 class="demo-section-title">排版七条速查（改界面之前先看这一块）</h2>
+      <div class="demo-rules">
+        <section class="demo-rule">
+          <h3>① 控件同一个高度（30px）</h3>
+          <p class="demo-rule-note">
+            按钮、输入框、下拉框是同一套尺寸（D182）。原来按钮 30 / 输入 40 / 下拉 37，
+            同一行里差 10px。
+          </p>
+          <div class="workdir-row" id="demo-rule-controls">
+            <input type="text" value="~/agentdeck-workspace" aria-label="路径" />
+            <select aria-label="交给谁">
+              <option>助手（默认）</option>
+            </select>
+            <button type="button" class="btn btn--secondary">浏览…</button>
+            <button type="button" class="btn btn--primary">保存</button>
+          </div>
+        </section>
+
+        <section class="demo-rule">
+          <h3>② 内距只有四级：面板与浮层是同一套</h3>
+          <p class="demo-rule-note">
+            面板（栏 / 面板 / 详情栏）与浮层（抽屉 / 模态）是同一级东西 ⇒ 头 16/24/12、
+            体 16/24、脚 12/24（D183）。下面两块一个是面板、一个是浮层，内距逐条相同。
+          </p>
+          <div class="demo-rule-frames">
+            <div class="main-panel" id="demo-rule-panel">
+              <div class="main-panel-head"><h3>面板</h3></div>
+              <div class="main-panel-body"><p class="hint" style="margin: 0">头 / 体 / 脚内距与右边那块浮层逐条相等。</p></div>
+              <div class="main-panel-foot"><button type="button" class="btn btn--primary">保存</button></div>
+            </div>
+            <div class="modal" id="demo-rule-modal" role="dialog" aria-label="浮层示例">
+              <div class="modal-head"><h3>浮层</h3><button type="button" class="btn btn--ghost">关闭</button></div>
+              <div class="modal-body"><p class="hint" style="margin: 0">体 16/24——不是 24/24。</p></div>
+              <div class="modal-foot"><button type="button" class="btn btn--secondary">取消</button><button type="button" class="btn btn--primary">确定</button></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="demo-rule">
+          <h3>③ 密度只有两档：表格紧凑、列表标准</h3>
+          <p class="demo-rule-note">
+            表格数据行 <code>td</code> 上下各 12、表头 <code>th</code> 上下各 8（紧凑档）；
+            列表行 64 + 行内上下各 8（标准档）（D184）。
+          </p>
+          <div class="table-wrap">
+            <table class="table" id="demo-rule-table">
+              <thead>
+                <tr><th>文件</th><th>大小</th><th>改于</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>weekly-12.md</code></td><td>12 KB</td><td class="faint fs-xs">12 分钟前</td></tr>
+                <tr><td><code>sources.md</code></td><td>4 KB</td><td class="faint fs-xs">14 分钟前</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="demo-rule">
+          <h3>④ 两个东西并排只有一条规则</h3>
+          <p class="demo-rule-note">
+            <code>.pair-field</code>（字段对，两等宽列 + gap 12）/ <code>.pair-card</code>
+            （卡片对，gap 16）；窄屏一律塌成一列（D187）。左边是字段对、右边是卡片对。
+          </p>
+          <div class="demo-rule-pairs">
+            <div class="pair-field" id="demo-rule-pair-field">
+              <div class="field" style="margin: 0"><label for="demo-r1">周次</label><input id="demo-r1" type="text" value="12" /></div>
+              <div class="field" style="margin: 0"><label for="demo-r2">优先级</label><select id="demo-r2"><option>普通</option></select></div>
+            </div>
+            <div class="pair-card" id="demo-rule-pair-card">
+              <div class="main-panel"><div class="main-panel-body"><p class="hint" style="margin: 0">卡片 A</p></div></div>
+              <div class="main-panel"><div class="main-panel-body"><p class="hint" style="margin: 0">卡片 B</p></div></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="demo-rule">
+          <h3>⑤ 正文档只有一个字号，而且有行宽上限</h3>
+          <p class="demo-rule-note">
+            agent 产出的正文与界面正文**同一个字号 14**（D185）。连续成段的文字有 640px 上限
+            （D186）——这块容器故意做成 1000px 宽，你能看到这段文字在 640px 处停住，而下面那张
+            表格横过去。
+          </p>
+          <div class="demo-ruler" id="demo-rule-ruler">
+            <div class="markdown" id="demo-rule-markdown">
+              <p>
+                三家竞品的定价页这一周都改过：丙家把「按席位」换成了按用量，甲家只是把价格上调了
+                8%，乙家没动价格但把试用从 14 天缩到 7 天。周报的结论是「先把按用量那一套的折算
+                口径写清楚」，因为三家放在一起比价时，只有口径统一了才看得出谁真的更便宜。
+              </p>
+            </div>
+            <div class="table-wrap">
+              <table class="table" id="demo-rule-table-wide">
+                <thead>
+                  <tr><th>竞品</th><th>改了什么</th><th>影响</th><th>下周动作</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>丙家</td><td>按席位 → 按用量（阈值 2000 次/月）</td><td>小客户变便宜</td><td>重算折算口径</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="demo-rule">
+          <h3>⑥ 主操作只有一个长相</h3>
+          <p class="demo-rule-note">
+            实心 accent + 白字 + 600（D181）。它在顶栏格子、栏头、面板底栏、浮层脚里都长这样；
+            旁边那些是 <code>btn--secondary</code> / <code>btn--ghost</code> / <code>btn--danger</code>。
+          </p>
+          <div class="demo-rule-weights" id="demo-rule-weights">
+            <button type="button" class="btn btn--primary">保存</button>
+            <button type="button" class="btn btn--secondary">浏览…</button>
+            <button type="button" class="btn btn--ghost">返回</button>
+            <button type="button" class="btn btn--danger">删除</button>
+            <button type="button" class="btn btn--link">撤销</button>
+          </div>
+        </section>
+      </div>
+
+      <div id="demo-rules-selfcheck" class="notice" role="status" aria-live="polite">正在自检排版七条…</div>
 
       <h2 class="demo-section-title">三种错的样子（这三种都真的发生过）</h2>
       <div class="demo-bad-grid">
@@ -3702,6 +3887,115 @@ a > button { width: 100%; }
           })()],
           ['没有横向溢出', document.documentElement.scrollWidth <= window.innerWidth + 1],
         ]
+        /**
+         * ★ D188：**排版七条速查**那六条单独一档。
+         * ⚠️ 不并进上面那 24 条：上面那一屏是**固定高度的一屏截图**（`.demo-screen` 52rem），
+         *   它的判据回答"这一屏是不是照着标准控件拼的"；这六条回答"七条尺寸本身对不对"，
+         *   而且必须放在**主屏之外**才量得准（主屏详情栏只有 640px 宽，行宽上限在那里显不出来）。
+         * 两档各自一个结论条，谁也不冒充谁。
+         */
+        const ruleChecks = [
+
+          // ── 排版七条速查（主屏之外那一块）────────────────────────────
+          // ⚠️ 这六条量的都是**尺寸本身**，所以它们放在主屏外面：
+          //    主屏是固定高度的"一屏截图"，塞不进 640px 宽的正文档，也显不出行宽上限。
+          [
+            '① 控件同高：输入 / 下拉 / 按钮全是 30px',
+            (() => {
+              const box = q('#demo-rule-controls')
+              if (!box) return false
+              const items = [box.querySelector('input'), box.querySelector('select'),
+                box.querySelector('.btn'), box.querySelector('.btn--primary')]
+              if (items.some((el) => !el)) return false
+              return items.every((el) => Math.round(R(el).height) === 30) &&
+                items.every((el) => C(el).fontSize === '13px')
+            })(),
+          ],
+          [
+            '② 面板与浮层的内距逐条相等（头 16/24/12、体 16/24、脚 12/24）',
+            (() => {
+              const panel = q('#demo-rule-panel')
+              const modal = q('#demo-rule-modal')
+              if (!panel || !modal) return false
+              const pairs = [
+                [panel.querySelector('.main-panel-head'), modal.querySelector('.modal-head')],
+                [panel.querySelector('.main-panel-body'), modal.querySelector('.modal-body')],
+                [panel.querySelector('.main-panel-foot'), modal.querySelector('.modal-foot')],
+              ]
+              if (pairs.some(([a, b]) => !a || !b)) return false
+              return pairs.every(([a, b]) => {
+                const ca = C(a)
+                const cb = C(b)
+                return ca.paddingTop === cb.paddingTop && ca.paddingBottom === cb.paddingBottom &&
+                  ca.paddingLeft === cb.paddingLeft && ca.paddingRight === cb.paddingRight
+              }) && C(modal.querySelector('.modal-body')).paddingTop === '16px'
+            })(),
+          ],
+          [
+            '③ 密度两档：表格单元格 td 竖 12 / 表头 th 竖 8',
+            (() => {
+              const table = q('#demo-rule-table')
+              if (!table) return false
+              const td = C(table.querySelector('tbody td'))
+              const th = C(table.querySelector('thead th'))
+              return td.paddingTop === '12px' && td.paddingBottom === '12px' &&
+                th.paddingTop === '8px' && th.paddingBottom === '8px'
+            })(),
+          ],
+          [
+            '④ 并排两列是同一个规则（字段对 gap 12 / 卡片对 gap 16，都是等宽两列）',
+            (() => {
+              const field = q('#demo-rule-pair-field')
+              const card = q('#demo-rule-pair-card')
+              if (!field || !card) return false
+              const twoEqual = (el) => {
+                const cols = C(el).gridTemplateColumns.split(/\s+/).map((v) => Math.round(parseFloat(v)))
+                return cols.length === 2 && cols[0] === cols[1]
+              }
+              return twoEqual(field) && twoEqual(card) &&
+                C(field).gap === '12px' && C(card).gap === '16px'
+            })(),
+          ],
+          [
+            '⑤ 正文档 14px、行宽 640px（且正文比它所在的栏窄）',
+            (() => {
+              const md = q('#demo-rule-markdown')
+              const ruler = q('#demo-rule-ruler')
+              if (!md || !ruler) return false
+              const w = Math.round(R(md).width)
+              const rw = Math.round(R(ruler).width)
+              return C(md).fontSize === '14px' && C(document.body).fontSize === '14px' &&
+                C(md).maxWidth === '640px' && w <= 640 && w < rw
+            })(),
+          ],
+          [
+            '⑥ 主操作只有一个长相（实心 accent + 白字 + 600）',
+            (() => {
+              const box = q('#demo-rule-weights')
+              const primary = box && box.querySelector('.btn--primary')
+              if (!primary) return false
+              const c = C(primary)
+              const others = [...box.querySelectorAll('.btn')].filter((el) => el !== primary)
+              // 主操作 ⇒ 实心 accent + 白字 + 600；其余**都不许是这个实心底**
+              // （`btn--danger` 是另一种实心底，它允许有底色，所以比的是"和主操作不同色"）
+              return c.fontWeight === '600' &&
+                c.backgroundColor !== 'rgba(0, 0, 0, 0)' &&
+                c.color === 'rgb(255, 255, 255)' &&
+                others.every((el) => C(el).backgroundColor !== c.backgroundColor)
+            })(),
+          ],
+        ]
+        const ruleBad = ruleChecks.filter(([, ok]) => !ok).map(([name]) => name)
+        const ruleBox = q('#demo-rules-selfcheck')
+        if (ruleBox) {
+          ruleBox.className = 'notice ' + (ruleBad.length === 0 ? 'good' : 'bad')
+          ruleBox.innerHTML =
+            ruleBad.length === 0
+              ? '<b>排版七条自检通过 ' + ruleChecks.length + '/' + ruleChecks.length + '</b>：' +
+                '控件同高、面板与浮层内距逐条相等、表格紧凑档、并排两列一条规则、' +
+                '正文档 14px + 行宽 640px、主操作一个长相。'
+              : '<b>排版七条自检未通过（' + ruleBad.length + ' 项）</b>：' + ruleBad.join('、')
+        }
         const bad = checks.filter(([, ok]) => !ok).map(([name]) => name)
         const box = q('#demo-selfcheck')
         if (!box) return
