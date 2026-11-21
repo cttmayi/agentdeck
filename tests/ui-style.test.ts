@@ -394,6 +394,51 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
   })
 
   /**
+   * ★★★ D193：**标题层级只有一套定义（在 app.css）**，页面不许给 `h1`–`h4` 写字号 / 字重 / 字色。
+   *
+   * 量到的现状（六页逐页量 computed style）：标题族**只有一处**在改动——
+   *   `PromptEditor.svelte` 的 `.pe-head h3 { font-size: var(--fs-base); font-weight: 600 }`，
+   *   把 `<h3>` 画成 14/600（而全局 h3 是 17/600）⇒ 那个"标题"其实落在**标签档**
+   *   （13 那一档）与正文档（14）之间，两档都不是。
+   * 这条判据钉住"层级不被页面重定义"，例外写进 `HEADING_OVERRIDES` 并写明理由。
+   */
+  test('★★★ 标题层级只有一处定义：页面不许给 h1–h4 写字号 / 字重 / 字色', async () => {
+    const files = await load()
+    const css = files.get('packages/ui/src/styles/app.css') ?? ''
+    // 全局必须有这一档阶梯（少一行就说明有人把层级写丢了）
+    for (const need of ['h1, h2, h3, h4', 'font-size: var(--fs-lg)', 'font-size: var(--fs-sm)']) {
+      assert.ok(css.includes(need), `app.css 的标题族少了一行：${need}`)
+    }
+    /** 登记过的例外：文件 → 选择器片段（必须写明"为什么它不是标题层级的事"） */
+    const HEADING_OVERRIDES: Array<[string, string, string]> = [
+      [
+        'apps/web/src/components/PromptEditor.svelte',
+        '.pe-head h3',
+        '编辑器头那一行是"这块编辑什么东西"+ 工具按钮的**工具条**，不是正文层级；它按 14/600 画（与标签档 13、h4 13 都不撞，因为它在浮层里独占一行）。真要统一该动 markup（换成非标题元素），但那会改观感 ⇒ 只登记，不擅改。',
+      ],
+    ]
+    const offenders: string[] = []
+    for (const [rel, text] of files) {
+      if (!rel.endsWith('.svelte')) continue
+      const at = text.indexOf('<style')
+      if (at < 0) continue
+      const style = text.slice(at).replace(/\/\*[^]*?\*\//g, '')
+      for (const m of style.matchAll(/([^{}]*\bh[1-4]\b[^{}]*)\{([^{}]*)\}/g)) {
+        const sel = String(m[1] ?? '')
+          .split(/\s+/)
+          .filter((x) => x !== '')
+          .join(' ')
+        const body = m[2] ?? ''
+        if (!/font-size|font-weight|\bcolor:/.test(body)) continue
+        const reg = HEADING_OVERRIDES.find(([f, sel2]) => f === rel && sel.includes(sel2))
+        if (reg) continue
+        offenders.push(`${rel} → ${sel} { ${body.trim().slice(0, 60)} }`)
+      }
+    }
+    assert.deepEqual(offenders, [], `标题的字号/字重/字色在 app.css 里定一次就够；页面要改请先在 HEADING_OVERRIDES 登记理由：\n${offenders.join('\n')}`)
+  })
+
+  /**
    * ★★★ D192：**断点只有四级**，而且写法只有一种（range 语法）。
    *
    * 量到的现状：`app.css` 里有四档断点（74 / 72 / 60 / 48rem），但
