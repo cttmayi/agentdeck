@@ -570,7 +570,7 @@ import type { WebTextId } from '@agentdeck/i18n'
   {#snippet schedSub()}
     {@const s = selected}
     {#if s !== null}
-      <span class="pill">{s.humanCron}</span>
+      <span class="badge">{s.humanCron}</span>
       {#if s.enabled && s.nextRunAt !== null}
         <span class="muted">{$t('schedules.next')} {relativeTime(s.nextRunAt, Date.now())}</span>
       {:else if !s.enabled}
@@ -675,11 +675,11 @@ import type { WebTextId } from '@agentdeck/i18n'
               />
               <span class="time-unit">{$t('schedules.minuteUnit')}</span>
             </div>
-            <div class="freq-picker">
+            <div class="chip-row freq-picker">
               {#each FREQS as f (f.key)}
                 <button
                   type="button"
-                  class="pill {form.freq === f.key ? 'active' : ''}"
+                  class:active={form.freq === f.key}
                   onclick={() => (form.freq = f.key)}
                 >
                   {$t(f.label)}
@@ -689,18 +689,21 @@ import type { WebTextId } from '@agentdeck/i18n'
 
             {#if form.freq === 'weekly'}
               <div class="schedule-line">
-                <button
-                  type="button"
-                  class="pill quick-weekdays {isWorkdays(form) ? 'active' : ''}"
-                  onclick={toggleWorkdaysQuick}
-                >
-                  {$t('schedules.workdaysQuick')}
-                </button>
-                <div class="weekday-picker">
+                <div class="chip-row">
+                  <button
+                    type="button"
+                    class:dashed={true}
+                    class:active={isWorkdays(form)}
+                    onclick={toggleWorkdaysQuick}
+                  >
+                    {$t('schedules.workdaysQuick')}
+                  </button>
+                </div>
+                <div class="chip-row">
                   {#each WEEKDAY_BTNS as w (w.day)}
                     <button
                       type="button"
-                      class="weekday-btn {form.weekdays.includes(w.day) ? 'active' : ''}"
+                      class:active={form.weekdays.includes(w.day)}
                       onclick={() => toggleWeekday(w.day)}
                     >
                       {$t(w.label)}
@@ -996,26 +999,10 @@ import type { WebTextId } from '@agentdeck/i18n'
   /* ⚠️ 2026-11（D138）：`.schedules-main { overflow-y: auto }` 删了——右栏改走标准控件
      `MainArea`，滚动容器是它里面的 `.pane-body.detail-scroll`。 */
   /* 表单式调度 */
+  /* ★★ D217：`.pill` / `.weekday-btn` / `.quick-weekdays` 三套自绘格子**整族删掉**，
+     统一用全局 `.chip-row`（见 `app.css`）。这里只剩这一行的位置差异。 */
   .freq-picker {
-    display: flex;
-    gap: 0.25rem;
-    flex-wrap: wrap;
-    margin-bottom: 0.5rem;
-  }
-  .pill {
-    border: 1px solid var(--line-strong);
-    background: var(--surface);
-    border-radius: var(--radius-pill);
-    height: var(--ctl-h);
-    padding: 0 0.9rem;
-    font-size: var(--fs-base);
-    cursor: pointer;
-    color: var(--text);
-  }
-  .pill.active {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--on-accent);
+    margin-bottom: var(--sp-2);
   }
   .schedule-line {
     display: flex;
@@ -1038,27 +1025,7 @@ import type { WebTextId } from '@agentdeck/i18n'
     min-width: 0;
     width: auto;
   }
-  .weekday-picker {
-    display: flex;
-    gap: 0.25rem;
-  }
-  .weekday-btn {
-    /* 2026-11 v8：原来是 1.9rem 圆形——「周一」两个字放不下出框（使用者抓到的），
-      改 pill 形状（与预设键一致，能容纳完整词） */
-    border: 1px solid var(--line-strong);
-    background: var(--surface);
-    border-radius: var(--radius-pill);
-    height: var(--ctl-h);
-    padding: 0 0.9rem;
-    cursor: pointer;
-    font-size: var(--fs-sm);
-    color: var(--text);
-  }
-  .weekday-btn.active {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--on-accent);
-  }
+
   /* 结果区三行（2026-11 v8 定型：cron / 人话 / 下次 常驻，改哪侧都实时同步） */
   .schedule-time {
     /* 2026-11（"分"不见了那次的配套）：时间行 = 两段数字输入 + 「时」「分」单位。
@@ -1081,17 +1048,7 @@ import type { WebTextId } from '@agentdeck/i18n'
     font-size: var(--fs-sm);
     color: var(--text-faint);
   }
-  .quick-weekdays {
-    border-style: dashed;
-    color: var(--accent);
-    font-size: var(--fs-sm);
-    height: auto;
-    padding: 0.2rem 0.8rem;
-  }
-  .quick-weekdays.active {
-    border-style: solid;
-    color: var(--on-accent);
-  }
+
   .custom-cron {
     margin-top: 0.4rem;
   }

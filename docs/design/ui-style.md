@@ -1009,6 +1009,25 @@ D179 归位的两件：
   **别自己套一层容器**；单颗不画。
 - `MainArea` 的 `foot` 只留给**常驻输入**那种东西（聊天的输入条）；表单式的主操作不放它。
 
+#### 2.1.1.7 可选格子只有一族：`.chip-row`（D217）
+
+一排"选一个 / 选几个"的键（频率三选一、星期多选、那类快捷）**只有一个容器类**
+`class="chip-row"`，里面直接放 `<button>`（选中加 `.active`；"一键套用"那种不是选项的键加 `class:dashed`）。
+
+它们是**控件档**（30 高 / 13px / 胶囊圆角），与 `.theme-picker` 的格子同级——
+**不是**标签胶囊档（`.stage-chips` 那种 11px 小一圈的筛选）。
+
+来由：`Schedules` 上原来有**三份各自手画的"可选格子"**——`.pill`（频率）、`.weekday-btn`（星期）、
+`.quick-weekdays`（虚线快捷键），每份都自己写 `border` / `background` / `border-radius` / `height` /
+`padding` / `font-size`，只是字号与虚线不同（`--fs-base` / `--fs-sm` / 虚线）。改一次圆角要改三处，
+漏一处就有两个圆角——这正是"同一件事写三遍"。
+
+收进 app.css 之后：`Schedules` 里那三个类名**整族删除**（只剩 `.freq-picker` 的 `margin-bottom` 这种位置差异），
+探针里按旧类名取样的地方（星期键 7 颗 / 虚线快捷键）改成"含 7 颗按钮的 `.chip-row`"与 `.chip-row > button.dashed`。
+
+判据：探针 `ctl.heights` 的登记表新增 `可选格子 · .chip-row > button` = **30**（冒出新值就红）；
+静态护栏的"裸 `<button>` 白名单"里 `pill` / `quick-weekdays` / `weekday-btn` 换成 `chip-row`。
+
 #### 2.1.1.6 一屏只许有一颗"可用"的主操作（D215）
 
 主操作只有一种长相（实心 accent + 白字 + 600）⇒ **一屏出现两颗，就没有主次了**。

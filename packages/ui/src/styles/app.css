@@ -2326,6 +2326,60 @@ label > select { margin-top: var(--sp-1); }
   white-space: nowrap;
 }
 
+/* ══════════════ 可选格子（互斥或多选的一排键）══════════════
+ *
+ * ★★ D217：**同一件事只有一族**。`Schedules` 上原来有三份各自手画的"可选格子"：
+ *   `.pill`（频率三选一）、`.weekday-btn`（星期多选）、`.quick-weekdays`（"工作日"快捷键）——
+ *   三份都自己写 border / background / border-radius / height / padding / font-size，
+ *   只是字号与虚线各不相同（fs-base / fs-sm / 虚线）。这正是"同一形状写三遍"：
+ *   改一次圆角要改三处，漏一处就有两个圆角。
+ *
+ * 这一族是**控件档**（30 高 / 13px）而不是标签胶囊档（11px 那种 `.stage-chips`）：
+ *   它们跟输入框在同一张表单里，跟 `.theme-picker` 的格子同级。
+ *
+ * 用法：容器 `class="chip-row"`，里面直接放 `<button>`（或带 `active` 的 `<button>`）；
+ *   "一键套用"那种**不是选项**的键加 `class="dashed"`（虚线 + accent 字）。
+ */
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.chip-row > button {
+  height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chip-row > button:hover:not(:disabled):not(.active) {
+  border-color: var(--text-faint);
+  background: var(--surface-hover);
+}
+
+.chip-row > button.active {
+  background: var(--accent-dim);
+  border-color: var(--accent-dim);
+  color: var(--on-accent);
+}
+
+/* 「一键套用」类：虚线圈、accent 字——它不是一个"选项"，是一个动作 */
+.chip-row > button.dashed {
+  border-style: dashed;
+  color: var(--accent);
+}
+
+.chip-row > button.dashed.active {
+  border-style: solid;
+  color: var(--on-accent);
+}
+
 /* ══════════════ 表格 ══════════════ */
 
 /* ★ 307 批（使用者要求"给未来的表格也留一个同一的入口"）：每条规则都同时挂

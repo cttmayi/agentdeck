@@ -157,6 +157,8 @@
         ['.view-switch button', '标签胶囊', [22]],
         ['.expand-toggle', '内联小件', [13]],
         ['.switch', '内联小件', [20]],
+        // ★ D217：可选格子（频率 / 星期）是**控件档**：30 高、13px 字
+        ['.chip-row > button', '可选格子', [30]],
       ]
       /** 容器类：高度跟着内容/容器走（列表行、导航行、拖拽条、分组头），不是控件 */
       const CONTAINER = ['.list-row-main', '.nav-item', '.split-grip', '.list-group-head']
@@ -3891,22 +3893,29 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
 
           if (!clickByText('每周')) { errors.push('预设键「每周」找不到'); return false }
           await wait(60)
-          const dayBtns = d().querySelectorAll('.detail-pane .weekday-btn').length
-          const quick = !!d().querySelector('.detail-pane .quick-weekdays')
+          /**
+           * ★★ D217：星期键 / 工作日快捷原来各有自己的类名（`.weekday-btn` / `.quick-weekdays`），
+           *   现在都收进全局"可选格子"一族 `.chip-row`：星期 = 含 7 颗的 `.chip-row`，
+           *   快捷键 = 带 `.dashed` 的那颗（虚线 = "一键套用"而不是"一个选项"）。
+           */
+          const chipRows = [...d().querySelectorAll('.detail-pane .chip-row')]
+          const dayRow = chipRows.find((r) => r.querySelectorAll('button').length === 7) ?? null
+          const dayBtns = dayRow ? dayRow.querySelectorAll('button').length : 0
+          const quick = !!d().querySelector('.detail-pane .chip-row > button.dashed')
           if (dayBtns !== 7 || !quick) {
             errors.push(`每周视图不对：星期键 ${dayBtns}/7、工作日快捷 ${quick}`)
             return false
           }
           // 2026-11 v8：星期按钮曾是 1.9rem 圆形，「周一」两个字出框（使用者抓到）——
           // 量每个按钮有没有文字溢出（scrollWidth > clientWidth 就是溢出）
-          const overflowDays = [...d().querySelectorAll('.detail-pane .weekday-btn')].filter(
+          const overflowDays = [...(dayRow ? dayRow.querySelectorAll('button') : [])].filter(
             (b) => b.scrollWidth > b.clientWidth,
           )
           if (overflowDays.length > 0) {
             errors.push(`星期按钮文字出框：${overflowDays.length} 个（scrollWidth > clientWidth）`)
             return false
           }
-          const quickBtn = d().querySelector('.detail-pane .quick-weekdays')
+          const quickBtn = d().querySelector('.detail-pane .chip-row > button.dashed')
           click(quickBtn)
           await wait(60)
           const quickActive = quickBtn.classList.contains('active')

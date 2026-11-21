@@ -1018,8 +1018,10 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
       'tab', 'run-tab', 'theme-picker', 'view-switch', 'stage-chips', 'source-toggle',
       // 各自的专用控件
       'intake-choice', 'skill-choice', 'artifact-tab', 'draft-turn-toggle', 'file-row',
-      'history-row', 'mem-pin', 'pane-resizer', 'pe-close', 'pe-var-chip', 'pill',
-      'quick-weekdays', 'weekday-btn', 'prefix-x', 'prompt-expand', 'switch',
+      'history-row', 'mem-pin', 'pane-resizer', 'pe-close', 'pe-var-chip',
+      // ★ D217：`.pill` / `.weekday-btn` / `.quick-weekdays` 三套自绘格子已收进全局
+      //   `.chip-row`（"可选格子"一族）——白名单里换成它。
+      'chip-row', 'prefix-x', 'prompt-expand', 'switch',
       'terms-label', 'wd-dir', 'wd-file', 'wf-tpl', 'cat-toggle',
       'pane-tabs', 'fv-toggle', 'page-menu',
     ]
