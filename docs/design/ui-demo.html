@@ -3335,6 +3335,37 @@ a > button { width: 100%; }
       /* ── 设置页层级对比（D193/D195）：同一张设置卡片渲染两遍，只差 h3 的取值 ── */
       .demo-rule-settings { display: flex; gap: var(--sp-4); align-items: flex-start; flex-wrap: wrap; }
       .demo-rule-settings > * { flex: 1 1 22rem; min-width: 0; }
+      /* ── 页面类型标准（讨论稿）：一张总表 + 两处待拍板的对比 ── */
+      .demo-types {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--fs-sm);
+      }
+      .demo-types th,
+      .demo-types td {
+        text-align: left;
+        padding: var(--sp-2) var(--sp-3);
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+      }
+      .demo-types th {
+        font-size: var(--fs-xs);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-faint);
+        border-bottom-color: var(--line-strong);
+      }
+      .demo-types td.ok { color: var(--good); white-space: nowrap; }
+      .demo-types td.warn { color: var(--warn); white-space: nowrap; }
+      .demo-types code { font-family: var(--font-mono); font-size: var(--fs-xs); }
+      .demo-option {
+        border: 1px dashed var(--line-strong);
+        border-radius: var(--radius);
+        padding: var(--sp-3);
+        background: var(--surface);
+        min-width: 0;
+      }
+      .demo-option h4 { margin: 0 0 var(--sp-2); }
       /* ── 次要文字的三档深度（D206）：同一句话，只差字色 ── */
       .demo-faint-row {
         display: flex;
@@ -4019,6 +4050,149 @@ a > button { width: 100%; }
             </div>
           </div>
           <p class="demo-rule-note" id="demo-faint-delta">正在量…</p>
+        </section>
+        <!-- ══════════ 页面类型标准（讨论稿 v1：待使用者确认后再统一改）══════════ -->
+        <section class="demo-rule" id="demo-page-types">
+          <h3>⑨ 页面类型的标准骨架（讨论稿——确认后按这张表统一）</h3>
+          <p class="demo-rule-note">
+            现在全站有 **五类页面**。每类的"头 + 体 + 主操作在哪"都应该只有一个答案；
+            下表左边是**建议的标准**，右边是**今天实测的现状**（红/黄 = 与标准不一致的地方）。
+          </p>
+          <table class="demo-types">
+            <thead>
+              <tr><th>类型</th><th>属于哪几页</th><th>标准骨架（建议）</th><th>现状</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><b>① 列表页</b></td>
+                <td>聊天 / 任务 / 智能体 / 沉淀 / 定时任务 / 编排</td>
+                <td>
+                  <code>.split-layout</code>：左 <code>.pane-head</code>（无标题，只放计数与搜索）+
+                  右 <code>.detail-head</code>（16/24/12，标题+动作）+ <code>.pane-body</code>（16/24）。
+                  主操作**在栏头**；危险动作离它最远。
+                </td>
+                <td class="ok">✓ 六页一致（探针 6 页互相相等）</td>
+              </tr>
+              <tr>
+                <td><b>② 表格页</b></td>
+                <td>技能</td>
+                <td>
+                  <code>.view-intro</code>（<b>这一段说明就是这页的头</b>）+ <b>一个容器</b>包住表格。
+                  建议：<code>.main-panel</code> + <code>.main-panel-head</code>（标题 + 计数）+ 体里放表格，
+                  与设置页「成本」那张卡**同一个壳**。
+                </td>
+                <td class="warn">✗ 现在只有一个裸 <code>.table-wrap</code>，<b>没有任何头</b>
+                  （设置/关于页的每张卡都有头，只有这一页整块没有）</td>
+              </tr>
+              <tr>
+                <td><b>③ 卡片页</b></td>
+                <td>设置 / 关于</td>
+                <td><code>.view-intro</code> + <code>.card-grid</code> + 每张卡 <code>.main-panel</code>（头/体/脚）</td>
+                <td class="ok">✓ 已一致（D179）</td>
+              </tr>
+              <tr>
+                <td><b>④ 新建视图</b><br /><span class="faint fs-xs">（右栏内换掉内容）</span></td>
+                <td>新建任务 / 新建定时任务 / 新建编排 / 新建对话</td>
+                <td>
+                  <code>.detail-head</code>（16/24/12，标题 = 「新建 X」+ 返回）+ <code>.pane-body</code>（16/24）。
+                  <b>主操作：短表单放栏头，长表单放吸底脚（<code>.form-foot</code>），二选一、不并存。</b>
+                </td>
+                <td class="warn">◐ 头都合规；<b>主操作位置四种写法</b>——任务=吸底脚、
+                  定时任务/编排=栏头、聊天=输入区、智能体=面板底栏（见 ⑩）</td>
+              </tr>
+              <tr>
+                <td><b>⑤ 设置面板</b><br /><span class="faint fs-xs">（整块换掉右栏的面板）</span></td>
+                <td>三个设置 / 新建智能体 / 技能安装</td>
+                <td>
+                  共享外壳 <code>SettingsPanel</code>：<code>.main-panel</code> + 头（返回 + <code>h2</code>）+
+                  体（16/24）+ <b>底栏（12/24，主操作在底栏）</b>
+                </td>
+                <td class="ok">✓ 五个面板一致（D214 + D216 收的）</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="demo-rule-note">
+            ⚠️ 需要你拍板的两处：<b>② 技能页要不要加头</b>（下表 ⑪）、
+            <b>④ 新建视图的主操作放哪</b>（下表 ⑩）。
+          </p>
+        </section>
+
+        <!-- ══════════ 待拍板 ①：新建视图的主操作放哪 ══════════ -->
+        <section class="demo-rule" id="demo-primary-place">
+          <h3>⑩ 新建视图的「主操作」放哪：现在是四种，建议收成两档</h3>
+          <p class="demo-rule-note">
+            实测（同一个「新建」入口点进去，看那颗实心按钮在哪）：
+          </p>
+          <div class="demo-rule-frames">
+            <div class="demo-option">
+              <h4>现状：四种</h4>
+              <ul class="plain" style="font-size: var(--fs-sm); line-height: 1.9">
+                <li><b>新建任务</b> → 吸底脚 <code>.form-foot</code>（表单很长，滚到哪都看得见）</li>
+                <li><b>新建定时任务</b> → 栏头 <code>.detail-actions</code></li>
+                <li><b>新建编排</b> → 栏头 <code>.detail-actions</code></li>
+                <li><b>聊天</b> → 输入区的发送键</li>
+              </ul>
+              <p class="faint fs-xs" style="margin: var(--sp-2) 0 0">
+                同一个动作，四种位置；其中"栏头"与"吸底脚"是**同一件事的两种答案**。
+              </p>
+            </div>
+            <div class="demo-option">
+              <h4>建议：两档（按表单长短）</h4>
+              <ul class="plain" style="font-size: var(--fs-sm); line-height: 1.9">
+                <li><b>短表单</b>（一眼看完）→ 主操作在<b>栏头</b>：定时任务、编排</li>
+                <li><b>长表单</b>（要滚动）→ 主操作在<b>吸底脚</b>：新建任务</li>
+                <li>同一视图里<b>只许有一颗</b>（另一处禁用或不存在）</li>
+                <li>聊天不属于这一类：发送键属于**输入区**，不是"这一页的主操作"</li>
+              </ul>
+              <p class="faint fs-xs" style="margin: var(--sp-2) 0 0">
+                判据已经有一条：<code>btn.primaryCount</code>（一屏只许一颗可用主操作）。
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <!-- ══════════ 待拍板 ②：技能页要不要头 ══════════ -->
+        <section class="demo-rule" id="demo-skills-head">
+          <h3>⑪ 技能页（整页表格）：要不要一个头</h3>
+          <p class="demo-rule-note">
+            现在这一页是「一段说明 + 一个裸表格」：说明有（<code>.view-intro</code>，3 行），
+            但**没有任何标题行**——设置/关于页每张卡都有头，只有这一页整块没有。
+          </p>
+          <div class="demo-rule-frames">
+            <div class="demo-option">
+              <h4>A · 保持现状（只有说明段）</h4>
+              <p class="fs-xs faint" style="margin: 0">
+                标题就是顶栏页名（与设置/关于同款）。代价：表格<b>没有"这块叫什么"的一行</b>，
+                也没有地方放计数/筛选，看起来像"内容掉在页面上"。
+              </p>
+            </div>
+            <div class="demo-option">
+              <h4>B · 加一个面板头（建议）</h4>
+              <p class="fs-xs faint" style="margin: 0 0 var(--sp-2)">
+                表格外面套 <code>.main-panel</code>：头 <code>h2</code> +「已安装的技能 · N 个」，
+                体里放表格（与设置页「成本」那张卡同一个壳）。
+              </p>
+              <section class="main-panel" style="margin: 0">
+                <header class="main-panel-head">
+                  <h2>已安装的技能</h2>
+                  <span class="faint fs-xs">· 12 个</span>
+                </header>
+                <div class="main-panel-body" style="padding: var(--sp-3) var(--sp-4)">
+                  <div class="table-wrap">
+                    <table class="table">
+                      <thead>
+                        <tr><th>slug</th><th>名字</th><th>来源</th></tr>
+                      </thead>
+                      <tbody>
+                        <tr><td class="mono fs-xs">weekly-report</td><td>周报</td><td class="faint fs-xs">内置</td></tr>
+                        <tr><td class="mono fs-xs">media-outline</td><td>提纲</td><td class="faint fs-xs">远端</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
         </section>
       </div>
 
