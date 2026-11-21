@@ -793,6 +793,7 @@ D186 量到「2200px 窗口下任务详情栏 1658px、正文一行约 115 个�
 | 三栏壳 | `.shell` + `.topbar` / `.sidebar` / `.main` | 顶栏高度 `--topbar-h`、侧栏宽 `--sidebar-w` |
 | 列表 + 详情 | `.split-layout`（`.board` 看板 / `.with-detail` / `.with-artifact`） | 窄屏自动退成"列表 → 详情"两层 |
 | 列表栏 | `.pane`, `.pane-head`, `.pane-body`, `.pane-foot`, `.pane-actions` | 栏头不放标题（D64） |
+| 整页表格（技能） | `.view-intro`（这一段说明是页头）+ **一个 `.main-panel` 包住表格**：头 `<h2>已安装的技能</h2>` + 计数，体里放骨架 / 错误 / 空态 / 表格 | D219（使用者选 B）：原来只有一个裸 `.table-wrap`——设置/关于页每张卡都有头，只有这一页整块没有。现在与设置页「成本」那张卡**同一个壳**。探针按 `aria-label="安装技能"` 区分"安装面板"与"列表面板"（两都是 `.main-panel`） |
 | 主区面板（设置这类） | `.main-panel` + `.main-panel-head`（`h2` + `.panel-back`）+ `.main-panel-body` + `.main-panel-foot`（分段用 `.drawer-section`） | **所有"整块换掉右栏"的面板都长这样**："设置"三处（`WorkspaceSettings` / `ChatSettings` / `CrystallizeSettings`）+ **「新建智能体」**（D214 才补上——之前它是一个裸表单，进来不知道自己在哪、也没有回去的出口）。统一走共享外壳 `SettingsPanel`。设置**页**（`views/Settings.svelte`）的三张卡也是同一个壳（D174）。**主操作在这一族的底栏**（`.main-panel-foot`），栏头只放 ghost——见 §2.6.1.1「主操作放哪」 |
 | 目录选择 | 组件 `DirPicker`（「浏览…」打开它，`bind:open` + `bind:value` 与表单输入框同一个值） | 路径行 + 导航行 + 列表（目录可进、文件只作佐证）+ 底部「选这个目录」；输入框始终留着，手打永远可用。**不要**自己再搭一个目录弹层 |
 | 详情头 | `.detail-head` + `.detail-sub` + `.detail-actions`（**主操作在栏头**，见 §2.6.1.1） | 动作按钮 ≥2 个时自动画分组轨道。所有「标题 + 元信息 + 动作」的头都用它（聊天栏头 313 批已并入，不要再自己写 flex 补丁） |

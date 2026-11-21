@@ -178,6 +178,8 @@ export const skillsText = {
     en: 'The button on the right of each row above is the install entry point.',
   },
 
+  'skills.listTitle': { zh: '已安装的技能', en: 'Installed skills' },
+  'skills.listCount': { zh: '{n} 个', en: '{n} total' },
   'skills.emptyTitle': { zh: '还没有技能', en: 'No skills yet' },
   'skills.emptyHint': {
     zh: '技能是执行者干活时参考的资料包（可安装、带版本、可带支持文件）。',

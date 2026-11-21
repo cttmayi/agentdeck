@@ -1090,6 +1090,22 @@
   </section>
 {:else}
 
+<!--
+  ★★ D219（使用者选了 B）：**表格页也要有一个头**。
+
+  原来这一页是"一段说明 + 一个裸 `.table-wrap`"——设置/关于页每张卡都有头，
+  只有这一页整块没有，表格看起来像"内容掉在页面上"。现在套进 `SettingsPanel` 的同族外壳
+  `.main-panel`：头里说清"这块是什么 + 有多少条"（标题 + 计数），体里放骨架 / 错误 /
+  空态 / 表格——与设置页「成本」那张卡**同一个壳**。
+-->
+<section class="main-panel">
+  <header class="main-panel-head">
+    <h2>{$t('skills.listTitle')}</h2>
+    {#if $skills.length > 0}
+      <span class="faint fs-xs">· {$t('skills.listCount', { n: $skills.length })}</span>
+    {/if}
+  </header>
+  <div class="main-panel-body">
 {#if $loading['skills'] && $skills.length === 0}
   <div class="skeleton"></div>
   <div class="skeleton"></div>
@@ -1251,6 +1267,8 @@
     {/snippet}
   </Table>
 {/if}
+  </div>
+</section>
 
 {/if}
 

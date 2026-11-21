@@ -3407,13 +3407,20 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             )
           }
 
+          /**
+           * ★★ D219：**列表本身现在也是一个 `.main-panel`**（表格页有头了）⇒ 不能用
+           *   "有没有 `.main-panel`"判断"回到列表没有"。按**安装面板**认：它带
+           *   `aria-label="安装技能"`。⚠️ 必须定义在下面 `if` 之外——Esc 那一段在块外
+           *   也要用它（第一版定义在 `if` 里 ⇒ 块外 `ReferenceError`）。
+           */
+          const installPanel = () => d().querySelector('.main-panel[aria-label="安装技能"]')
           // 返回入口回到列表（列表被换掉了，所以这一步是**唯一**的路）
           const backBtn = panel.querySelector('.panel-back')
           if (backBtn) {
             click(backBtn)
             await wait(300)
             facts['skills.backReturnsToList'] = await until(
-              () => !d().querySelector('.main-panel') && !!d().querySelector('.main table'),
+              () => !installPanel() && !!d().querySelector('.main table'),
               40,
             )
           } else {
@@ -3423,13 +3430,13 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           // Esc 关闭（这个面板是视图自己渲染的，不在 App 的 $openDrawer 里；
           // 技能页的设置抽屉与它同一页，Esc 手感必须一致）
           click(openBtn)
-          await until(() => d().querySelector('.main-panel'), 40)
+          await until(() => !!installPanel(), 40)
           f.contentWindow.dispatchEvent(
             new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
           )
           await wait(300)
-          facts['skills.escClosesPanel'] =
-            !d().querySelector('.main-panel') && !!d().querySelector('.main table')
+          // ★ D219：同上——列表也是 `.main-panel` 了，按**安装面板**认（不能看"有没有 .main-panel"）
+          facts['skills.escClosesPanel'] = !installPanel() && !!d().querySelector('.main table')
         }
 
         // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
