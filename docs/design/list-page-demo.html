@@ -142,6 +142,21 @@
   --pad-frame-head: var(--sp-4) var(--sp-5) var(--sp-3);
   --pad-frame-body: var(--sp-4) var(--sp-5);
   --pad-frame-foot: var(--sp-3) var(--sp-5);
+
+  /**
+   * ★★ D184：**行级密度只有两档**（第四级的两个数，见 §2.4）：
+   *
+   *   · 紧凑档 = 表格（一屏要看很多行）：数据行 `td` 上下各 12、表头 `th` 上下各 8
+   *     （表头比数据行紧一档——它是一行标签，不是内容）；
+   *   · 标准档 = 列表行（一行装一句话 + 元信息）：`--list-row-min-h` 64、行内上下各 8。
+   *
+   * 量过三页（任务 / 智能体 / 聊天）的 `.list-row` 都是 64、表格 `td` 都是 12/12
+   * ——**这两档本来就已经一致，写在这里是为了让"新写的表格 / 新写的列表"有数可抄**。
+   * 分组标题行（`.cat-row` / `.group-head`）不在两档里：它 12/4，是"标题贴着它管的那段"，
+   * 不是一行数据。
+   */
+  --pad-cell: var(--sp-3);
+  --pad-cell-head: var(--sp-2) var(--sp-3);
   --radius: 8px;
   --radius-lg: 12px;
 
@@ -2138,14 +2153,14 @@ thead th,
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-faint);
-  padding: var(--sp-2) var(--sp-3);
+  padding: var(--pad-cell-head);
   border-bottom: 1px solid var(--line-strong);
   white-space: nowrap;
 }
 
 tbody td,
 .table td {
-  padding: var(--sp-3);
+  padding: var(--pad-cell);
   border-bottom: 1px solid var(--line);
   vertical-align: top;
 }

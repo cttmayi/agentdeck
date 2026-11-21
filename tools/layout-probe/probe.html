@@ -2730,6 +2730,27 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         )
         facts['skills.noLegacyDrawerBeforeOpen'] = !d().querySelector('.drawer')
         const skillRows = () => d().querySelectorAll('.main table tbody tr').length
+        /**
+         * ★★ D184：**行级密度两档的第二档**——表格是紧凑档：数据行 `td` 上下各 12
+         * （`--pad-cell`）、表头 `th` 上下各 8（`--pad-cell-head`）。表头比数据行紧一档
+         * ——它是一行标签，不是内容。技能页的本地清单是界面里最典型的表格。
+         */
+        facts['density.cell'] = (() => {
+          // ⚠️ 技能表的第一行是**分组标题行**（`.group-head td`，12/4——它是"贴着它管的
+          //    那段"的标签，不是一行数据）。所以取样要跳过它，否则量到的是标题行。
+          const skip = (tr) => tr && (tr.classList.contains('group-head') || tr.classList.contains('cat-row'))
+          const dataRow = [...d().querySelectorAll('tbody tr')].find((tr) => !skip(tr))
+          const td = dataRow?.querySelector('td') ?? d().querySelector('tbody td')
+          const th = d().querySelector('thead th')
+          const row = dataRow
+          const m = (el) => {
+            if (!el) return null
+            const c = cs(el)
+            return { 上: c.paddingTop, 下: c.paddingBottom, 高: el ? Math.round(el.getBoundingClientRect().height) : null }
+          }
+          if (!td) return null
+          return { 单元格: m(td), 表头: th ? m(th) : null, 行高: row ? Math.round(row.getBoundingClientRect().height) : null }
+        })()
         facts['skills.tableRows'] = skillRows()
         // ★ 2026-10：「说明」列要真的显示出来。夹具的 SKILL.md frontmatter 里写着
         //   `description: 探针夹具的说明`——它必须出现在**名称列**（那一格是
@@ -5962,6 +5983,19 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               const browse = d().querySelector('[data-newtask-workdir-browse]')
               const submit = d().querySelector('.form-foot button[type=submit]')
               return { 输入框: m(input), 浏览按钮: m(browse), 提交按钮: m(submit) }
+            })()
+            /**
+             * ★★ D184：**行级密度两档**——列表行 64（`--list-row-min-h`）、表格单元格 12/12。
+             *   量"行高真的等于令牌那个数"，这样改 `--list-row-min-h` 时三页一起动，
+             *   而不是某一页偷偷写了个 56px。
+             */
+            facts['density.listRow'] = (() => {
+              const rows = [...d().querySelectorAll('.list-row')].slice(0, 4)
+              if (!rows.length) return null
+              return {
+                高: rows.map((r) => Math.round(r.getBoundingClientRect().height)),
+                令牌: cs(d().documentElement).getPropertyValue('--list-row-min-h').trim(),
+              }
             })()
             facts['btn.uniform'] = (() => {
               const m = (el) => {
