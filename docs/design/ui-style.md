@@ -71,6 +71,28 @@
 
 补充：`btn--link.btn--quiet` 是**更淡**的文字链（虚线下划线，用在"已记进它的记忆 · 撤销"这种句子里）。
 
+**重量词必须带 `btn--` 前缀，`btn` 也必须写。** 这不是强迫症：
+
+> ★ D180（使用者："在'选择一个目录'的界面中，可以看到'关闭'等的蓝色按钮，这个风格需要调整一下，
+> 觉得不太好看"）。查下来是**改名漏了一层**：`.` 批把按钮族从 `button.ghost` / `button.secondary`
+> 改名成 `.btn--ghost` / `.btn--secondary`，那次迁移覆盖了 `apps/web` 的 167 个按钮，
+> 却漏了**共享包 `packages/ui/src/components`**——那里五颗按钮还写着裸的 `ghost` /
+> `primary` / `secondary` / `danger`。这些裸名字**没有任何全局规则**，而裸 `button`
+> 的 base 是 `background: var(--accent-dim)`：
+>
+> | 位置 | 旧写法 | 实际渲染 |
+> |---|---|---|
+> | `Modal` 的「关闭」（**每个模态框**，含目录选择框） | `class="ghost"` | 蓝底白字 `rgb(47, 111, 208)` |
+> | `FootFiles` 的「工作目录的文件」标题 + 「在文件管理器里显示」 | `class="ghost"` | 同上（栏脚标题变成一颗主按钮） |
+> | `ConfirmDialog` 的「取消」 | `class="secondary"` | 同上（"取消"失去了"轻"这一层） |
+> | `ConfirmDialog` 的「确认」（危险动作） | `class="danger"` | 同上 —— **删东西的按钮和保存按钮长得一模一样** |
+> | `ChatComposer` 的「发送」 | `class="primary"` | 碰巧是 accent（看着对），但没有 `.btn`，尺寸/禁用态与按钮族脱钩 |
+>
+> 这类缺陷的特征：**不报错、不警告、类型检查看不见**，只是安静地变成另一个按钮。
+> 所以判据是机器化的：`tests/ui-style.test.ts` 判「重量词必须带 `btn--` 前缀」+
+> 「用到的变体必须在 app.css 里有定义」，探针再在真 Chrome 里量一眼「关闭」的底色是**透明**
+> （`dirs.modalCloseIsGhost`）。
+
 ### 2.2 输入 / 表单
 
 - 单个控件：`input, textarea, select` 已经有全局样式（底色、描边、圆角、focus），**不要重写**。

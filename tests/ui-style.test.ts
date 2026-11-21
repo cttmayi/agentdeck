@@ -334,6 +334,64 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
     }
     assert.deepEqual(bad, [], '`.small` 在 298 批改名 `.fs-xs`；留别名就还是两套名字')
   })
+
+  /**
+   * ★★ D180：**按钮的重量词必须带 `btn--` 前缀**（`ghost` / `primary` / `secondary` /
+   * `danger` / `link` / `quiet` / `mini` / `icon` / `tight` / `sm`）。
+   *
+   * 为什么值得一条判据：D298 把按钮族改名成 `.btn--*` 时**漏了
+   * `packages/ui/src/components` 那一层**（那一批 167 个按钮全在 `apps/web`）。
+   * 于是 `Modal` 的「关闭」写着 `class="ghost"`、`ConfirmDialog` 的「取消/确认」写着
+   * `secondary` / `danger` —— **这些裸名字没有一条全局规则**，而裸 `button` 的 base 是
+   * `background: var(--accent-dim)`：实测「关闭」渲染成 `rgb(47, 111, 208)` + 白字。
+   *
+   * 这类缺陷的特点：**不报错、不警告、类型检查也看不见**，只是安静地变成另一个按钮。
+   * 使用者原话："可以看到'关闭'等的蓝色按钮……不太好看"——所以它必须只能靠判据拦。
+   *
+   * 同时反向判一次：**用到的 `btn--*` 变体必须在 `app.css` 里有定义**
+   * （否则就是"写了个名字、没人给它画样子"）。
+   */
+  test('★★ 按钮的重量词必须带 `btn--` 前缀，且用到的变体必须在 app.css 里有定义', async () => {
+    const files = await load()
+    const WEIGHTS = ['ghost', 'primary', 'secondary', 'danger', 'link', 'quiet', 'mini', 'icon', 'tight', 'sm']
+    const bare: string[] = []
+    const used = new Set<string>()
+    for (const [file, text] of files) {
+      if (!file.endsWith('.svelte')) continue
+      // 讲历史时注释里会原样引用旧写法（`class="ghost"`），先剥注释再判
+      const code = text.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '')
+      code.split('\n').forEach((line, i) => {
+        const t = line.trim()
+        if (t.startsWith('*') || t.startsWith('/*') || t.startsWith('<!--')) return
+        // 模板字面量的属性（`class={`btn btn--${kind ?? 'secondary'}`}`）解析不了 ——
+        // 里面那些字符串是**取值**而不是类名，跳过（第一版把 `?? 'secondary'` 报成了裸名字）
+        if (/class=\{\`/.test(line)) return
+        // 静态写法：`class="a b c"`；动态写法：`class={cond ? 'a b' : 'c'}` —— 两种都要看
+        for (const m of line.matchAll(/class=(?:"[^"]*"|\{[^}]*\})/g)) {
+          const raw = m[0]
+          const sources = raw.startsWith('class="') ? [raw.slice(7, -1)] : [...raw.matchAll(/'[^']*'/g)].map((x) => x[0].slice(1, -1))
+          for (const source of sources) {
+            for (const token of source.split(/\s+/)) {
+              if (token === '') continue
+              const hit = WEIGHTS.find((w) => token === w)
+              if (hit !== undefined) bare.push(`${file}:${i + 1}  ${t}`)
+              else if (/^btn--[a-z]+$/i.test(token)) used.add(token)
+            }
+          }
+        }
+      })
+    }
+    assert.deepEqual(
+      bare,
+      [],
+      '按钮的重量词必须写成 `btn btn--<重量>`（裸名字没有全局规则，裸 button 会变成蓝底主按钮）：\n' +
+        bare.join('\n'),
+    )
+
+    const css = files.get(APP_CSS) ?? ''
+    const missing = [...used].filter((v) => !new RegExp(`\\.${v}\\b`).test(css))
+    assert.deepEqual(missing, [], `这些按钮变体在 app.css 里没有定义（写了名字但没人画样子）：${missing.join('、')}`)
+  })
 })
 
 /** 把一个样式块拆成 { selector, body, line }（够用的浅解析：`}` 收尾即可）。 */

@@ -180,6 +180,21 @@ const CHECKS = [
     ok: (v) => v === true,
   },
   {
+    view: '新建任务 / 目录选择框',
+    key: 'dirs.modalCloseIsGhost',
+    /**
+     * ★★ D180：模态框的「关闭」必须是 **ghost**（透明底 + 淡字），不是蓝底主按钮。
+     *
+     * 根因不是审美：`Modal` 那颗写的是 `class="ghost"`，而 D298 把按钮族改名成
+     * `.btn--*` 时漏了 `packages/ui/src/components` 那一层 ⇒ 这五颗按钮挂在裸 `button`
+     * 的 base 上（`background: var(--accent-dim)`），于是**「关闭」「取消」全都变成主按钮**，
+     * 危险确认（`danger`）也失去红色。使用者原话："可以看到'关闭'等的蓝色按钮……不太好看"。
+     */
+    label: '★★ 目录选择框的「关闭」是 ghost（**透明底**、淡字），不是蓝底主按钮',
+    ok: (v) => !!v && v.transparent === true && v.bg !== v.accent,
+    show: (v) => `「${String(v.label)}」底 ${String(v.bg)}，字 ${String(v.color)}，透明 ${String(v.transparent)}`,
+  },
+  {
     view: '新建任务',
     key: 'newtask.workDirPicker',
     label:

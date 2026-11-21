@@ -139,7 +139,7 @@
       {/if}
       <button
         type="button"
-        class="primary"
+        class="btn btn--primary"
         data-composer-send
         disabled={!canSend}
         title={canSend ? undefined : sendDisabledTitle}

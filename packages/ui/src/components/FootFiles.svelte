@@ -103,9 +103,10 @@
   }}
 >
   <div class="foot-files-head">
+    <!-- ★ D180：`class="ghost"` 没有全局规则（见 Modal 那颗的注释），裸 button 会变成蓝底 -->
     <button
       type="button"
-      class="ghost"
+      class="btn btn--ghost"
       aria-expanded={open}
       onclick={() => (open = !open)}
     >
@@ -127,7 +128,7 @@
       <!-- 最右侧那颗：把这一栏指向的目录交给系统文件管理器（分批第 234 批） -->
       <button
         type="button"
-        class="ghost"
+        class="btn btn--ghost"
         data-workdir-reveal
         title={revealTitle}
         onclick={onreveal}
@@ -190,7 +191,8 @@
     font-size: var(--fs-xs);
   }
 
-  .foot-files-head :global(.ghost) {
+  /* ★ D180：跟着按钮族一起改成 `.btn--ghost`（原来选的是不存在的 `.ghost`） */
+  .foot-files-head :global(.btn--ghost) {
     padding: var(--sp-1) var(--sp-2);
     /**
      * ★ 分批第 230 批：标题那颗按钮与右侧的「刷新 / 上传」都**不许被挤窄**。

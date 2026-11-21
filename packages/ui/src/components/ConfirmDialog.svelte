@@ -30,13 +30,19 @@
   <p class="confirm-message">{req?.message ?? ''}</p>
 
   <svelte:fragment slot="foot">
-    <!-- 取消在左、确认在右（与系统对话框同一个顺序），危险动作用危险色 -->
-    <button type="button" class="secondary" onclick={() => settleConfirm(false)}>
+    <!--
+      取消在左、确认在右（与系统对话框同一个顺序），危险动作用危险色。
+      ★ D180：这两颗原来写的是 `class="secondary"` / `class="danger"`——**都没有全局规则**
+      ⇒ 裸 `button` 的 accent 底色让它们全变成蓝底主按钮：「取消」失去了"轻"，
+      **危险确认失去了红色**（删东西的按钮和保存按钮长得一模一样）。
+      现在按按钮族写：`btn btn--secondary` / `btn btn--danger｜btn btn--primary`。
+    -->
+    <button type="button" class="btn btn--secondary" onclick={() => settleConfirm(false)}>
       {cancelLabel}
     </button>
     <button
       type="button"
-      class={req?.danger ? 'danger' : ''}
+      class={req?.danger ? 'btn btn--danger' : 'btn btn--primary'}
       onclick={() => settleConfirm(true)}
     >
       {req?.confirmLabel ?? ''}

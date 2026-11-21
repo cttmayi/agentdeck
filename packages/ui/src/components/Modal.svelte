@@ -89,7 +89,14 @@
         <h2>{title}</h2>
         {#if subtitle}<p class="hint">{subtitle}</p>{/if}
       </div>
-      <button type="button" class="ghost" onclick={onclose}>{closeLabel}</button>
+      <!--
+        ★ D180：这里原来写的是 `class="ghost"`——**没有这条全局规则**（D298 把按钮族改名成
+        `.btn--ghost` 时漏了 `packages/ui/src/components` 这一层）。裸 `button` 的 base 是
+        `background: var(--accent-dim)`，于是「关闭」变成**蓝底主按钮**（实测
+        `rgb(47, 111, 208)` + 白字）——使用者："可以看到'关闭'等的蓝色按钮……不太好看"。
+        现在它真的是 ghost：透明底 + 淡字，hover 才浮出底色。
+      -->
+      <button type="button" class="btn btn--ghost" onclick={onclose}>{closeLabel}</button>
     </div>
 
     <!-- ★ 正文**自己滚**（头与脚固定）：两栏挑选器可以很高，头部的标题和底部的

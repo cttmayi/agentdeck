@@ -4216,8 +4216,11 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           click(del)
           const appeared = await until(() => !!d().querySelector('.modal .confirm-message'), 40)
           const text0 = appeared ? (text(d().querySelector('.modal .confirm-message')) ?? '') : ''
-          // 取消（`Modal` 的脚注里那颗 secondary）
-          const cancel = d().querySelector('.modal .modal-foot button.secondary')
+          // 取消（`Modal` 脚注里那颗 `btn--secondary`）
+          // ⚠️ 这里原来选的是 `.modal-foot button.secondary`——那个类名**从来不存在**，
+          //    只是"裸 button + 名字"（选到它纯属巧合）。D180 修成按钮族的真类名之后，
+          //    这条选择器必须跟着改，否则"取消真的不删"会变成假红。
+          const cancel = d().querySelector('.modal .modal-foot button.btn--secondary')
           if (cancel) click(cancel)
           const closed = await until(() => !d().querySelector('.modal .confirm-message'), 40)
           const after = d().querySelectorAll('.list-pane .wf-row').length
@@ -5867,6 +5870,32 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               60,
             )
             const current = text(d().querySelector('[data-dir-picker-current]')) ?? ''
+            /**
+             * ★★ D180（使用者："在'选择一个目录'的界面中，可以看到'关闭'等的蓝色按钮，
+             *   这个风格需要调整一下，觉得不太好看"）：**按钮族里那条唯一的写法**
+             *   （`class="btn btn--<重量>"`）在共享包里有五颗漏了——`Modal` 的「关闭」写的是
+             *   `class="ghost"`、`ConfirmDialog` 的「取消/确认」写的是 `secondary` / `danger`，
+             *   而这些裸重量词**没有一条全局规则**（D298 把它们改名成 `.btn--*` 时漏了
+             *   `packages/ui/src/components` 那一层）。裸 `button` 的 base 是
+             *   `background: var(--accent-dim)` ⇒ 它们全变成**蓝底主按钮**：
+             *   「关闭」和「取消」失去了"轻"，危险确认失去了红色。
+             *
+             * 这里量三样：底色是不是**透明**（ghost）、字色是不是淡一档、以及"不是 accent 底色"。
+             * 量在目录选择框上，因为它是唯一一个**每页都能打开**的模态（对话/新建任务都用它）。
+             */
+            facts['dirs.modalCloseIsGhost'] = (() => {
+              const btn = d().querySelector('.modal-head > button')
+              if (!btn) return null
+              const c = cs(btn)
+              const accent = cs(d().documentElement).getPropertyValue('--accent-dim').trim()
+              return {
+                label: text(btn),
+                bg: c.backgroundColor,
+                color: c.color,
+                transparent: /rgba\(0, 0, 0, 0\)|transparent/.test(c.backgroundColor),
+                accent,
+              }
+            })()
             const pick = d().querySelector('[data-dir-picker-pick]')
             if (pick) click(pick)
             const closed = await untilNet(() => !d().querySelector('[data-dir-picker-list]'), 30)
@@ -11018,9 +11047,17 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
                 const variant =
                   VARIANTS.find((c) => b.classList.contains(c)) ?? '(无变体)'
                 const inTopbar = !!b.closest('.topbar')
+                /**
+                 * ★ D180：**栏脚那一行的按钮单独一档**（`@foot`）。
+                 * `.foot-files` 自己把字号定在 `--fs-sm`（栏脚是紧凑带），按钮 `font: inherit`
+                 * 就跟着是 13px；而页面里的同变体按钮是 14px —— 这是**语境**的差，
+                 * 不是"同一类按钮被画成两种"。`@topbar` 早就用了同一种分档法。
+                 */
+                const inFoot = !!b.closest('.foot-files, .pane-foot')
                 const size = Object.keys(SIZES).find((c) => b.classList.contains(c)) ?? ''
                 const c = getComputedStyle(b)
-                const key = variant + (size === '' ? '' : '/' + SIZES[size]) + (inTopbar ? '@topbar' : '')
+                const key =
+                  variant + (size === '' ? '' : '/' + SIZES[size]) + (inTopbar ? '@topbar' : '') + (inFoot && !inTopbar ? '@foot' : '')
                 // 高度**按内容变**是正常的（只有图标的、带两行的），所以只比字号；
                 // 高度照样记下来，报错时能一眼看出是哪一颗。
                 const sample = `${Math.round(parseFloat(c.fontSize) * 10) / 10}（高 ${Math.round(b.getBoundingClientRect().height)}）`
