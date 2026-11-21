@@ -284,7 +284,7 @@
     color: var(--good);
   }
   .change.del {
-    color: var(--bad, #c33);
+    color: var(--bad);
   }
   .counts {
     margin-left: auto;
@@ -306,6 +306,6 @@
     background: color-mix(in srgb, var(--good) 12%, transparent);
   }
   .diff-line.del {
-    background: color-mix(in srgb, var(--bad, #c33) 12%, transparent);
+    background: color-mix(in srgb, var(--bad) 12%, transparent);
   }
 </style>

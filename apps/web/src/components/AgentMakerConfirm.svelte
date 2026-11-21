@@ -221,7 +221,7 @@
 
 <style>
   .draft-note {
-    color: var(--good, #4ec9a0);
+    color: var(--good);
     margin-bottom: 0.75rem;
   }
   .form-field {
@@ -245,7 +245,7 @@
     font: inherit;
   }
   .skill-card {
-    border: 1px solid var(--line-strong, #333a49);
+    border: 1px solid var(--line-strong);
     border-radius: var(--radius);
     padding: 0.75rem;
     margin-bottom: 0.75rem;
@@ -263,8 +263,8 @@
   }
   .warn-note {
     font-size: var(--fs-sm);
-    color: var(--warn, #e0b04a);
-    border: 1px solid var(--warn, #e0b04a);
+    color: var(--warn);
+    border: 1px solid var(--warn);
     border-radius: var(--radius);
     padding: 0.5rem 0.625rem;
     margin-bottom: 0.75rem;

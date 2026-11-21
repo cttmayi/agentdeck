@@ -983,7 +983,7 @@ import type { WebTextId } from '@agentdeck/i18n'
     width: 1rem;
     height: 1rem;
     border-radius: 50%;
-    background: #fff;
+    background: var(--paper);
     box-shadow: var(--shadow-1);
     transition: left 0.15s;
   }
@@ -1015,7 +1015,7 @@ import type { WebTextId } from '@agentdeck/i18n'
   .pill.active {
     background: var(--accent);
     border-color: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
   }
   .schedule-line {
     display: flex;
@@ -1057,7 +1057,7 @@ import type { WebTextId } from '@agentdeck/i18n'
   .weekday-btn.active {
     background: var(--accent);
     border-color: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
   }
   /* 结果区三行（2026-11 v8 定型：cron / 人话 / 下次 常驻，改哪侧都实时同步） */
   .schedule-time {
@@ -1090,7 +1090,7 @@ import type { WebTextId } from '@agentdeck/i18n'
   }
   .quick-weekdays.active {
     border-style: solid;
-    color: #fff;
+    color: var(--on-accent);
   }
   .custom-cron {
     margin-top: 0.4rem;

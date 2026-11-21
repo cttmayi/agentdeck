@@ -394,6 +394,93 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
   })
 
   /**
+   * ★★★ D204：**组件里不许出现裸色值**，`var()` 也不许带颜色兜底，引用的令牌必须真的声明过。
+   *
+   * 查出来的三件事：
+   *   ① `var(--danger, #b42318)` —— **`--danger` 这个令牌根本不存在**（令牌叫 `--bad`），
+   *      于是它一直靠兜底的硬编码色活着，暗色主题下不会变。这是"兜底掩盖了错名字"的典型；
+   *   ② `#1a7f37` / `#b42318` 直接写在组件里（diff 增删色）——暗色下还是亮色的绿/红，对比度掉下去；
+   *   ③ `#fff` 当"accent 底上的白字"用（三处），而 `--on-accent` 就是干这个的。
+   *
+   * 现在：`--diff-add` / `--diff-del` / `--paper` / `--screen` / `--on-screen` 都进了两套主题，
+   *   组件里**一个裸色都不留**；`var(--tok, #hex)` 这种颜色兜底一律不许（令牌都在，兜底只会掩盖改名）。
+   */
+  test('★★★ 组件里不许有裸色值；var() 不许带颜色兜底；引用的令牌必须声明过', async () => {
+    const files = await load()
+    const css = files.get('packages/ui/src/styles/app.css') ?? ''
+    /**
+     * "令牌有没有被声明过"要**扫全仓**，不只看 `:root`：有些是**局部自定义属性**，
+     * 由组件自己设（`style="--rows:{rows}"`）或由断点覆盖（Tasks 的 `--create-pad-x`）。
+     * 只看 `:root` 会把它们误判成"引用了不存在的令牌"。真正要抓的是**哪儿都没声明**的
+     * 名字——比如 `--danger`（令牌叫 `--bad`，那处一直靠 `var()` 的兜底活着）。
+     */
+    const declared = new Set<string>()
+    for (const [, text] of files) {
+      // ⚠️ 令牌**声明**前面必须是行首/空白/分号/花括号——否则 `.btn--danger:hover` 里
+      //    那个 `--danger:` 会被当成本地声明（第一版就这么把不存在的 `--danger` 判成了"声明过"）。
+      for (const m of text.matchAll(/(?:^|[\s;{])(--[a-z0-9-]+)\s*:/gm)) {
+        const name = m[1]
+        if (name) declared.add(name)
+      }
+    }
+    /**
+     * **运行时才有的自定义属性**：由 JS / 内联 `style:` 设，静态文件里查不到声明值
+     * （`pane-resize.ts` 拖拽时 `setProperty('--list-w', …)`、`style:--level={level}`）。
+     * 它们进这张表，每条写明**是谁设的**——不是"名字看着像就算了"。
+     */
+    const RUNTIME: Array<[string, string]> = [
+      ['--list-w', 'apps/web/src/lib/pane-resize.ts：拖分隔条时 setProperty'],
+      ['--artifact-w', 'apps/web/src/lib/pane-resize.ts：产物栏同理（默认 28rem 在 CSS 兜底里）'],
+      ['--grip-w', 'apps/web/src/lib/pane-resize.ts：分隔条宽度'],
+      ['--level', 'apps/web/src/components/VoiceButton.svelte：`style:--level={level}` 语音电平'],
+      ['--rows', 'apps/web/src/components/CodeEditor.svelte：`style="--rows:{rows}"` 行号高度'],
+      ['--create-pad-x', 'apps/web/src/views/Tasks.svelte：新建栏的左右内距（窄屏覆盖）'],
+    ]
+    for (const [name] of RUNTIME) declared.add(name)
+    assert.ok(declared.size > 30, `全仓只解析到 ${String(declared.size)} 个令牌，解析器可能坏了`)
+
+    const bareHex: string[] = []
+    const colorFallback: string[] = []
+    const unknownToken: string[] = []
+    for (const [rel, text] of files) {
+      if (!rel.endsWith('.svelte') && !rel.endsWith('.css')) continue
+      const at = rel.endsWith('.svelte') ? text.indexOf('<style') : 0
+      if (at < 0) continue
+      const style = text.slice(at).replace(/\/\*[^]*?\*\//g, '')
+      // ⚠️ app.css 是令牌的**定义处**（`:root` 里当然有裸色），所以只对组件检查裸色/兜底；
+      //    "引用的令牌必须声明过"这条对 app.css 也查（它也会引用令牌）。
+      const isDefiner = rel === 'packages/ui/src/styles/app.css'
+      if (!isDefiner) {
+        for (const m of style.matchAll(/#[0-9a-fA-F]{3,8}\b/g)) bareHex.push(`${rel} → ${m[0]}`)
+      }
+      // `var(--tok, <带颜色的兜底>)`：兜底里出现 # / rgb / color-mix 就算
+      if (!isDefiner) {
+        for (const m of style.matchAll(/var\((--[a-z0-9-]+)\s*,\s*([^)]*(?:#[0-9a-fA-F]{3,8}|rgb|color-mix)[^)]*)\)/g)) {
+          colorFallback.push(`${rel} → var(${m[1]}, ${(m[2] ?? '').trim()})`)
+        }
+      }
+      // 每个 `var(--tok)` 引用的令牌必须真的在 :root 里声明过（这条能抓到 `--danger` 那种错名字）
+      for (const m of style.matchAll(/var\((--[a-z0-9-]+)/g)) {
+        const name = m[1]
+        if (name && !declared.has(name)) unknownToken.push(`${rel} → var(${name})`)
+      }
+    }
+    assert.deepEqual(bareHex, [], `组件里不许写裸色值（走令牌；"纸/幕"用 --paper/--screen/--on-screen）：\n${bareHex.join('\n')}`)
+    assert.deepEqual(colorFallback, [], `var() 不许带颜色兜底（令牌都在，兜底只会掩盖改名/错名）：\n${colorFallback.join('\n')}`)
+    assert.deepEqual(unknownToken, [], `这些 var() 引用了**不存在**的令牌（暗色/亮色都不会给它值）：\n${unknownToken.join('\n')}`)
+
+    // 主题切换必须真的换颜色：两套主题里同一批令牌不许相等（"纸/幕/白字"这四个是有意不随主题）
+    const dark = css.slice(css.indexOf(":root[data-theme='dark']"))
+    const KEEP = new Set(['--paper', '--screen', '--on-screen', '--on-accent'])
+    const missing: string[] = []
+    for (const name of ['--bg', '--surface', '--panel', '--line', '--text', '--accent', '--good', '--bad', '--diff-add', '--diff-del']) {
+      if (!dark.includes(`${name}:`)) missing.push(name)
+    }
+    assert.deepEqual(missing, [], `暗色主题里缺这些令牌（切主题时它们不会变）：${missing.join(' / ')}`)
+    assert.ok(KEEP.size === 4, '不随主题的四个令牌要写在文档里')
+  })
+
+  /**
    * ★★★ D202：**键盘焦点全站只有一道环**（2px accent）。任何 `outline: none` 都必须登记理由。
    *
    * 量出来的现状（真按 Tab 走 22 个停靠点 × 3 页）：按钮都有环，**`input` / `textarea` 一个都没有**

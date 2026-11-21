@@ -251,11 +251,11 @@
     white-space: nowrap;
   }
   .num-tag.add {
-    color: #1a7f37;
+    color: var(--diff-add);
     background: rgba(26, 127, 55, 0.1);
   }
   .num-tag.del {
-    color: #b42318;
+    color: var(--diff-del);
     background: rgba(180, 35, 24, 0.1);
   }
   .diff-box {
@@ -292,10 +292,10 @@
     user-select: none;
   }
   .diff-line.add .sign {
-    color: #1a7f37;
+    color: var(--diff-add);
   }
   .diff-line.del .sign {
-    color: #b42318;
+    color: var(--diff-del);
   }
 
   /* ══════════ 审阅重排（2026-10-19）：结论条 + 主区 + 折叠 ══════════

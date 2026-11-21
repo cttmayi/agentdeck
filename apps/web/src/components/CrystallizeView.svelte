@@ -2013,7 +2013,7 @@
     margin: 0 0 var(--sp-2);
     padding: var(--sp-2) var(--sp-3);
     border-radius: var(--radius-md);
-    background: var(--surface-2, #f4f4f5);
+    background: var(--surface-2);
     font-size: var(--fs-xs);
   }
 
@@ -2340,11 +2340,11 @@
     white-space: nowrap;
   }
   .num-tag.add {
-    color: #1a7f37;
+    color: var(--diff-add);
     background: rgba(26, 127, 55, 0.1);
   }
   .num-tag.del {
-    color: #b42318;
+    color: var(--diff-del);
     background: rgba(180, 35, 24, 0.1);
   }
   .diff-box {

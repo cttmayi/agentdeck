@@ -636,7 +636,7 @@
     height: 62vh;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #fff;
+    background: var(--paper);
   }
 
   .fv-image {
@@ -664,7 +664,7 @@
     flex-direction: column;
     align-items: center;
     gap: var(--sp-2);
-    background: #000;
+    background: var(--screen);
     border: 1px solid var(--line);
     border-radius: var(--radius);
     padding: var(--sp-2);
@@ -687,7 +687,7 @@
 
   .fv-media .faint {
     margin: 0;
-    color: #ddd;
+    color: var(--on-screen);
   }
 
   .fv-note {

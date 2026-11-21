@@ -220,6 +220,17 @@
   --status-blocked: #b7791f;
 
   /* 代码高亮：亮色底下用墨色系（霓虹色只在暗底成立） */
+  /**
+   * ★★ D204：**diff 的增删色是主题色**（原来写死在组件里：`#1a7f37` / `#b42318`）。
+   * 写死的结果是暗色主题下那两行字还按亮色的绿/红画，对比度掉到看不清。
+   * 另外**"纸"与"幕"不随主题**：HTML/图片预览的白底、视频预览的黑底、幕上那行字——
+   * 它们说的是"内容自己的底色"，不是界面主题。
+   */
+  --diff-add: #1a7f37;
+  --diff-del: #b42318;
+  --paper: #fff;
+  --screen: #000;
+  --on-screen: #ddd;
   --hl-keyword: #9d3fbf;
   --hl-string: #3e7d24;
   --hl-number: #c4621c;
@@ -271,6 +282,12 @@
   --status-done: #4ec9a0;
   --status-blocked: #e0b04a;
 
+  /* D204：暗色下的 diff 增删色 + 不随主题的"纸/幕" */
+  --diff-add: #7ee2a8;
+  --diff-del: #f2908a;
+  --paper: #fff;
+  --screen: #000;
+  --on-screen: #ddd;
   --hl-keyword: #c792ea;
   --hl-string: #9ece6a;
   --hl-number: #ff9e64;

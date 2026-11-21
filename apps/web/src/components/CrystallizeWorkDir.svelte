@@ -283,7 +283,7 @@
   }
   .mat-del.confirm {
     opacity: 1;
-    color: var(--danger, #b42318);
+    color: var(--bad);
   }
 
 
