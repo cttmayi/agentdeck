@@ -394,6 +394,59 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
   })
 
   /**
+   * ★★★ D210：**退场的类名不许再出现在标记里**。
+   *
+   * 踩到的实例：`.workdir-row`（"输入 + 浏览…"那一行）在 D174 被并进了 `.field-row`，
+   *   app.css 里**规则已经删了**、只剩注释提到它；但 `docs/design/list-page-demo.html`
+   *   里还留着 3 处 `class="workdir-row"`。于是那几行退化成普通块：
+   *     · `<input>` 吃到全局 `input, select { width: 100% }` ⇒ 占满整行；
+   *     · 「浏览…」是行内块 ⇒ 被挤到**下一行**（使用者报"『浏览』和编辑框分成 2 行"）。
+   *   实测（1500px）：行宽 624 / 输入 624 / 按钮 60 / 折行 —— 输入宽 == 行宽就是铁证。
+   * 修法只是把类名改回 `.field-row`（不加任何 CSS）；这条判据防止同样的"改了一半"再发生。
+   */
+  test('★★★ 退场的类名不许再出现在标记里（规则删了、标记还在 = 那几行静默退化）', async () => {
+    const files = await load()
+    const css = files.get('packages/ui/src/styles/app.css') ?? ''
+    /** 退场登记：[类名, 为什么退场] —— 每一条都必须真的在 app.css 里**没有**规则 */
+    const RETIRED: Array<[string, string]> = [
+      ['workdir-row', 'D174 并入 `.field-row`（原来只有 4 处用）'],
+      ['set-card', 'D174：设置页卡片改用 `.main-panel`'],
+      ['set-block', 'D174：设置页分段改用 `.drawer-section`'],
+      ['set-grid', 'D179：并进全局 `.card-grid`'],
+      ['ab-grid', 'D179：并进全局 `.card-grid`'],
+      ['ab-card', 'D179：并进全局 `.main-panel`'],
+      ['voice-row', 'D174：并进全局 `.field-row`'],
+      ['proxy-row', 'D174：并进全局 `.field-row`'],
+    ]
+    const problems: string[] = []
+    for (const [cls, why] of RETIRED) {
+      // ① 这个类**必须真的没有规则**（否则它就不算退场，登记表写错了）
+      const hasRule = new RegExp(`(^|\\n)[^\\n{]*\\.${cls}\\b[^\\n{]*\\{`, 'm').test(
+        css.replace(/\/\*[^]*?\*\//g, ''),
+      )
+      if (hasRule) problems.push(`${cls}：登记为"已退场"，但 app.css 里还有它的规则（${why}）`)
+      // ② 标记里不许再用它。⚠️ `load()` 只扫 apps/packages，**不含 `docs/`** ——
+      //    设计稿正是踩坑的地方（演示稿里那 3 处就是这么漏掉的），所以这里额外读 docs/design。
+      const targets: Array<[string, string]> = [...files]
+      for (const rel of ['docs/design/list-page-demo.html', 'docs/design/platform-members-design.html']) {
+        targets.push([rel, await readFile(join(REPO_ROOT, rel), 'utf8')])
+      }
+      for (const [rel, raw] of targets) {
+        if (!rel.endsWith('.svelte') && !rel.endsWith('.html')) continue
+        // ⚠️ 先剥掉注释/`<style>` 里的解释文本：那些地方会**引用**退场类名来讲道理
+        //    （我自己就在注释里写过 `class="workdir-row"` 这个例子），不剥就会误报。
+        const text = raw
+          .replace(/\/\*[^]*?\*\//g, '')
+          .replace(/<!--[^]*?-->/g, '')
+          .replace(/`[^`]*`/g, '')
+        if (!new RegExp(`class="[^"]*\\b${cls}\\b`).test(text)) continue
+        problems.push(`${rel}：还在用 class="${cls}"（${why}）——那几行会静默退化`)
+      }
+    }
+    assert.deepEqual(problems, [], `退场类名还在被使用：\n${problems.join('\n')}`)
+  })
+
+  /**
    * ★★★ D205：**对比度是量出来的，不是"看着还行"**（WCAG 相对亮度，两套主题都算）。
    *
    * 为什么需要这条：主题切换那条判据只保证"令牌跟着变"，不保证"变得够不够"。

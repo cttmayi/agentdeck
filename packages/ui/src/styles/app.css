@@ -85,7 +85,7 @@
   /**
    * ★ D182：它现在是**控件高度**（按钮 + 输入框 + 下拉同一个数），所以改名
    *   `--btn-h` → `--ctl-h`。量到的病：按钮 30px、输入框 40px、下拉 37px ——
-   *   ".workdir-row" 那种"输入 + 浏览…"的行里一行差 10px，聊天输入栏、`.field-row`
+   *   "输入 + 浏览…"那种行里一行差 10px，聊天输入栏、`.field-row`
    *   全是这个组合。`--rail-h` 仍是工具条轨道（= 控件高 + 4px）。
    */
   --ctl-h: 1.875rem;
@@ -1972,7 +1972,7 @@ button,
  *   · `.modal-head > button`（模态框的「关闭」）
  *   · `FootFiles` 的 `.foot-files-head :global(.btn--ghost)`（「工作目录的文件」/「材料」标题行）
  *   · `DirPicker` 的 `.path-row / .nav-row / .actions > button`
- *   · 「新对话」与「新建任务」的 `.workdir-row > button`（「浏览…」）
+ *   · 「新对话」与「新建任务」的 `.field-row > button`（「浏览…」）
  *
  * ⚠️ 不要图省事在这里全局写 `white-space: nowrap`：`.intake-choice` 那类按钮里**本来就要
  *    折行**（第一行是选项、第二行是说明），全局禁掉会把它们挤成横向溢出。
@@ -2298,7 +2298,9 @@ label > select { margin-top: var(--sp-1); }
    替代了三处各写一遍/两处内联样式：
      · `.voice-row`（`ChatSettings` scoped）
      · `.proxy-row`（`CrystallizeSettings` scoped）
-     · `.workdir-row`（这条本来是全局的，但只有 4 处用）
+     · 曾经的 `.workdir-row`（**D174 已并入 `.field-row`，这个名字不再存在**——
+       演示稿里还留着 `class="workdir-row"` 的地方会退化成普通块：`<input>` 吃
+       全局 `width: 100%` 占满整行、「浏览…」被挤到下一行。D210 清掉了）
      · 设置页远端那两处 `style="display:flex;gap:var(--sp-2)"`
    对齐用 `flex-end`（**底对齐**）：短控件（勾选框）与长控件（标签+下拉）混排时，
    `center` 会让勾选框"浮在中间"、`stretch` 会把它拉高——批 308 的使用者报过这个。
