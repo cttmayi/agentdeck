@@ -2474,6 +2474,21 @@ const CHECKS = [
     ok: (v) => !!v && v.headAllGhost === true && v.headPrimary === 0 && v.footExists === false,
   },
   {
+    view: '聊天 / 正文',
+    key: 'type.bodySame',
+    /**
+     * ★★ D185：**正文档只有一个字号**：界面正文（14）、agent 产出的正文（`.markdown`）、
+     * 聊天气泡里的字，都是同一档。改之前三者是 14 / 13 / 13——"人读得最多的那块"
+     * 反而比按钮旁的说明还小。判据量的是**与 body 同一个字号**，不是写死的 14。
+     */
+    label: '★★ 正文档只有一个字号：agent 产出的正文（`.markdown`）= 界面正文（聊天气泡若在，也要同档）',
+    ok: (v) => !!v && v['markdown'] === v['body'] && (!v['bubble'] || v['bubble'] === v['body']),
+    show: (v) =>
+      v
+        ? `body ${String(v['body'])}、markdown ${String(v['markdown'])}、行高 ${String(v['markdownLineHeight'])}、气泡 ${String(v['bubble'] ?? '（空态没有气泡）')}`
+        : '没量到',
+  },
+  {
     view: '聊天',
     key: 'chat.hasListPane',
     label: '左栏（对话列表）在',

@@ -8332,6 +8332,30 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           return place
         })()
 
+        /**
+         * ★★ D185：**正文档只有一个字号（14）**——界面正文、agent 产出的正文
+         *   （`.markdown`）、聊天气泡里的字，都是同一档。改之前：body 14、
+         *   `.markdown` 13、`ChatBubble` 的 `.bubble` 13 ⇒ 读得最多的那块反而最小。
+         *   这里量"气泡里的字与界面正文同一个字号"，而不是"等于 14"（换成别的基础
+         *   字号时这条自动跟着走）。
+         */
+        facts['type.bodySame'] = (() => {
+          const base = cs(d().querySelector('body') ?? d().documentElement).fontSize
+          // 聊天页此刻可能是空态（还没有对话内容）⇒ `.markdown` / `.bubble` 都不在。
+          // 用一个与渲染器同构的临时宿主量它（与 `chat.codeBlockKeepsNewlines` 同一招）。
+          const host = d().createElement('div')
+          host.className = 'markdown'
+          host.setAttribute('data-probe-type', '')
+          host.textContent = '正文档取样'
+          host.style.position = 'absolute'
+          host.style.left = '-9999px'
+          d().body.appendChild(host)
+          const mdSize = cs(host).fontSize
+          const mdLH = cs(host).lineHeight
+          host.remove()
+          const bubble = d().querySelector('.bubble')
+          return { body: base, markdown: mdSize, markdownLineHeight: mdLH, bubble: bubble ? cs(bubble).fontSize : null }
+        })()
         facts['chat.hasListPane'] = chatList() !== null
         facts['chat.hasDetailPane'] = chatDetail() !== null
         facts['chat.twoColumnsSideBySide'] = need('两栏并排', () => {

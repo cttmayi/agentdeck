@@ -130,6 +130,25 @@
 > 「用到的变体必须在 app.css 里有定义」，探针再在真 Chrome 里量一眼「关闭」的底色是**透明**
 > （`dirs.modalCloseIsGhost`）。
 
+#### 2.9.1 正文档只有一个字号（D185）
+
+字号的四档里，"正文"这一档只管一件事：**人读的句子**。它不分"界面的"和"agent 产出的"：
+
+| 档 | 字号 | 谁 |
+|---|---|---|
+| 正文 | **14**（`--fs-base`） | `body`、`.markdown`（agent 产出的正文）、`.bubble`（聊天气泡）、`.list-group-head` |
+| 说明 / 控件 | **13**（`--fs-sm`） | `label`、`.btn`、`input/select/textarea`、`.table`、`code`、`.view-intro p`、`.fold-summary`、顶栏语言下拉 |
+| 元信息 | **12**（`--fs-xs`） | `.list-row-sub`、`.list-group-count`、`.badge`、`.nav-hint`、`btn--sm/--mini/--link` |
+| 标签 / 极小 | **11**（`--fs-2xs`） | `.badge--sm`、`.stage-chips` / `.view-switch` 的格子 |
+
+改之前：界面正文 14，而**agent 产出的正文是 13**（`.markdown` 与 `ChatBubble` 的 `.bubble` 各写一份 13）——"结 果""聊天气泡""文件查看器"恰恰是读得最多的那块，却比按钮旁的说明还小一档。现在三处都是 14。
+
+⚠️ 两处必须同档的陷阱：同一个气泡里"纯文本"与"渲染出来的 markdown"分属两个文件（`ChatBubble.svelte` 的 `.bubble` 与 `app.css` 的 `.markdown`），只改一处会让同一个气泡里出现两种字号——这也是为什么这条要有判据。
+
+`.markdown` 的行高是 **1.7**（要读的长段落），标题仍走全局 `--lh-tight`。
+
+判据：探针 `type.bodySame` —— `.markdown` 的字号**等于 `body`**（量的是"同一档"，不是写死 14），聊天气泡若在也必须同档。
+
 #### 2.2.2 密度只有两档（D184）
 
 "这块该多密"也只有两档答案，量过的三页都已经是这个数——写下来是为了让**新写的表格 / 新写的列表有数可抄**，而不是各自发明：

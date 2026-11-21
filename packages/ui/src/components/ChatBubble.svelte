@@ -105,7 +105,11 @@
     border: 1px solid var(--line);
     border-radius: var(--radius);
     padding: var(--sp-2) var(--sp-3);
-    font-size: var(--fs-sm);
+    /* ★ D185：气泡里装的是**要读的正文**（对话内容、agent 的答复）⇒ 正文档 14。
+       原来是 `--fs-sm`(13)：气泡里的字比旁边的按钮/说明还小一档，而它恰恰是读得
+       最多的那块。（`.markdown` 自己在 app.css 里也已经从 13 提到 14，两处必须同档，
+       否则同一个气泡里"纯文本"与"渲染出来的 markdown"又会是两个字号。） */
+    font-size: var(--fs-base);
     line-height: var(--lh-base);
     white-space: pre-wrap;
     word-break: break-word;

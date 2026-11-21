@@ -629,7 +629,8 @@ hr {
   /* ★ D181/D182：与轨道同一个数（原来这里是 2rem，与同排的按钮差 2px） */
   height: var(--rail-h);
   padding: 0 var(--sp-2);
-  font-size: var(--fs-xs);
+  /* ★ D185：控件只有一个字号（13，与 `input`/`select`/`button` 同一档；原来这里是 12） */
+  font-size: var(--fs-sm);
 }
 
 /**
@@ -2778,8 +2779,18 @@ a > button { width: 100%; }
      `FileViewer.svelte`）。原来它写在 `Tasks.svelte` 的局部样式里，于是查看器要用
      就得抄一份——而"渲染出来的 Markdown 长什么样"抄第二份就是迟早两处不一样。
 */
+/**
+ * ★★ D185：**agent 产出的正文与界面正文同一个字号**（`--fs-base` 14px）。
+ *
+ * 原来这里是 `--fs-sm`(13px)：界面上"人读的东西"分成了两种——界面正文 14、
+ * agent 产出的正文 13。而"最后结果""聊天气泡""文件查看器"恰恰是**读得最多**的那块，
+ * 却比按钮旁边的说明文字还小一档。正文档只有一个：**14**。
+ *
+ * 行高 1.7 是"要读的长段落"专门的口径（正文 14 + 1.7 ≈ 24px 行距），标题仍走
+ * 全局的 `--lh-tight`（下面那几条 `h1..h4` 只改字号，不改行高）。
+ */
 .markdown {
-    font-size: var(--fs-sm);
+    font-size: var(--fs-base);
     line-height: 1.7;
     word-break: break-word;
   }
