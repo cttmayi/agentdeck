@@ -668,9 +668,9 @@
 
 | ID | 需求 | 优先级 |
 |---|---|---|
-| FR-CLI-18 | skill 写入 Claude 原生目录 `.claude/skills/<name>/SKILL.md` | P0 |
+| FR-CLI-18 | skill 写入 Claude 原生目录 `.claude/skills/<名字>/SKILL.md`（名字 = 目录名 = frontmatter 的 `name`，D236） | P0 |
 | FR-CLI-19 | 技能发现必须**靠把目录摆对**（走原生发现机制），不得只依赖提示词喂 | P0 |
-| FR-CLI-20 | 元数据规范化：**以 slug 为权威名**，改写作者填写的 name | P0 |
+| FR-CLI-20 | 元数据规范化：**以技能名为权威**（目录名，D236 前叫 slug），改名与它不一致的作者填写的 name | P0 |
 | FR-CLI-21 | 必须处理三种残缺元数据：缺 name 则注入；YAML 损坏则重建；重建时**保留其他键——特别是作者用于隐藏技能的键** | P0 |
 | FR-CLI-22 | 元数据判定必须使用**解析器**，不得用词法扫描 | P0 |
 | FR-CLI-23 | 技能包哈希必须覆盖来源、ID、名称、描述、正文、每个支持文件的路径与内容摘要 | P1 ⚠️ **未实现**：代码中没有覆盖这些字段的技能包哈希（`Skill` 实体无哈希字段；`computeDedupKey` 只作用于 report） |

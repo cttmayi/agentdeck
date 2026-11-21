@@ -38,7 +38,7 @@
 | 一次 run 的时序 | `initialize` 握手 → `thread/start`（新线程，cwd=工作目录）或 `thread/resume`（续上次）→ `turn/start`（B 档 prompt 作为 text input）→ 收 `item/*` 通知 → `turn/completed` → 关进程 |
 | 会话恢复 | **一等公民**：sessionId = `thread_id`，`thread/resume` 原生支持 ⇒ `sessionState: 'stateful'`（相对 CLI 形式的最大收益：返工、聊天都能接着上次会话） |
 | 沙箱 | ⚠️ **2026-10-18 修正**：每线程原生 `sandbox: danger-full-access` + `approvalPolicy: never`——macOS 上 `workspace-write` 的 Seatbelt 忽略 `[sandbox_workspace_write] network_access`（openai/codex#10390，无修复版本），进程内连本地模型端点都出不去、turn 直接 502；`danger-full-access` 是 macOS 上唯一能联网的选项。任务隔离不靠它：平台进程级沙箱（sandbox-exec 包装）+ 第一句话引导层 |
-| 技能注入 | **机制不变**：写 `<workdir>/.codex/skills/<slug>/SKILL.md`（codex 项目作用域，thread cwd=workdir 时自动发现） |
+| 技能注入 | **机制不变**：写 `<workdir>/.codex/skills/<名字>/SKILL.md`（codex 项目作用域，thread cwd=workdir 时自动发现） |
 | 协议 | `RuntimeProtocol` 已有的 **`'jsonrpc'`** 首次启用；`family: 'codex-app-server-jsonrpc'`（新值） |
 | 轮次上限 | app-server 没有 turn 上限 ⇒ `maxTurns` 无法执行；因 `managedFlags` 对 service 不适用（cli-only，可选化），**不再需要** v1 的 `maxTurns: string\|null` 扩展 |
 | 描述符契约 | 加 `kind: 'cli' \| 'service'`（默认 `'cli'`），cli 形状字段（managedFlags / blockedArgs / promptDelivery / resume.flag）对 service **不填**、按 kind 校验 |
@@ -191,7 +191,7 @@ codex app-server generate-ts --out DIR    # 生成协议 schema（可作我们�
 
 | 路 | 做法 | v1 |
 |---|---|---|
-| A. 项目作用域 | 写 `<workdir>/.codex/skills/<slug>/SKILL.md`，thread cwd=workdir 时 codex 自动发现（官方 Skills 文档：Project scope = `{cwd}/.codex/skills/`） | ✅ **推荐**——与 claude/generic 的注入机制完全一致，零新机制 |
+| A. 项目作用域 | 写 `<workdir>/.codex/skills/<名字>/SKILL.md`，thread cwd=workdir 时 codex 自动发现（官方 Skills 文档：Project scope = `{cwd}/.codex/skills/`） | ✅ **推荐**——与 claude/generic 的注入机制完全一致，零新机制 |
 | B. API 注入 | `skills/list` 带 `perCwdExtraUserRoots`（为指定 cwd 注册额外 user 作用域技能根） | 后续（需验证 + 新机制） |
 
 ### 2.8 已知没有的东西
@@ -411,7 +411,7 @@ error **`-32600`**（三种形态：`invalid session id` / `no rollout found for
 | 1 | 真实 `codex app-server` 的 stdio 帧与 §2 的形状（字段名、通知名、item 类型） | 起 server 手动发 initialize/thread/start/turn/start 对照 | ✅ 全对上，但 **3 处字段名与文档/源码假设不同**（见下方差异清单） |
 | 2 | `thread/start` 的 `approvalPolicy:'never'` + `sandbox:'workspace-write'` 在真实 server 上的行为 | 跑一个会改文件、会跑命令的 prompt | ✅ 新线程全程**无审批请求**；sandbox 生效（工作目录外写入被拒："writing outside of the project"）。⚠️ **恢复的线程 approvalPolicy 会退回 `on-request`** ⇒ 后端 turn/start 也显式传 `never` |
 | 3 | 非 git 工作目录（无 `.git`）下 app-server 会不会触发 trust 提示 / 挂起 | 真实跑一次 | ⚠️ 探针工作目录均新建、无 `.git`，全程无 trust 提示、无挂起（0.144.0-alpha.4 在 app-server 形态下不按 git/trust 提示） |
-| 4 | 项目技能：`<workdir>/.codex/skills/<slug>/SKILL.md` 是否真被 thread 自动发现 | 挂一个 skill 真实跑一次 | ✅ 自动发现（`skills/list` 返回 user/system 作用域；项目技能被尝试加载）。⚠️ **必须带 YAML frontmatter**（`---` 分隔）否则报 `missing YAML frontmatter`——`writeSkill` 注入时总会写，兼容 |
+| 4 | 项目技能：`<workdir>/.codex/skills/<名字>/SKILL.md` 是否真被 thread 自动发现 | 挂一个 skill 真实跑一次 | ✅ 自动发现（`skills/list` 返回 user/system 作用域；项目技能被尝试加载）。⚠️ **必须带 YAML frontmatter**（`---` 分隔）否则报 `missing YAML frontmatter`——`writeSkill` 注入时总会写，兼容 |
 | 5 | `thread/resume` 的实参形状 + 不存在的 thread 的错误形状（rejectDetectable 依据） | 跑两次（第一次留 thread_id）+ 恢复假 id | ✅ 跨进程恢复成功（rollout 落盘，`sessionState:'stateful'` 实锤）；不存在的线程一律回 JSON-RPC error **`-32600`**（三种形态：invalid session id / no rollout found / is archived）⇒ **`rejectDetectable=true`**；被拒时后端回退新线程 + `resumeRejected=true` |
 | 6 | `thread/tokenUsage/updated` 的实际载荷字段 | 跑一次看通知 | ✅ 用量在 `params.tokenUsage.total.{inputTokens,outputTokens,…}`（**不是** `params.usage`）——解析器已修 |
 | 7 | `turn/completed` 语义：一次 `turn/start` 是否可能产生多个 turn；interrupted 的实际触发路径 | 真实跑 + 取消各一次 | ✅ 一次 turn/start 一个 turn；`turn/interrupt {threadId,turnId}` → 响应 `{}` → `turn/completed(status:'interrupted')`。failed 分支的 TurnError 形状仍未实测触发 |

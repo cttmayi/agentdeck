@@ -44,8 +44,7 @@ my-skill/
 
 | 字段（`Skill` 实体） | 是什么 |
 |---|---|
-| `slug` | kebab-case，`^[a-z0-9][a-z0-9-]{0,62}$`。**同时是注入时的目录名**，所以它必须是文件系统安全的 |
-| `name` | 给人看的名字（≤200） |
+| `name` | **技能名**，只有一个：kebab-case，`^[a-z0-9][a-z0-9-]{0,63}$`（≤64）。它同时是库里的目录名、注入时的目录名、注入文件的 frontmatter `name`——业界规范（`SKILL.md`）要求 `name` 必须与目录名一致，所以三者只能是同一个字符串。**没有 `slug` 这个字段**（D236：以前有两个名字，`slug` 是权威名、`name` 是显示标签，实测几乎恒等，合并了） |
 | `description` | 一句话用途（可空）。会被补进注入文件的 frontmatter `description`——CLI 的清单里它**是唯一的用途信号**，缺了技能基本不会被主动选用 |
 | `body` | `SKILL.md` 正文 |
 | `files` | 支持文件：相对路径 → 文本内容（可选） |
@@ -65,13 +64,13 @@ my-skill/
 | 层 | 在哪 | 形态 |
 |---|---|---|
 | ① 作者那里（源头） | 你机器上的某个目录 / GitHub 仓库 | 一个含 `SKILL.md` 的**目录** |
-| ② 装进来之后（库） | `~/.agentdeck/skills/<slug>/`（默认；`--skills-root` 可覆盖） | **真文件**：`SKILL.md` + 支持文件；索引在 `log/skill.jsonl`（只留元数据） |
-| ③ 跑任务时（注入） | `<工作目录>/.claude/skills/<slug>/` | **真文件**：`SKILL.md` + 支持文件 |
+| ② 装进来之后（库） | `~/.agentdeck/skills/<名字>/`（默认；`--skills-root` 可覆盖） | **真文件**：`SKILL.md` + 支持文件；索引在 `log/skill.jsonl`（只留元数据） |
+| ③ 跑任务时（注入） | `<工作目录>/.claude/skills/<名字>/` | **真文件**：`SKILL.md` + 支持文件 |
 | ④ 界面上 | `#/skills` | 列表里的一行 |
 
 ### ② 装进来之后：是文件（磁盘为准）
 
-**2026-10 起，装一个 skill 会把内容写成真文件**，落在 `<skillsRoot>/<slug>/` 下，
+**2026-10 起，装一个 skill 会把内容写成真文件**，落在 `<skillsRoot>/<名字>/` 下，
 默认在**家目录下一个可见的** `~/.agentdeck/skills`。**磁盘是权威**：改那里的
 `SKILL.md` 就生效——下一次注入用的就是改后的内容，不用重装。
 
@@ -85,29 +84,29 @@ my-skill/
 ~/.agentdeck/data/                      ← 数据目录（--data-dir 可覆盖）
 ├── workspaces.jsonl
 └── workspaces/<wsId>/
-    ├── log/skill.jsonl                   ← ★ 索引：只留 id/slug/来源/版本/时间（append-only）
+    ├── log/skill.jsonl                   ← ★ 索引：只留 id/名字/来源/版本/时间（append-only；老记录里名字那一栏叫 `slug`，读时兼容）
     ├── log/skill.jsonl.snapshot          ← 压缩后的物化快照
     ├── log/tool.jsonl                    ← 工具包（见 tools.md）
     └── runs/<runId>/messages.jsonl       ← 执行消息流
 ```
 
-- **正文与支持文件以磁盘为准**（`~/.agentdeck/skills/<slug>/`）。代价如实写在这里：
+- **正文与支持文件以磁盘为准**（`~/.agentdeck/skills/<名字>/`）。代价如实写在这里：
   **改文件不进 append-only 日志**（改文件不留历史）——这是刻意的取舍；
 - 想确认"到底装了什么"，看的是 `~/.agentdeck/skills/`；索引（来源、版本）在 `log/skill.jsonl`；
 - ⚠️ 索引是 **append-only** 的：改一条 = 追加一条新记录，读的时候取最后一条。
   所以**别手动编辑**它——要改内容直接改 `SKILL.md`，要改来源/版本通过界面或接口重装
   （同名要显式 `overwrite`）；
-- 卸载 = 删索引记录 + 删 `<skillsRoot>/<slug>/` 目录。**还挂着它的智能体会让卸载被拒**，
+- 卸载 = 删索引记录 + 删 `<skillsRoot>/<名字>/` 目录。**还挂着它的智能体会让卸载被拒**，
   并把它们列出来：静默删掉一条还被引用的东西，症状会在很久以后才出现（而且看起来像技能
   坏了）。若挂它的是**没有内联标准的审核者**，提示会直接给出下一步：先把标准固化到审核者
   身上，再回来卸载；
 - ⚠️ **没有例外**（2026-10）：从**本地技能目录**装进来的（`localdir:`，见 §6）也要落盘——
-  它们装完之后就是一条普通技能，正文在 `~/.agentdeck/skills/<slug>/`，与其它来源完全一致。
+  它们装完之后就是一条普通技能，正文在 `~/.agentdeck/skills/<名字>/`，与其它来源完全一致。
   （改动前 `localdir:` 是唯一的例外、正文留在索引记录里；那条例外随"本地技能目录改成**显式
   安装**"撤掉了，见 D73。）
 - ✅ **唯一的例外是"聊天沉淀"（`mine:`，设计未实现，见 D80）**：自己提炼的 skill 落
-  **另一个根** `~/.agentdeck/skills-mine/<slug>/`（git 化 + 平台自动 commit），与安装根
-  **物理分离**——安装的重装覆盖语义不能碰自己的沉淀资产；同 slug 冲突时提炼的优先
+  **另一个根** `~/.agentdeck/skills-mine/<名字>/`（git 化 + 平台自动 commit），与安装根
+  **物理分离**——安装的重装覆盖语义不能碰自己的沉淀资产；同名冲突时提炼的优先
   （详见 `docs/design/skill-crystallization.md` §1.1）。
 
 ### ③ 跑任务时：注入到工作目录
@@ -117,7 +116,7 @@ my-skill/
 
 ```
 <工作目录>/.claude/skills/                ← 由 runtime 描述表决定（claude ⇒ 这个目录）
-├── .agentdeck-managed.json            ← 归属清单：我们放过哪些 slug
+├── .agentdeck-managed.json            ← 归属清单：我们放过哪些名字（老清单写的是 `{ slugs }`，读时两种都认）
 ├── my-skill/
 │   ├── SKILL.md                          ← 已重建过 frontmatter（见 §6）
 │   └── references/…                      ← 支持文件原样落盘
@@ -127,7 +126,7 @@ my-skill/
 - **工作目录**默认在 `~/agentdeck-workspace/<issue|report|run>-<id>/`（`--work-root` 可
   覆盖）。目录按**任务**（subject）分，不按 run 分——所以同一个任务的重试能看到上次留下的
   文件（D27）；
-- **`.agentdeck-managed.json` 是归属清单**，不是配置：它记着我们放过哪些 slug。作用是
+- **`.agentdeck-managed.json` 是归属清单**，不是配置：它记着我们放过哪些名字。作用是
   两件——
   - **不再挂载的会被清掉**（只清清单里我们自己放的那些）；
   - **同名冲突会被拒绝而不是覆盖**：目标目录存在、但不在清单里 ⇒ 那是使用者的东西，
@@ -171,8 +170,9 @@ my-skill/
 > 不用登录**——把一批安装方法固化成一份可点列表（`GET /api/skills/install-list`）。
 > 清单可用 `--skills-catalog <路径>` 换一份（清单**本身**坏掉时接口明确报错，不给空表；
 > 单条坏掉只进 `skipped` 并列出原因）。
-> ⚠️ 它**不声明 slug**——slug 由取包规则算出（与真正装的时候逐字相同），清单声明的 slug
-> 一旦与重算的不一致，界面会拿错 slug 去比"装没装过"，把已装的显示成「安装」。
+> ⚠️ 它**不声明技能名**——名字由取包规则从 URL / 目录算出（与真正装的时候逐字相同），
+> 清单声明的名字一旦与重算的不一致，界面会拿错名字去比"装没装过"，把已装的显示成「安装」。
+> （清单里那句中文标题叫 `title`，只是措辞，不是技能名。）
 > ⚠️ 经 url 安装会把那个仓库的**整棵树**拉下来（清单不带 `exclude` 修剪语义——那是推荐
 > 清单才有的），只在限额内。它与推荐清单（`tools/skill-catalog-sync/recommended-skills.json`）
 > 是**两份各自独立的文件**，不承诺同步。
@@ -260,7 +260,7 @@ daemon 读得到（页面读不了磁盘），而"下载到本地"本来就发�
 | 目录递归深度 | 4 | 同上 |
 | 单次 HTTP 超时 | 15 s | 同上 |
 | 递归时跳过的目录 | `.git`、`node_modules`、`.github` | 同上 |
-| slug | `^[a-z0-9][a-z0-9-]{0,62}$` | `packages/protocol/src/entities.ts` |
+| 技能名 | `^[a-z0-9][a-z0-9-]{0,63}$`（≤64，与规范一致） | `packages/protocol/src/entities.ts` |
 
 ⚠️ **文件数与总字节 2026-10 各提了一档**：真实技能仓库是**完整仓库**（实测
 fireworks-tech-graph：234 个文本文件、2.4 MB 文本），旧上限（64 个 / 1 MB）把它挡在
@@ -280,17 +280,17 @@ fireworks-tech-graph：234 个文本文件、2.4 MB 文本），旧上限（64 �
 
 | 情况 | 处理 | 记一条说明 |
 |---|---|---|
-| 完全没有 frontmatter | 注入最小的 `{ name: <slug>, description? }` | ✅ |
+| 完全没有 frontmatter | 注入最小的 `{ name: <名字>, description? }` | ✅ |
 | frontmatter 解析不了（YAML 坏） | 重建（只保留正文） | ✅ |
 | frontmatter 不是键值对象 | 重建 | ✅ |
 | 缺 `description` 而平台登记了用途 | 补上平台那句 | ✅ |
 | 两边都没有 `description` | 不动 | ❌ **刻意不记**——那是技能作者的问题，不是这次运行的异常。日志里的信号要稀缺 |
-| 缺 `name` | 注入 slug | ✅ |
-| 作者填的 `name` 与 slug 不一致 | **按 slug 改写** | ✅ |
+| 缺 `name` | 注入技能名 | ✅ |
+| 作者填的 `name` 与技能名不一致 | **按技能名改写**（规范要求两者一致，而目录名是权威） | ✅ |
 
 两条值得记住的：
 
-- **`name` 以 slug 为权威名**：同名不同源的技能必须可区分，而只有 slug 有唯一性保证；
+- **`name` 以技能名为权威**（= 目录名）：同名不同源的技能必须可区分，而目录名是唯一有唯一性保证的那个；
 - **作者写了 `description` 就不动**——那是他的表达。
 
 ---
@@ -308,13 +308,13 @@ fireworks-tech-graph：234 个文本文件、2.4 MB 文本），旧上限（64 �
 按来源分组（这边按**目录**、那边按**类别**）、点组标题折叠——两个页签是同一件事的两个来源
 （2026-10 使用者要求统一，见 D74 的后续）。
 
-**装完就是一条普通技能**：正文落到 `~/.agentdeck/skills/<slug>/`，与其它来源完全一致
+**装完就是一条普通技能**：正文落到 `~/.agentdeck/skills/<名字>/`，与其它来源完全一致
 （§2）。列表里它显示「来自本地技能目录：`<根目录>`」——那只是一条**来源标记**，不是
 "跟着源目录走"。所以：
 
 | 你可能以为 | 实际 |
 |---|---|
-| "在 `~/.claude/skills` 里改一句就生效" | ❌ 装完那份是**我们自己的副本**（`~/.agentdeck/skills/<slug>/`）。要改就改我们这份（磁盘为准），或回来**再装一次** |
+| "在 `~/.claude/skills` 里改一句就生效" | ❌ 装完那份是**我们自己的副本**（`~/.agentdeck/skills/<名字>/`）。要改就改我们这份（磁盘为准），或回来**再装一次** |
 | "在那边删了技能，这边也没了" | ❌ 库里那条照旧可用（它已经是一条独立技能） |
 | "卸载后会被扫描带回来" | ❌ 卸载就是卸载。它现在是一条普通技能，不会被自动重扫回来 |
 
@@ -326,8 +326,8 @@ fireworks-tech-graph：234 个文本文件、2.4 MB 文本），旧上限（64 �
 
 | 候选 | 路径 | 形状 |
 |---|---|---|
-| Claude Code | `~/.claude/skills` | 扁平：`<slug>/SKILL.md` |
-| Codex | `~/.codex/skills` | **多一层**：实测是 `.system/<slug>/SKILL.md` |
+| Claude Code | `~/.claude/skills` | 扁平：`<名字>/SKILL.md` |
+| Codex | `~/.codex/skills` | **多一层**：实测是 `.system/<名字>/SKILL.md` |
 | Cursor | `~/.cursor/skills` | 扁平 |
 | AGENTS 约定目录 | `~/.agents/skills` | 扁平 |
 
@@ -341,7 +341,7 @@ fireworks-tech-graph：234 个文本文件、2.4 MB 文本），旧上限（64 �
   "里面 1 个" 与 Finder 里的 2 个对不上，而使用者只能去猜；
 - 扫到却没有 `SKILL.md` 的目录、读不进来的技能，都进该目录的「跳过」列表并**带上原因**；
 - 目录不存在 / 读不了：`error` 字段如实说（**不是**"里面没有技能"）；
-- ⚠️ 列表里的「已安装」标记 = 库里有没有同 slug 的技能（现算，不缓存）。
+- ⚠️ 列表里的「已安装」标记 = 库里有没有同名（同名 = 同一条技能）的技能（现算，不缓存）。
 
 ---
 
@@ -351,12 +351,12 @@ fireworks-tech-graph：234 个文本文件、2.4 MB 文本），旧上限（64 �
 |---|---|
 | "目录里明明有东西，界面说没有 skill" | 那个目录里没有 `SKILL.md`。**没有它就不是技能**（空目录、只有 README 的目录都算） |
 | "它说找不到 SKILL.md，可我看着就是 `SKILL.md`" | 大小写。macOS 文件系统默认不分大小写，`skill.md` 能被碰巧读到——平台会明确点出"你那个是 `skill.md`，要求的是大写 `SKILL.md`" |
-| "我删了源目录的文件，库里还在" | 正常。**所有**来源装进来时都会**把内容复制到 `~/.agentdeck/skills/<slug>/`**，源目录后来变了不影响库里（要改就改库里那份，或重装）。**没有例外**（`localdir:` 也一样，见 §6） |
-| "从本地安装后，在源目录里改了它，注入的还是旧的" | 装完那份是**我们自己的副本**。改 `~/.agentdeck/skills/<slug>/`（磁盘为准），或回「从本地安装」页签**再装一次**（见 §6） |
-| "注入时报『技能「X」的正文是空的，拒绝注入』" | 你手删了 `~/.agentdeck/skills/<slug>/`（或里面的 `SKILL.md`）。索引记录还在、内容没了——平台**拒绝**用一个空技能，而不是静默注入一个空的。重新安装这个技能即可 |
+| "我删了源目录的文件，库里还在" | 正常。**所有**来源装进来时都会**把内容复制到 `~/.agentdeck/skills/<名字>/`**，源目录后来变了不影响库里（要改就改库里那份，或重装）。**没有例外**（`localdir:` 也一样，见 §6） |
+| "从本地安装后，在源目录里改了它，注入的还是旧的" | 装完那份是**我们自己的副本**。改 `~/.agentdeck/skills/<名字>/`（磁盘为准），或回「从本地安装」页签**再装一次**（见 §6） |
+| "注入时报『技能「X」的正文是空的，拒绝注入』" | 你手删了 `~/.agentdeck/skills/<名字>/`（或里面的 `SKILL.md`）。索引记录还在、内容没了——平台**拒绝**用一个空技能，而不是静默注入一个空的。重新安装这个技能即可 |
 | "卸载按钮点不动 / 点了被拒" | 还有智能体挂着它。提示里会点名是谁；若挂着的是"判断依据还来自这条 skill"的审核者，先在它详情页按「把这份判断依据并进「指令」」 |
 | "装 GitHub 的私有仓库失败" | 设 `AGENTDECK_GITHUB_TOKEN`；另外**只支持那三个 GitHub 主机**，别的域名会被拒 |
-| "两个不同目录里有同名 skill" | 两个来源目录各留一条记录（slug 相同、`id` 不同、来源徽标不同）。智能体选择器里会标出「（来自 `<目录>`）」以便区分 |
+| "两个不同目录里有同名 skill" | 两个来源目录各留一条记录（名字相同、`id` 不同、来源徽标不同）。智能体选择器里会标出「（来自 `<目录>`）」以便区分 |
 | "刷新页面白屏" | 与 skill 无关：是静态资源缓存。`Cmd+Shift+R` |
 
 ---
@@ -367,13 +367,13 @@ fireworks-tech-graph：234 个文本文件、2.4 MB 文本），旧上限（64 �
 |---|---|
 | 实体与字段 | `packages/protocol/src/entities.ts`（`Skill`、`Agent.skillIds`、`Agent.reviewStandard`、`AgentGroup.allowedActions`） |
 | 从路径 / GitHub 解析与限额 | `packages/skill-source/src/skill-source.ts` |
-| 本地安装清单：读、校验、算 slug | `apps/daemon/src/skill-list.ts`（自带清单在 `apps/daemon/catalog/skills.json`） |
+| 本地安装清单：读、校验、算名字 | `apps/daemon/src/skill-list.ts`（自带清单在 `apps/daemon/catalog/skills.json`） |
 | 从本地安装：候选、扫描（**只读**，无对账） | `apps/daemon/src/local-skill-dirs.ts` |
 | 注入（写文件、归属清单、冲突、清理） | `packages/agent-core/src/skill-injection.ts` |
 | frontmatter 归一化 | 同上（`normalizeSkillFrontmatter`） |
 | 工作目录怎么算出来的 | `apps/daemon/src/workdir.ts`（`defaultWorkRoot`、`resolveWorkDir`） |
 | 接口 | `apps/daemon/src/server.ts`：`GET/POST /api/skills`、`POST /api/skills/install`、`DELETE /api/skills/:id`、`GET /api/skills/local-dirs`（只读发现）、`GET /api/skills/install-list` |
 | 落在磁盘上的布局 | `packages/store-file/src/file-store.ts`（文件头有完整目录树） |
-| 技能内容落盘 / 回读 / 删目录 | `packages/store-file/src/skill-files.ts`（`<skillsRoot>/<slug>/`）；`FileStore.open` 里的 `#migrateSkillsToDisk` 负责老记录一次性迁移 |
+| 技能内容落盘 / 回读 / 删目录 | `packages/store-file/src/skill-files.ts`（`<skillsRoot>/<名字>/`）；`FileStore.open` 里的 `#migrateSkillsToDisk` 负责老记录一次性迁移 |
 | 运行时怎么投递技能 | `packages/agent-core/src/runtime-table.ts`（每个 runtime 的 `skills` 字段） |
 | 测试 | `packages/skill-source/src/skill-source.test.ts`、`packages/store-file/src/file-store.test.ts`（落盘/回读/卸载/迁移，含老 `localdir:` 记录迁移落盘）、`apps/daemon/src/skills-install.test.ts`（装进来的文件真落在 skillsRoot 下、磁盘为准、`path` 来源带 `sourceRef`）、`apps/daemon/src/local-skill-dirs.test.ts`（扫描）、`apps/daemon/src/skills-local-dirs-api.test.ts`（扫描 → 安装 → 落盘 → 挂给智能体）、`apps/daemon/src/skill-list.test.ts`、`apps/daemon/src/skills-install-list-api.test.ts`、`packages/agent-core/src/skill-injection.test.ts`（空正文守卫） |

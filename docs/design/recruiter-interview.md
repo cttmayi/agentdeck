@@ -23,7 +23,7 @@
   它自己描述规则（目标/职责/边界/输出格式/验收）——不是让你写规则，你只确认
   它挂几个平台技能（D111 起：生成者的**独有技能**，启动播种进目录，不再装进技能库）
   聊完 → 产出「岗位卡（草稿）」（写进工作目录 agent-draft/agent-draft.md）+ 配套
-        技能草稿（agent-draft/skill/<slug>/SKILL.md）
+        技能草稿（agent-draft/skill/<名字>/SKILL.md）
         ↓ 栏头出现「确认生成智能体」按钮
   审阅面板（岗位卡 + 配套技能，边界必审，人可改）→ 确认
         ↓
@@ -38,7 +38,7 @@
 - **取代两个内置**：「访谈官」（只问不干）与「岗位卡起草者」（只写岗位卡）被
   **智能体生成者**吸收合并——它既问又起草，一个内置、一个角色、一个入口。
 - **配套技能与岗位卡同一场确认**：生成者按 skill-eligibility 判定、在聊天里起草
-  `skill/<slug>/SKILL.md`（§3.4），确认时与岗位卡一起过审（§3.6 v1 拍板：不走
+  `skill/<名字>/SKILL.md`（§3.4），确认时与岗位卡一起过审（§3.6 v1 拍板：不走
   skill-draft run）。**落成新智能体的独有技能**（不进共享技能池——2026-11 使用者
   拍板："生成的 SKILL 应该作为智能体的内置技能"，D1xx 记录）。
 
@@ -87,14 +87,14 @@
    不是漏填。
 5. 用户表示聊够后，产出「岗位卡（草稿）」（§3.4 写入工作目录）+ **配套技能草稿**
    （0..N 条：它按 skill-eligibility 判定哪些做法值得抽成技能；没有就 0 条——
-   **逐条写成 `skill/<slug>/SKILL.md`**，与岗位卡同一份产出、同一场确认）。
+   **逐条写成 `skill/<名字>/SKILL.md`**，与岗位卡同一份产出、同一场确认）。
 6. 岗位卡注明"草稿——确认前尤其要审『边界』"。
 
 ### 3.3 挂载技能（D111 起：平台的独有技能，不再"动态安装进技能库"）
 
 智能体生成者挂 **3 个平台内置技能**（§4 推荐），由 `ensureBuiltinAgentMakerSkills`
-启动对账时**播种成生成者的独有技能**——`agents/<id>/skills/<slug>/SKILL.md`
-（内容从仓库 `catalog/platform-skills/<slug>/SKILL.md` 复制，幂等）。
+启动对账时**播种成生成者的独有技能**——`agents/<名字>/skills/<技能名>/SKILL.md`
+（内容从仓库 `catalog/platform-skills/<名字>/SKILL.md` 复制，幂等）。
 
 > ⚠️ **D111 修订**：早前这节写的是"动态安装进 `skillsRoot`（与 distilly 同一机制）"。
 > 智能体目录化（`docs/design/agent-directory.md` §4）之后，技能两类、**没有镜像**——
@@ -117,7 +117,7 @@ conversation-<id>/
                          frontmatter: name / role
                          ## 目标 / ## 职责 / ## 边界（不能碰）/ ## 输出格式
                          ## 验收标准
-    skill/<slug>/SKILL.md ← 配套技能草稿（0..N 条，逐条一个子目录；
+    skill/<名字>/SKILL.md ← 配套技能草稿（0..N 条，逐条一个子目录；
                             没有就 0 条，不写任何技能文件）。
                             正文三节（D114）：## When to Use /
                             ## Procedure / ## When NOT to Use（失败模式：
@@ -128,7 +128,7 @@ conversation-<id>/
 **只认新位置**（使用者拍板）：工作目录顶层的老 `agent-draft.md` 不再被认。
 岗位卡 = 生成者在对话里已逐条描述并被用户确认的规则，**落盘一份**，确认生成时
 平台读它（可复现、可 diff、可重新聊天再写）。配套技能同理：草稿落盘在
-`agent-draft/skill/<slug>/SKILL.md`，确认时与岗位卡一起过审一起沉淀（§3.6）。
+`agent-draft/skill/<名字>/SKILL.md`，确认时与岗位卡一起过审一起沉淀（§3.6）。
 
 ### 3.5 素材（可选）：工作目录 `agent/` 目录
 
@@ -145,16 +145,16 @@ conversation-<id>/
 - 点按钮 → 聊天页弹出审阅面板（Modal，尺寸 wide）：
   - **岗位卡部分**：名称 / 角色 / 指令（一段，边界在段内），**人可改**；提示
     「草稿不是合同——检查『边界』段」（提示不是校验）；
-  - **配套技能部分**：每条技能一块（slug/name/description/SKILL.md 正文，来自
-    工作目录 `skill/<slug>/SKILL.md`），黄条提示「未经验证——建议先让智能体干
+  - **配套技能部分**：每条技能一块（名字/description/SKILL.md 正文，来自
+    工作目录 `skill/<名字>/SKILL.md`），黄条提示「未经验证——建议先让智能体干
     几轮，再用沉淀结晶正式版」（提示不是校验）；可删可改；
   - 打开时 `GET /api/conversations/:id/agent-draft` 读一次；确认成功后面板内显示
     结果（不自动关，可关）。
 - 确认 = 人确认是唯一入口（`POST /api/conversations/:id/agent-commit`）：
-  1. 配套技能逐条过 `resolvePayloadEntry` 同一关（缺正文 / slug 非法 ⇒ 400
+  1. 配套技能逐条过 `resolvePayloadEntry` 同一关（缺正文 / 名字非法 ⇒ 400
      `agent_skill_invalid`，拦在写之前）；
   2. 创建智能体：name/role/instructions（岗位卡 frontmatter + 正文，`skillIds`
-     = 空）；配套技能写进它的**独有技能**目录（`agents/<id>/skills/<slug>/SKILL.md`）。
+     = 空）；配套技能写进它的**独有技能**目录（`agents/<名字>/skills/<技能名>/SKILL.md`）。
      ★ 2026-11（使用者拍板）：配套技能**不进共享技能池**（skills-mine / 无 git）——
      它是"这个岗位自己"的技能，是 D111"智能体自己的东西住进它的目录"的同一句语义；
      共享沉淀是使用者主动提炼的动作，生成流程不替使用者往共享池写。独有技能随
@@ -181,7 +181,7 @@ v1 定的是"共享资产"（mine + git、任何智能体可挂）；使用者�
 智能体生成者拥有 **3 条平台内置独有技能**（D111：目录文件，启动播种、幂等；
 将来使用者也可从技能市场装共享技能再挂上，两类同一条注入通道）：
 
-| slug | 名称 | 用途（为什么重要） |
+| 名字 | 是什么 | 用途（为什么重要） |
 |---|---|---|
 | `agent-design-norms` | 智能体设计规范 | 岗位卡五字段结构、指令 = 目标+职责+边界+输出格式一段组装（第一句话只有一个注入位，D29）、验收标准写法。保证生成者产出的岗位卡稳定可解析 |
 | `boundary-checklist` | 边界自检清单 | 边界段必含项：不可逆操作（删除/覆盖/对外发送/改他人文件）、拿不准先停下、只在工作目录动手、"没有边界也要明说"。保证边界段不缺项——文章最强调"不能做什么" |
@@ -192,7 +192,7 @@ v1 定的是"共享资产"（mine + git、任何智能体可挂）；使用者�
 
 ## 5. 与「沉淀」和「沉淀 Agent」（§4.1.3）的关系
 
-- **配套技能 = 生成产物的另一半**：生成者在聊天里起草 `skill/<slug>/SKILL.md`
+- **配套技能 = 生成产物的另一半**：生成者在聊天里起草 `skill/<名字>/SKILL.md`
   （skill-eligibility 判定哪些值得抽），确认时随岗位卡一起过 `resolvePayloadEntry`
   同一关、直接沉淀（§3.6 那条 v1 拍板）——**不复制 skill-draft 骨架、不开第二条
   run**；技能未经验证（§3.6 提示）。
@@ -217,7 +217,7 @@ v1 定的是"共享资产"（mine + git、任何智能体可挂）；使用者�
   - **内置对账**：生成者启动建出来、可恢复默认、历史版本冻结、不进业务选择
     （补进 `agents-create` 判据）；**挂载技能 = 独有技能（D111）**（3 条平台技能
     播种进生成者目录、不进技能库，幂等；老库 `platform:agent-maker` 记录一次性搬走）；
-  - **整链**：fake 生成者聊天产出岗位卡（写 agent-draft/agent-draft.md + `agent-draft/skill/<slug>/SKILL.md`）→
+  - **整链**：fake 生成者聊天产出岗位卡（写 agent-draft/agent-draft.md + `agent-draft/skill/<名字>/SKILL.md`）→
     按钮出现（`hasAgentDraft`）→ 审阅（改边界、删一条技能）→ 确认 → 断言配套技能
     **不进共享技能池**、`GET /api/agents/:id/skills` 读回新智能体的独有技能
     = 配套技能（agent-maker.test.ts 钉住）；
@@ -233,8 +233,8 @@ v1 定的是"共享资产"（mine + git、任何智能体可挂）；使用者�
 | 端点 | 说明 |
 |---|---|
 | `GET /api/conversations/:id` | 详情带 `hasAgentDraft`（agent-draft/ 目录里有 agent-draft.md 的侦测） |
-| `GET /api/conversations/:id/agent-draft` | 生成产物：`{agentDraft: string|null, skills: [{slug,name,description,body}]}`（agent-draft/agent-draft.md + `agent-draft/skill/<slug>/SKILL.md` 解析） |
-| `POST /api/conversations/:id/agent-commit` `{agentDraft, skills:[{slug,body}]}` | 人确认：岗位卡重解析校验 → 配套技能逐条 `resolvePayloadEntry` 校验（缺正文/slug 非法 ⇒ 400 `agent_skill_invalid`）→ 创建智能体 → 配套技能写进它的独有技能目录（`agents/<id>/skills/`；不进共享池）。非 `agent-maker` 对话 ⇒ 400 `agent_commit_not_maker` |
+| `GET /api/conversations/:id/agent-draft` | 生成产物：`{agentDraft: string|null, skills: [{name,description,body}]}`（agent-draft/agent-draft.md + `agent-draft/skill/<slug>/SKILL.md` 解析） |
+| `POST /api/conversations/:id/agent-commit` `{agentDraft, skills:[{name,body}]}` | 人确认：岗位卡重解析校验 → 配套技能逐条 `resolvePayloadEntry` 校验（缺正文/slug 非法 ⇒ 400 `agent_skill_invalid`）→ 创建智能体 → 配套技能写进它的独有技能目录（`agents/<id>/skills/`；不进共享池）。非 `agent-maker` 对话 ⇒ 400 `agent_commit_not_maker` |
 
 创建动作仍走现有端点（智能体 `POST /api/agents` 同批字段、技能沉淀 commit 同
 `resolvePayloadEntry`），新接口只负责"岗位卡 → 配套技能 → 确认"这一段，不复制

@@ -456,11 +456,10 @@ proposed ──┬──▶ auto_approved ──▶ executing ──┬──▶
 ├── device.json             本机 device 标识
 ├── workspaces.json         workspace 记录（普通 JSON 数组，不是日志——D226）
 ├── agents/<名字>/          ★ 一个智能体 = 一个目录（D111）：agent.json（不含指令）+ instructions.md
-│                           + memory.jsonl + skills/<slug>/SKILL.md（它**独有**的技能）
+│                           + memory.jsonl + skills/<名字>/SKILL.md（它**独有**的技能）
 ├── memory/<agentId>/MEMORY.md  记忆的**人可读镜像**（`memory/` 整个根是 git 仓库；权威仍是 store）
 ├── workflows/<workflowId>/ ★ 一条编排 = 一个目录（D224）：workflow.json（不含代码）+ main.js
-│                           + agents/<名字>/（**编排内建智能体**，与 agents/<名字>/ 同形；
-│                             功能尚未落地，但落点就是这里）
+│                           + agents/<名字>/（**编排内建智能体**，D234；与 agents/<名字>/ 同形）
 ├── workflow-runs/<runId>.json  编排运行记录（一条运行一个文件）
 ├── schedules/<scheduleId>/ ★ 一条定时任务 = 一个目录（D225）：schedule.json（配置）+ task.md（任务正文）
 │                           + records.jsonl（触发记录，一行一条）
@@ -480,11 +479,12 @@ proposed ──┬──▶ auto_approved ──▶ executing ──┬──▶
 `<collection>` 共 **12** 个：`agent` / `skill` / `tool` / `issue` / `comment` / `run` /
 `report` / `verdict` / `action` / `artifact` / `audit` / `inbox`。
 
-> **技能内容不在数据目录里**（2026-10）：正文与支持文件落在 `<skillsRoot>/<slug>/`
+> **技能内容不在数据目录里**（2026-10）：正文与支持文件落在 `<skillsRoot>/<名字>/`
 > （默认 `~/.agentdeck/skills`，`--skills-root` 可覆盖），`log/skill.jsonl` 里那条记录
-> 退化成**索引**（id / slug / 来源 / 版本 / 时间）。**磁盘为准**——改那里的 `SKILL.md`
-> 就生效。**没有例外**：从本地技能目录装进来的（`localdir:`）也落盘——它装完就是一条
-> 普通技能，正文在 `~/.agentdeck/skills/<slug>/`（2026-10 D73 撤掉了旧的 `localdir:`
+> 退化成**索引**（id / 名字 / 来源 / 版本 / 时间）。**磁盘为准**——改那里的 `SKILL.md`
+> 就生效。目录名就是技能的名字（D236：`slug` 与显示名合并成一个 `name`，与业界规范一致）。
+> **没有例外**：从本地技能目录装进来的（`localdir:`）也落盘——它装完就是一条
+> 普通技能，正文在 `~/.agentdeck/skills/<名字>/`（2026-10 D73 撤掉了旧的 `localdir:`
 > 例外：那时它的正文留在记录里、不落盘）。老记录（含老的 `localdir:` 记录）在
 > `FileStore.open` 里**一次性迁移**落盘（幂等）。落点与回读见 `packages/store-file/src/skill-files.ts`；
 > 兜底 `fallbackSkillsRoot` 在 `apps/daemon/src/workdir.ts`（与 `fallbackWorkRoot` 同层，
@@ -693,7 +693,7 @@ interface AgentSession {
 
 | 注入什么 | 落在哪 | 什么时候清 |
 |---|---|---|
-| 技能（执行者挂的） | `<workDir>/<descriptor.skills.dir>/<slug>/`（claude 是 `.claude/skills/`） | run 结束，**只删平台自己放进去的** |
+| 技能（执行者挂的） | `<workDir>/<descriptor.skills.dir>/<名字>/`（claude 是 `.claude/skills/`） | run 结束，**只删平台自己放进去的** |
 | ~~上下文副本~~ | ~~`<workDir>/.agentdeck/context/<runId>.md`~~ | **已撤（2026-09）**：不再写（日志含第一句话全文，①②③ 分开带标签） |
 
 > ⚠️ 这里原来还有一行「工具包（执行者挂的）⇒ `<workDir>/.agentdeck/tools/<slug>/`」。
@@ -704,7 +704,7 @@ interface AgentSession {
 > 永远不会写出任何东西）。
 
 **归属靠落盘的清单，不靠内存**：技能目录里会写一份
-`<skills.dir>/.agentdeck-managed.json`（内容 `{slugs: [...]}`，放在技能目录**之内**，
+`<skills.dir>/.agentdeck-managed.json`（内容 `{names: [...]}`；老清单写的是 `{slugs: [...]}`，读时两种都认——不认老键会让老工作目录里我们放过的技能被当成使用者的文件，直接演成 `SkillCollisionError`。放在技能目录**之内**，
 CLI 不会把它当成一个技能）。清理时读的是**这份清单**——所以哪怕内存里的数组传错了，
 也删不到使用者的东西。清单读不到或坏掉 ⇒ 当空（**宁可少删**）。
 
@@ -719,8 +719,9 @@ CLI 不会把它当成一个技能）。清理时读的是**这份清单**——
 4. **注入失败要让 run 失败**（`RunFailureReason.injection_failed`）：
    静默的缺能力比直接报错糟得多——它不报错，只让结果悄悄变差。
 
-两个额外细节：技能正文会过一遍 **frontmatter 规范化**（缺 `name` 补 slug、
-`name` 与 slug 不一致时**以 slug 为权威**、缺 `description` 补平台那句、YAML 坏掉就重建，
+两个额外细节：技能正文会过一遍 **frontmatter 规范化**（缺 `name` 补技能名、
+`name` 与技能名不一致时**以技能名为权威**——规范要求两者一致，而目录名就是技能名；
+缺 `description` 补平台那句、YAML 坏掉就重建，
 **但保留其它键**如 `disable-model-invocation`）；技能单文件上限 `MAX_SKILL_BYTES = 256KB`，
 且这个数**与安装侧共用同一个常量**——否则会出现"装得上、注入时被拒"。
 `descriptor.skills.kind === 'none'` 时**一个文件都不写**，并在日志里明说原因。
@@ -825,7 +826,7 @@ CLI，消耗真实额度。这条错误当场被测试抓到了（`apps/daemon/s
 | POST | `/api/skills` | 直接写入（页面不走这条，走 install） |
 | POST | `/api/skills/install` | 装技能：本地路径 / GitHub 地址 / 远端目录（D38） |
 | GET | `/api/skills/local-dirs` | **只读发现**：扫内置的那几个本机技能目录（别的 AI 工具的 `skills/`），列出里面发现的技能与「已装」标记（D73；原来的 PUT 对账已删） |
-| GET | `/api/skills/install-list` | 读**本地安装清单**（一份仓库自带的 JSON，列出可点的安装方法 url/path；daemon 算 slug）。**不联网**——只读本地那份文件；清单本身坏掉时**报错**而不是回空表。路径可用 `--skills-catalog` 换 |
+| GET | `/api/skills/install-list` | 读**本地安装清单**（一份仓库自带的 JSON，列出可点的安装方法 url/path；daemon 算名字）。**不联网**——只读本地那份文件；清单本身坏掉时**报错**而不是回空表。路径可用 `--skills-catalog` 换 |
 | DELETE | `/api/skills/{id}` | 卸载（还被 agent 挂着时**被拒**并列出是谁） |
 | **工具包** | | |
 | GET | `/api/tools` | 列表 + 「不支持预演就自动执行」那个开关的当前值 |
@@ -851,7 +852,7 @@ CLI，消耗真实额度。这条错误当场被测试抓到了（`apps/daemon/s
 | GET | `/api/agents/{id}/memory-consolidate/{runId}` | 轮询结果（形状与 `memory-tidy` 同） |
 | GET | `/api/conversations/{id}/files` | 这个对话工作目录的文件树（一次一层；D49 ⑪） |
 | GET | `/api/conversations/{id}/file` | 目录里某个文件的内容（查看器用；带 NUL 就按二进制）。⚠️ 2026-10：**音视频**（`video/*` / `audio/*`）走另一条发法——不读进内存、认 `Range`（206 / 416）、带 `accept-ranges`，上限也从 8MB 换到 2GB |
-| GET | `/api/conversations/{id}/agent-draft` | **智能体生成者的草稿**（D109）：读工作目录 `agent-draft/agent-draft.md` + 配套技能草稿（`agent-draft/skill/<slug>/SKILL.md`）。对话详情另带 `hasAgentDraft`（按钮**条件出现**，不置灰） |
+| GET | `/api/conversations/{id}/agent-draft` | **智能体生成者的草稿**（D109）：读工作目录 `agent-draft/agent-draft.md` + 配套技能草稿（`agent-draft/skill/<名字>/SKILL.md`）。对话详情另带 `hasAgentDraft`（按钮**条件出现**，不置灰） |
 | POST | `/api/conversations/{id}/agent-commit` | **确认生成智能体**：先沉淀配套技能（进新智能体的**独有目录**，不进共享技能池），再建智能体并挂上它们；响应如实带 `exclusiveSlugs`。只有**智能体生成者**的对话能采纳（`agent_commit_not_maker`） |
 | GET | `/api/conversations/{id}/workflow-draft` | **编排生成者的草稿**（D135）：读工作目录 `workflow-draft/workflow-draft.md`（frontmatter `name`/`summary` + 正文即代码，```js 围栏会剥掉）。解析失败**照样 200**，带 `parseError`——界面据此说清哪里不对。对话详情另带 `hasWorkflowDraft` |
 | POST | `/api/conversations/{id}/workflow-commit` | **采纳编排**（D135）：**以请求里的最终版为准**（人可能改过代码），服务端重解析 + 三道校验（语法 `new AsyncFunction` **只构造不调用** / `agent('字面量')` 必须是现存智能体 / 名字非空 ≤100），通过就落一条编排 `source: 'ai'`；拼出来的 `agent(变量)` 放行但落 `unverifiable` 计数。只有**编排生成者**的对话能采纳（`workflow_commit_not_maker`） |
@@ -1444,7 +1445,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | GET | `/api/catalog/skills/sync` | 同步状态（`idle/running/ok/failed/unavailable` + 开始/结束时间、退出码、输出末尾若干行）。**公开** |
 | POST | `/api/catalog/skills/sync` | 触发一次同步：把独立工具当**子进程**跑（服务不 import 抓取代码）；**单飞**（跑着再点回 409）；**非回环 Origin 一律 403**（浏览器对简单请求不做预检，光靠 CORS 拦不住）。202 = 已开始 |
 | POST | `/api/catalog/skills/local` | **手动装一条技能**进远端目录的**本地层**（`<dataDir>/catalog-skills-local`，D52）：复用与 daemon 同一份取包规则（只允许 GitHub、必须有 `SKILL.md`）；**撞名一律 409**（不覆盖）；**非回环 Origin 403**。201 = 装上了 |
-| DELETE | `/api/catalog/skills/local/<slug>` | **卸载**（只对本地层）：同步来的那条会 **409 拒绝**并把替代路径写清楚（改清单 → 重新同步）；不在本地层 ⇒ 404 |
+| DELETE | `/api/catalog/skills/local/<名字>` | **卸载**（只对本地层）：同步来的那条会 **409 拒绝**并把替代路径写清楚（改清单 → 重新同步）；不在本地层 ⇒ 404 |
 | GET | 其它路径 | **管理页静态文件**（`apps/remote/web/dist`，D51）：未知路径回 `index.html`（hash 路由兜底）；`resolve` 之后必须仍在页面目录内（穿越不出去，有测试）；产物没构建时回一句"先跑 `pnpm run build:remote-web`"而不是 404 |
 | GET | `/api/me` | 账号 + 插件清单（⚠️ 2026-10 起**界面上没有展示它的地方**了，见 D56；接口本身仍然如实——FR-PLUGIN-10） |
 | GET/PUT | `/api/settings` | 用户设定（含 `reportingEnabled`） |
@@ -1603,7 +1604,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | runtime 描述表（加 runtime） | `packages/agent-core/src/runtime-table.ts` + `apps/daemon/src/runtime-registry.ts` |
 | 技能 / 工具注入与清理 | `packages/agent-core/src/skill-injection.ts` |
 | **任务隔离（引导 + 拦截，D76）** | 引导：`packages/agent-core/src/first-sentence.ts` 的 ③ 任务块无条件追加「任务边界」；拦截：`apps/daemon/src/run-hooks/pre-tool-use.py` 的 PreToolUse hook（结构化路径全拦、Bash 只拦明显越界）。★ **2026-10 分批第 76 批：hook 不再写进任务工作目录**，而是由 `claude-config.ts` 随受管 `CLAUDE_CONFIG_DIR/settings.json` 一起装（`env` / `enabledPlugins` / `hooks` 同一个写点，脚本落 `<受管目录>/agentdeck-hooks/`）——工作目录里没有平台文件；隔离没生效（自动退回）时这轮就没有拦截，note 会明说。见 §4.3.34 |
-| **技能内容落盘 / 回读 / 迁移** | `packages/store-file/src/skill-files.ts`（`<skillsRoot>/<slug>/`）+ `file-store.ts` 的 `insertSkill` / `#hydrate` / `#migrateSkillsToDisk`；路径兜底 `apps/daemon/src/workdir.ts`（`defaultSkillsRoot` / `fallbackSkillsRoot`），CLI `--skills-root` 在 `apps/daemon/src/cli.ts` |
+| **技能内容落盘 / 回读 / 迁移** | `packages/store-file/src/skill-files.ts`（`<skillsRoot>/<名字>/`）+ `file-store.ts` 的 `insertSkill` / `#hydrate` / `#migrateSkillsToDisk`；路径兜底 `apps/daemon/src/workdir.ts`（`defaultSkillsRoot` / `fallbackSkillsRoot`），CLI `--skills-root` 在 `apps/daemon/src/cli.ts` |
 | 沙箱 | `packages/agent-core/src/sandbox.ts` |
 | **一个进程怎么起**（探测到什么 / 该 exec 什么 / 起不来怎么解释） | `packages/agent-core/src/spawn-target.ts`（`.cmd` 垫片解开、`.ps1` 拒绝、`cmd.exe` 兜底、`describeSpawnError`）——**唯一一处**平台差异判断，接在 `process-tree.ts` 与 `apps/daemon/src/script-executor.ts` 上 |
 | CLI 入口的 Node 版本守卫 | `scripts/node-entry.mjs`（**所有** `pnpm run` 命令都过它，含 `test`；`.mjs` 是必须的，写在 `.ts` 里跑不到）。裸 Node ≥ 22.6 且默认没开类型擦除时自动补 `--experimental-strip-types` 重跑 |
@@ -3076,7 +3077,7 @@ codex 拿着一个缺 `auth.json` 的空目录起来 ⇒ 认证失败。也就�
 **技能搬到受管 home**（使用者提的："skill 和配置都在 workdir 下，能不能挪到 `<CODEX_HOME>`"）：
 
 - 描述表新增 `SkillDelivery.runtimeHomeSubdir`：codex 声明 `'skills'`（实测 0.157.1：
-  `<CODEX_HOME>/skills/<slug>/SKILL.md` 会被当成技能，`codex debug prompt-input` 里技能根是
+  `<CODEX_HOME>/skills/<名字>/SKILL.md` 会被当成技能，`codex debug prompt-input` 里技能根是
   `r0 = <CODEX_HOME>/skills`；app-server 模式下模型能抄出它的 description）；
 - 注入点：**隔离生效 ⇒ 写 `<受管 home>/skills`，工作目录一个字不写；隔离没生效 ⇒ 退回
   工作目录的 `.codex/skills`**（绝不写使用者真实的 `~/.codex`）；
@@ -3088,7 +3089,7 @@ codex 拿着一个缺 `auth.json` 的空目录起来 ⇒ 认证失败。也就�
 
 三个附带好处（都真的）：① 工作目录里不再出现平台自己的东西；② **agent 改不到自己的技能
 正文**（受管目录在数据目录里，agent 隔离在外）；③ 消掉一类失败——使用者仓库里若有同名
-`.codex/skills/<slug>`，原来的 `SkillCollisionError` 会让**整条 run 失败**，现在不存在了。
+`.codex/skills/<名字>`，原来的 `SkillCollisionError` 会让**整条 run 失败**，现在不存在了。
 
 **过程中撞出一个真 bug（不是这一批引入的，但被它顶到必现）**：`GET /api/runs/{id}/events`
 的顺序是"先补历史、再挂订阅"，两者之间是一个真实时间窗（`await store.listRunMessages(...)`

@@ -128,7 +128,7 @@
 
 | 路径 | 内容 | 跑完 |
 |---|---|---|
-| `.claude/skills/<slug>/` + `.agentdeck-managed.json` | 这个 agent 挂的技能（**只在 runtime 声明有技能发现机制时**才写） | **收掉**（按落盘清单删，只删自己写的） |
+| `.claude/skills/<名字>/` + `.agentdeck-managed.json` | 这个 agent 挂的技能（**只在 runtime 声明有技能发现机制时**才写） | **收掉**（按落盘清单删，只删自己写的） |
 | ~~`.claude/settings.json` + `.agentdeck/hooks/pre-tool-use.py`~~ | **已搬走（分批第 76 批）**：任务隔离 hook 现在随受管 `CLAUDE_CONFIG_DIR/settings.json` 常驻（`<受管目录>/agentdeck-hooks/pre-tool-use.py`），工作目录里不再出现 | 无（不在工作目录里，自然不用收） |
 | ~~`.agentdeck/tools/<slug>/`~~ | ~~这个执行者挂的工具包（D42）~~ **已撤掉**：挂载能力整个删了（`Agent.toolIds` 不在协议里，`{{tools}}` 恒为空） | — |
 | `.agentdeck/rounds/<轮次>-{task,result}.md` | §3.3b：执行任务 / 执行结果的落盘（审核按文件引用读） | **留着**（多轮不覆盖） |
@@ -347,9 +347,9 @@
 **技能的文件布局**（run 开始前写、**跑完收掉**）：
 
 ```
-<workdir>/.claude/skills/<slug>/SKILL.md              ← 技能正文（可含 frontmatter）
-<workdir>/.claude/skills/<slug>/<支持文件>             ← 技能里引用的脚本/参考文档
-<workdir>/.claude/skills/.agentdeck-managed.json   ← 归属清单 {"slugs":[…]}
+<workdir>/.claude/skills/<名字>/SKILL.md              ← 技能正文（可含 frontmatter）
+<workdir>/.claude/skills/<名字>/<支持文件>            ← 技能里引用的参考文档
+<workdir>/.claude/skills/.agentdeck-managed.json   ← 归属清单 {"names":[…]（老清单是 "slugs"，两种都认）}
 ```
 
 ★ **能力位**（`RuntimeDescriptor.skills`）：claude 声明
@@ -594,7 +594,7 @@ bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
 | `{{subjectType}}` | 对象类型（issue / run / report） | 全部 |
 | `{{subjectId}}` | 对象 id | 全部 |
 | `{{language}}` | 回答用什么语言（界面语言的显示名：`简体中文` / `English`）。prompt 本身不翻译；判决 JSON 里的字段名与取值永远照原样 | 全部 |
-| `{{skills}}` | 这个 agent 挂载的 skill 的 slug，用「、」连成一行（没挂就是空字符串） | 全部 |
+| `{{skills}}` | 这个 agent 挂载的 skill 的名字，用「、」连成一行（没挂就是空字符串） | 全部 |
 | `{{reportKind}}` | 被审/上报的类型（run-output、ci-result…） | 审核 |
 | `{{issueId}}` | 关联的 issue id（没有就是空字符串） | 审核 |
 | `{{previousContext}}` | 上一次的上下文副本路径——**已无来源**（2026-09 起副本文件不再写，恒为空；变量机制保留以免模版校验炸掉） | 审核 |
@@ -616,7 +616,7 @@ bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
 
 > ★ **变量给内容，标题归模版**（D33 → D35 推到底）。使用者看完 D33 之后说"全部彻底回到
 > 模版手里"，于是**一个"整段变量"都不留了**：`{{header}}`（身份段）、`{{skills}}` 的行内
-> 标签、`{{standards}}` 的 `### slug`、`{{material}}` 的那句声明与两个标记，全部交回模版。
+> 标签、`{{standards}}` 的 `### 名字`、`{{material}}` 的那句声明与两个标记，全部交回模版。
 > 每个变量都只是**一段内容**，标题、标签、标记、说明都由模版写。
 >
 > 默认模版因此变成"完整的一段话"——把它展开读一遍，就是模型真正看到的东西。
@@ -1216,7 +1216,7 @@ stageOf(issue, runs)                    ← issue 是整条，不是 id
 ⚠️ 本次**没有**注入技能：这个 agent 挂了 N 个 skill（…），但 runtime `x` 没有技能发现机制
 ⚠️ 挂了 N 个 skill 但**一个都没写下去**：…（同上，措辞不同：它只作为「审核标准/参考」出现在第一句话里）
 已从工作目录移除不再挂载的 skill：…        ← 上次崩过留下的残渣，这里自愈
-skill <slug>：<规范化改了什么>              ← 例如"原文没有 frontmatter，已注入最小元数据"
+skill <名字>：<规范化改了什么>              ← 例如"原文没有 frontmatter，已注入最小元数据"
 ⚠️ 环境有问题：…                           ← 环境预检的问题（附影响与修法）
 ★ 第一句话（投递档 A：①② 走系统提示（N 字符），③ 走用户消息，以下就是交给 CLI 的全部内容）：
 ===== ① 框架 =====
@@ -1302,7 +1302,7 @@ skill <slug>：<规范化改了什么>              ← 例如"原文没有 fron
    "按 run 分、谁都不覆盖谁"由**日志**（每 run 一份第一句话全文）与 §3.3b 的
    **rounds 文件**（按轮次分）继续承担。）
 4. ~~技能的 `description` 从来没被写进 `SKILL.md`~~ **已修**：CLI 自己那份技能清单是
-   **描述驱动**的（模型看描述决定要不要加载正文），而我们的第一句话只列 slug——于是
+   **描述驱动**的（模型看描述决定要不要加载正文），而我们的第一句话只列名字——于是
    写出来的 `SKILL.md` 只有 `name`，技能在 CLI 的清单里没有用途说明、基本不会被主动选用。
    根因是 `description` 根本没被带到执行侧（`SkillPayload` 里没有这个字段）。
 5. ~~失败原因码有两个是死的~~ **部分接线**：`injection_failed`（同名技能撞车、技能超限、

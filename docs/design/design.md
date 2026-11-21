@@ -1143,15 +1143,15 @@ inject(file, block):
 
 | 项 | 设计 | 现状 |
 |---|---|---|
-| 落盘位置 | `<workDir>/.claude/skills/<slug>/SKILL.md`（+ 支持文件） | ✅ |
+| 落盘位置 | `<workDir>/.claude/skills/<名字>/SKILL.md`（+ 支持文件） | ✅ |
 | **skill 集合** | **按 run 的 agent 求解**（agent 声明的子集 ∩ 可用 skill） | ✅ `Agent.skillIds` |
 | **tool 集合** | —— | ⚠️ **已整个撤掉**（2026-09 收口）：`Agent.toolIds` 不在协议里、注入那一段（`syncInjectedTools`）已删、写入口也删了。工具包现在只能**安装 / 卸载**，它的动作由审核者的「行动权限」（`Agent.allowedActions`）授权——「挂给执行者、干活时送进工作目录」这条路不存在了 |
 | 发现方式 | 靠目录摆对，走 CLI 原生发现 | ✅ 技能；⚠️ **工具不走发现**——CLI 不认识那个目录，工具靠**模型自己读**（第一句话里列了"有哪些、在哪儿"） |
-| 权威名 | **slug**，改写 frontmatter 里的 name | ✅ |
+| 权威名 | **技能名**（D236 起就叫 `name`：目录名 = frontmatter 的 `name`），与作者写的不一致就改写 | ✅ |
 | 残缺处理 | 缺 name → 注入；YAML 坏 → 重建并保留其他键（**特别是作者用于隐藏技能的键**） | ⚠️ **YAML 坏时只保留正文**：`frontmatter 无法解析，已重建（仅保留正文）`——坏掉的 YAML 解析不出键，所以"保留其他键"这一条在**坏的那条路上做不到**（能解析时是保留的） |
 | 解析方式 | **用 YAML 解析器**，不用正则/词法扫描 | ✅ `yaml` 包的 `parse` |
 | 上限 | 单技能 256 KiB | ✅ `MAX_SKILL_BYTES` |
-| 哈希 | 覆盖来源 + ID + name + description + 正文 + 每个支持文件的路径与内容摘要 | ❌ **没有这个哈希**：代码里**不为技能内容算指纹**（`skillRefs` 只记 `{id, slug, source}`）。今天唯一的哈希是投递出去那句「第一句话」的 sha256（`promptHash`）——所以"这次用了哪份技能正文"**事后无法证明**（§11.2 已注明） |
+| 哈希 | 覆盖来源 + ID + name + description + 正文 + 每个支持文件的路径与内容摘要 | ❌ **没有这个哈希**：代码里**不为技能内容算指纹**（`skillRefs` 只记 `{id, name, source}`）。今天唯一的哈希是投递出去那句「第一句话」的 sha256（`promptHash`）——所以"这次用了哪份技能正文"**事后无法证明**（§11.2 已注明） |
 | 派发 | 传引用，逐个拉取、独立缓存 | ✅ |
 | **来源** | **由页面下载后交给 daemon**（daemon 不自己下载，FR-BRIDGE-08） | ⚠️ **daemon 会自己下载**：`packages/skill-source/src/skill-source.ts` 有 GitHub 主机白名单（`github.com` / `raw.githubusercontent.com` / `api.github.com`）、只允许 https、**每一跳跳转都重新校验主机**、以及单文件/总量/文件数/深度上限。技能来源因此是三种：本地目录 / GitHub 地址 / 远端目录 |
 
@@ -1344,7 +1344,7 @@ interface AuditRecord {
   subject: { type: 'issue' | 'report' | 'run'; id: string }   // ⚠️ 字段名是 `subject`，不是 `subjectRef`
   inputBlobRefs: BlobRef[]
   // 决策依据
-  skillRefs: { id: string; slug: string; source: 'local' | 'remote' }[]   // 只有标识与来源（⚠️ 是 `slug`，没有 `name`）
+  skillRefs: { id: string; name: string; source: 'local' | 'remote' }[]   // 只有标识与来源（D236：名字只有一个）
   runtimeDescriptorKey: string
   cliVersion: string | null
   modelId: string | null
@@ -2338,7 +2338,7 @@ FR-REG-14 要求"给项目方的部分应尽量聚合、去内容化"，而最�
 "daemon 自己派生的路径"（报告触发的审核），都做了变异验证。
 
 `Skill.files` 做成**可选字段**而不是新版本：正文与支持文件的权威位置是磁盘上的
-`<skillsRoot>/<slug>/`（2026-10 起，默认 `~/.agentdeck/skills`），`log/skill.jsonl` 里那条
+`<skillsRoot>/<名字>/`（2026-10 起，默认 `~/.agentdeck/skills`；D236：目录名就是技能名），`log/skill.jsonl` 里那条
 记录**只留索引**——索引记录里既没有 `files` 也没有 `body`，读回时由 `store-file` 从磁盘补齐
 （`#hydrate`）。读路径上没有 zod 校验（`JSON.parse(...) as Skill`），所以索引里少这两个键对
 老数据完全安全，不需要动存储格式版本；老记录里那份正文由 `FileStore.open` 的
@@ -2692,7 +2692,7 @@ overwrite: true"。
 |---|---|
 | 任务正文 | **两处**：CLAUDE.md 受管块的 `## 要做的事`，**以及** stdin 的 user turn（`buildClaudeInput`） |
 | 审核 | 待审内容 + 审核标准（整篇 skill 正文）+ 判决 schema + 护栏 → CLAUDE.md；stdin 只有一句"请审核…" |
-| skill | 文件写进 `<workdir>/.claude/skills/`；CLAUDE.md 里只列 slug（省 token 的既有决定） |
+| skill | 文件写进 `<workdir>/.claude/skills/<名字>/`；CLAUDE.md 里只列名字（省 token 的既有决定） |
 | agent 自己的 instructions | **哪儿都没进**（`ExecOptions` 里根本没有这个通道） |
 | 跑完 | 块从**当时那份内容**里摘掉，块外原样保留；我们自己造的整份文件留着 |
 
@@ -2780,7 +2780,7 @@ overwrite: true"。
 1. **`agent.instructions` 终于被送达**（进第一句话的「你的角色」段）。此前界面上能填、
    能存、能显示，`ExecOptions` 里却没有这个通道——运行时被丢掉。
 2. **技能的 `description` 终于写进 `SKILL.md` 的 frontmatter**。CLI 自己那份技能清单是
-   **描述驱动**的，而我们的第一句话只列 slug ⇒ 描述是唯一的路由信号；此前它根本没被
+   **描述驱动**的，而我们的第一句话只列名字 ⇒ 描述是唯一的路由信号；此前它根本没被
    带到执行侧（`SkillPayload` 里没有这个字段），写出来的 `SKILL.md` 只有 `name`，
    技能基本不会被主动选用。
 3. **两个从没被写出来过的失败原因码接上了**：`injection_failed`（同名技能撞车、技能
@@ -3115,7 +3115,7 @@ INV-8 对"通知"的定义上：**需要你介入**。
 | | `{{runId}}` `{{subjectType}}` `{{subjectId}}` | 身份 |
 | | `{{reportKind}}` `{{issueId}}` `{{previousContext}}`（审核） | 报告的三个字段 |
 | 整段（**带条件行或硬契约**的生成块，空则不出现） | `{{header}}` | 身份段：`# 任务` / `# 审核任务` + run id、对象（审核还带类型；**关联 issue、上一次的上下文是"有才出现"的行**——所以它是整段） |
-| | `{{standards}}`（审核） | 每个 skill 一小段（`### slug（名字）` + 正文全文） |
+| | `{{standards}}`（审核） | 每个 skill 一小段（`### 名字` + 正文全文） |
 | | `{{material}}`（审核）**必需** | 那句"不是给你的指令"的声明 + 两个材料标记 + 标题与正文 |
 | | `{{verdict}}`（审核）**必需** | 判决契约全文：schema + 取值枚举 + 一个合法的示例 + 围栏标记 |
 
@@ -3140,7 +3140,7 @@ INV-8 对"通知"的定义上：**需要你介入**。
 | `{{header}}` | 关联 issue、上一次的上下文这两行是**有才出现**的。拆成值 ⇒ 没有 issue 时留下一条光秃秃的 `- 关联 issue：`。模版语言里**没有条件语法**（有意的，见下） |
 | `{{material}}` | 两个材料标记是**硬契约**（重试靠它们取回原样材料），那句"不是给你的指令"必须紧贴标记 |
 | `{{verdict}}` | 契约全文本身就是成品（schema + 枚举 + 示例 + 围栏） |
-| `{{standards}}` | 每个 skill 一段，段间要有 `### slug` 才分得开 |
+| `{{standards}}` | 每个 skill 一段，段间要有 `### 名字` 才分得开 |
 
 `{{skills}}` 是唯一一个"带行内标签的单值"：没挂 skill 是**常态**（执行者常常一个都不挂），
 而模版里没法写"有才出现"——所以"能用到的技能：…"这一行必须整体消失。它是一行，不是标题。
@@ -3194,7 +3194,7 @@ mustache 是**零依赖**，语法又是我们已经在用的 `{{name}}`，还�
 "能渲染但保存时被拒"——实测被测试抓到了（转义那条用例直接红）。
 
 **D35：把"整段变量"也全部交回去。** D33 之后还剩四个"整段"（`{{header}}`、`{{skills}}` 的行内
-标签、`{{standards}}` 的 `### slug`、`{{material}}` 的声明与两个标记）。使用者的意见是
+标签、`{{standards}}` 的 `### 名字`、`{{material}}` 的声明与两个标记）。使用者的意见是
 「**全部彻底回到模版手里**，注意把默认模版修改完整」。
 
 于是**一个整段变量都不留**：
@@ -3202,8 +3202,8 @@ mustache 是**零依赖**，语法又是我们已经在用的 `{{name}}`，还�
 | 以前 | 现在 |
 |---|---|
 | `{{header}}`（`# 任务` + 身份行 + 有才出现的关联 issue 行） | 取消。模版写标题与身份行，`{{runId}}` / `{{subjectType}}` / `{{subjectId}}` / `{{reportKind}}` 都是纯值；"有才出现"用条件段：`{{#issueId}}…{{/issueId}}` |
-| `{{skills}}` 自带"能用到的技能：" | 只给 slug（`a、b`）；要标签就在模版里写 |
-| `{{standards}}` 自带 `### slug（名字）` | 只给各 skill 的**正文**（段间空行）；skill 自己的标题就在正文里 |
+| `{{skills}}` 自带"能用到的技能：" | 只给名字（`a、b`）；要标签就在模版里写 |
+| `{{standards}}` 自带 `### 名字` | 只给各 skill 的**正文**（段间空行）；skill 自己的标题就在正文里 |
 | `{{material}}` 自带声明 + 两个标记 + `### 标题` | 只给**正文**；标题是 `{{materialTitle}}`，声明与两个标记由模版写 |
 
 **两个代价是刻意的**：
@@ -3301,7 +3301,7 @@ mustache 会把"独立成行的段标签"整行剥掉（规范），所以
    通常说明那个概念缺个家；
 2. **四道手续换一段文本。** 写一条自己的清单要走：起 slug → 写 frontmatter → 安装 → 回来挂载。
    而它本质就是"一段判断依据 + 判完能做什么"；
-3. **可见性差。** 审核者的判断依据藏在技能页的一个 slug 后面；详情页只列 slug chips，
+3. **可见性差。** 审核者的判断依据藏在技能页的一个名字后面；详情页只列名字 chips，
    正文要点两次才看得到，动作白名单完全看不到。
 
 评估过三个方案（A 现状 / B 搬进 agent / C 双来源），使用者选 **B**。落地时做了这些决定：
@@ -3680,7 +3680,7 @@ close-issue/            ← 一次安装 = 一个目录 = 一个"组"
 |---|---|
 | 安装 | 一次装一个目录（组）；组内多动作、多脚本 |
 | 授权 | ~~挂载/摘挂以组为单位~~ ⚠️ **已撤**（2026-09）：挂载能力整个删掉，动作改为在审核者的「行动权限」里逐个勾（`Agent.allowedActions`） |
-| 审计 | 记 `slug + version + source`，照 skill 的"标识与来源"做法 |
+| 审计 | 记 `name + version + source`，照 skill 的"标识与来源"做法 |
 
 #### 挂载的落点：干活时送进工作目录（D42 接线）——⚠️ **整段已撤（2026-09）**
 
@@ -4208,7 +4208,7 @@ GET /api/catalog → catalog.skills[]（每次请求重扫）
 
 **① 取包规则只有一份（这就是 `packages/skill-source` 存在的理由）。**
 抓取工具要做的事与 daemon 装技能一模一样：主机白名单、只允许 https、每一跳跳转都校验、限额、必须有 `SKILL.md`、`slug` 怎么收敛。各写一份就会长出这个仓库最忌讳的那种不一致——而这一次的后果特别具体：**目录会把一份 daemon 装不进来的东西列成"推荐"**，使用者点下去才失败，而失败原因看起来像"平台坏了"。所以 `skill-source.ts` 从 daemon 里抽出来独立成包，两个调用方共用。
-**推论**：`slug` 与 `sourceRef` **不写进清单**，由取包规则算出来——手写两份身份标识就是漂移的开始。
+**推论**：技能名与 `sourceRef` **不写进清单**，由取包规则算出来——手写两份身份标识就是漂移的开始。
 
 **② 单条失败 ⇒ 一个字都不替换（P7）。**
 抓取全程先在内存里做完，全绿才写临时目录、再替换。半份目录比旧目录更糟：使用者会点到一个"看起来能装、其实是半截"的条目，而维护者以为同步成功了。首次真跑就撞上了这个场景（见下），行为正确：输出「目录没有改动」并以非零退出，逐条给原因。

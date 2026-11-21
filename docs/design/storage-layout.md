@@ -60,7 +60,7 @@
 │   ├── agent.json                结构化（**不含指令正文**）
 │   ├── instructions.md           指令正文（**组装前**：内置 = 身份块，自建 = 全文）
 │   ├── memory.jsonl              它自己的记忆（权威；§5）
-│   └── skills/<slug>/SKILL.md     它**独有**的技能（文件资产：不进技能库、不进技能页、不可卸载）
+│   └── skills/<技能名>/SKILL.md   它**独有**的技能（文件资产：不进技能库、不进技能页、不可卸载）
 │
 ├── memory/<agentId>/MEMORY.md    记忆的**人可读镜像**（`memory/` 整个根是一个 git 仓库）
 │
@@ -70,7 +70,7 @@
 │   └── agents/<名字>/            **编排内建智能体**（D234 已落地；只在编排里有效）——与 agents/<名字>/ 同形：
 │       ├── agent.json            id / name / skillIds / 时间（不含指令）
 │       ├── instructions.md       它的话（组装前正文）
-│       └── skills/<slug>/SKILL.md 它的独有技能（D228：注入通道按**来源**取目录，
+│       └── skills/<技能名>/SKILL.md 它的独有技能（D228：注入通道按**来源**取目录，
 │                                  不再要求"这个智能体在库里有一条 AgentId"）
 │       ⚠️ 目录名是**名字的 slug**（D235）；技能就在**它自己的目录里面**——
 │          绝不另开 `agents/<agentId>/skills/`（一个实体一个目录）
@@ -106,7 +106,7 @@
 ├── agent.json          结构化（**不含指令正文**；**`id` 在这里**，是身份）
 ├── instructions.md     指令正文（**组装前**：内置 = 身份块，自建 = 全文）
 ├── memory.jsonl        这个智能体自己的记忆（逐条 op 日志，§5）
-└── skills/<slug>/SKILL.md   它**独有**的技能（文件资产，不进技能库、不进技能页、不可卸载）
+└── skills/<技能名>/SKILL.md 它**独有**的技能（文件资产，不进技能库、不进技能页、不可卸载）
 ```
 
 **`agent.json` 里有什么**（一条真实记录，字段顺序为落盘顺序）：
@@ -143,7 +143,7 @@
 | `agent.json` | `writeAgentDir()`（`packages/store-file/src/agent-dirs.ts`） | `readAgentDir()` | 结构化信息；**永远不含 `instructions`** |
 | `instructions.md` | 同上 | 同上（读回时拼成一条 `Agent.instructions`） | 组装**前**正文 |
 | `memory.jsonl` | store 端口 `insertMemoryEntry` | `listMemoryEntries` | 记忆的**权威** |
-| `skills/<slug>/SKILL.md` | store 端口 `writeExclusiveSkill(owner, …)` | `listExclusiveSkills(owner)` | 这个智能体独有的技能（**按来源定位**，见下） |
+| `skills/<技能名>/SKILL.md` | store 端口 `writeExclusiveSkill(owner, …)` | `listExclusiveSkills(owner)` | 这个智能体独有的技能（**按来源定位**，见下） |
 
 **目录名 = 名字的 slug，身份仍是 `agent.json` 里的 `id`**（D231，方案 D）：
 
@@ -224,7 +224,7 @@ daemon 在装配 `FileStore` 时把"owner → 目录"的解析函数注入进去
 > 的 frontmatter 写 `asd-ste100`），而注入时那条"不一致"会被**改写成 slug**。
 > 也就是说显示名几乎恒等于 slug —— 合并成一个，用规范的名字叫它。
 > **代价如实记**：中文显示名没有地方放了，标题要写进 `description`（规范里 ≤1024，
-> 也是模型挑技能的信号）。老 `skill.jsonl` 记录里的 `slug` 按 `name ?? slug` 读兼容。
+> 也是模型挑技能的信号）。老 `skill.jsonl` 记录**以 `slug` 为准**（它就是磁盘上的目录名；第一版写"优先 name"会去 `skills/研究/` 找 `slug: research` 的正文 ⇒ 正文空），读出来的记录里不再留 `slug`。
 
 **正文在磁盘、索引在日志**（2026-10 起，没有例外）：
 
@@ -318,7 +318,7 @@ append-only 日志。真机上量到的样子：**一个**工作区、**87 行**
 └── agents/<名字>/    **编排内建智能体**（D234；目录是真相，`workflow.json` 里不存第二份）
     ├── agent.json      id / name / skillIds / 时间
     ├── instructions.md 指令
-    └── skills/<slug>/SKILL.md 它的独有技能（D228 的来源机制；D235 起就在这个目录里）
+    └── skills/<技能名>/SKILL.md 它的独有技能（D228 的来源机制；D235 起就在这个目录里）
 
 ~/.agentdeck/data/workflow-runs/<runId>.json    一条运行一个文件
 ```
@@ -370,7 +370,7 @@ append-only 日志。真机上量到的样子：**一个**工作区、**87 行**
 | 方案 | 代价 | 结论 |
 |---|---|---|
 | 只带 `skillIds`（**引用技能库**里的技能） | 零：`loadInjectableSkills` 已经在做"库 id → 注入"，内建智能体只是多传一份 id | ✅ 已落地（D234） |
-| 带 `skills/<slug>/SKILL.md`（**该编排独有**的文件资产） | 存储与注入都已接好（`agents/<名字>/skills/`）；但**编排页还没有"内建智能体 → 它带的技能"面板**，写了就是"盘上有文件、界面上没有落点" | ⏳ 存储已就绪、**面板尚未做**；做面板时一起开放写入口 |
+| 带 `skills/<技能名>/SKILL.md`（**该编排独有**的文件资产） | 存储与注入都已接好（`agents/<名字>/skills/`）；但**编排页还没有"内建智能体 → 它带的技能"面板**，写了就是"盘上有文件、界面上没有落点" | ⏳ 存储已就绪、**面板尚未做**；做面板时一起开放写入口 |
 
 > 口径一句话：**能引用就别复制。** 库技能是共享的（`skillIds` 引用，改一处全生效）；
 > 只有"这条编排专属、且使用者真会去编辑"的东西才值得落成文件资产——而"真会去编辑"
@@ -503,7 +503,7 @@ skill、`~/.claude.json` 的 `mcpServers` 会拉起 npx/浏览器，天然在任
 ├── <agent 写的东西>                          ← 真实产出，人直接看这个
 ├── .agentdeck/rounds/<轮次>-task.md          ← 这一轮收到的任务（原文）
 ├── .agentdeck/rounds/<轮次>-result.md        ← 这一轮的产出（多轮不覆盖）
-└── <skills.dir>/<slug>/SKILL.md              ← 本次注入的技能（跑完只删平台自己放的）
+└── <skills.dir>/<技能名>/SKILL.md            ← 本次注入的技能（跑完只删平台自己放的）
 ```
 
 - 轮次 = `chainDepth + 1`（首轮 1）。落盘在**清理之后**：目录已收拾干净，而这两份是我们自己的文件。
@@ -533,7 +533,7 @@ skill、`~/.claude.json` 的 `mcpServers` 会拉起 npx/浏览器，天然在任
 - **幂等**：再跑一次不重复做。现存的三个启动迁移都在 `FileStore.open()` 里按序跑一次：
   `#migrateAgentsToDirs`（老 `log/agent.jsonl` → 目录）、`#migrateMemoryToAgentDirs`
   （workspace 级记忆 → `agents/<id>/memory.jsonl`，孤儿丢掉并计数）、
-  `#migrateSkillsToDisk`（老记录里的正文 → `<skillsRoot>/<slug>/`）；
+  `#migrateSkillsToDisk`（老记录里的正文 → `<skillsRoot>/<名字>/`）；
   字段级的那个是 `migratePlatformMemberFields`（`owner` / `entries`）。
 - **只补缺的**：已经有新字段的记录一律不动（那是迁移过的，或是使用者后来改的）。
 - **不删老字段/老文件**：`builtin` / `builtinKind` / 老 `skill.jsonl` 的 `body` 都留着——

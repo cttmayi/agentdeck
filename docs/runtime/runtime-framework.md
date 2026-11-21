@@ -156,7 +156,7 @@ export type SessionState = 'stateful' | 'stateless' | 'unknown'
 export type PromptDelivery = 'stdin-ndjson' | 'argv'   // prompt 怎么送进 CLI
 
 export type SkillDelivery =
-  | { kind: 'directory'; dir: string }   // 这个 CLI 会自己扫 <dir>/<slug>/SKILL.md
+  | { kind: 'directory'; dir: string }   // 这个 CLI 会自己扫 <dir>/<名字>/SKILL.md
   | { kind: 'none'; reason: string }     // 没有技能发现机制 → 一个文件都不写，宁可不支持也不要假装支持
 
 export interface ManagedFlags {           // 平台受管参数用的旗标名（必填，不得替 CLI 猜）
@@ -236,7 +236,7 @@ export interface RuntimeDescriptor {
 |---|---|---|---|---|
 | 3.1 | **执行**（`executor`） | 按 `agent.runtimeKey` 经装配表解析 `{backend, descriptor}`；只读 `sessionState` 决定是否恢复；然后 `backend.execute({prompt, systemPrompt?, workDir, model, maxTurns, resumeSessionId, env, 回调, sandbox})`；终态 `output` → 判决围栏提取 | 走同一条代码 | 走同一条代码 |
 | 3.2 | **第一句话**（`first-sentence`） | `deliveryModeFor(runtime)`：`systemPrompt === null ? B : A`。A 档①②走系统提示旗标、③是用户消息；B 档三块合成一段 | A 档（`--append-system-prompt`） | B 档（作为 `turn/start` 的 text input） |
-| 3.3 | **技能注入**（`skill-injection`） | 读 `descriptor.skills.dir`，写 `<workdir>/<dir>/<slug>/SKILL.md`——"把目录摆对，不靠提示词喂"（FR-CLI-19） | `.claude/skills/` | `.codex/skills/`（项目作用域） |
+| 3.3 | **技能注入**（`skill-injection`） | 读 `descriptor.skills.dir`，写 `<workdir>/<dir>/<名字>/SKILL.md`——"把目录摆对，不靠提示词喂"（FR-CLI-19） | `.claude/skills/` | `.codex/skills/`（项目作用域） |
 | 3.4 | **沙箱**（`sandbox` + 执行器） | `planSandbox` 在 spawn 前包装进程；`cliStateDir(descriptor.stateDir)` 放行 CLI 自己的状态目录；沙箱状态由后端经 `onCommandLine` 如实上报 | `~/.claude` | `~/.codex`；per-run 进程同样能被平台沙箱包住，内部再由 codex 每线程 `sandbox: workspace-write` 双保险 |
 | 3.5 | **环境预检**（`environment`） | 起 run 前检查 `stateDir` 能否建/写，给出可读诊断 | `.claude` | `.codex` |
 | 3.6 | **审计**（`audit/record`） | 后端上报**最终**命令行 → `redactArgv` 脱敏（脱敏只有一份，各适配器不各自脱敏）→ 记入审计；`result.model` 记"实际跑的"；`result.usage` 记用量 | `claude -p …` | `codex app-server --stdio` |

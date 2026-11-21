@@ -26,7 +26,7 @@ JSONL 记录（`workspaces/<wsId>/log/agent.jsonl`）做智能体的载体有两
   agent.json          结构化资讯（不含指令正文；builtin / role / skillIds / env / …）
   instructions.md     指令**组装前**正文
   memory.jsonl        这个智能体的**记忆**（D112：记忆 = 智能体自己的）
-  skills/<slug>/SKILL.md  这个智能体**独有的**技能（文件资产）
+  skills/<技能名>/SKILL.md  这个智能体**独有的**技能（文件资产）
 ```
 
 - `agent.json` **不含 `instructions`**（指令在 md 里；`readAgentDir` 读回时把两者拼回
@@ -64,10 +64,10 @@ JSONL 记录（`workspaces/<wsId>/log/agent.jsonl`）做智能体的载体有两
 
 | | 独有技能 | 共享技能 |
 |---|---|---|
-| 载体 | `agents/<id>/skills/<slug>/SKILL.md` | 技能库（`skills/<slug>/` + `skillIds` 引用） |
+| 载体 | `agents/<名字>/skills/<技能名>/SKILL.md` | 技能库（`skills/<名字>/` + `skillIds` 引用） |
 | 谁看得到 | 只有这个智能体 | 全工作区（技能页） |
 | 卸载 | 无此概念（随智能体删除） | 技能页可卸载 |
-| 注入 | 与共享走**同一条通道**（`loadAgentInjectableSkills`），同 slug 时**独有盖过共享** | 同左 |
+| 注入 | 与共享走**同一条通道**（`loadInjectableSkills`），同名时**独有盖过共享** | 同左 |
 
 生成者的 3 条平台技能（`agent-design-norms` / `boundary-checklist` /
 `skill-eligibility`）从"动态装进技能库"改成**生成者的独有技能**（启动播种进目录，
@@ -90,22 +90,22 @@ JSONL 记录（`workspaces/<wsId>/log/agent.jsonl`）做智能体的载体有两
 ## 6. 读取端（daemon）
 
 - 聊天 / 审核 / 返工 / 任务配置：`agentRef.instructions` = `effectiveInstructions`，
-  `skills` = `loadAgentInjectableSkills(store, agent)`（共享 ∪ 独有，同 slug 独有盖共享）。
+  `skills` = `loadInjectableSkills(store, skillSourcesOfAgent(agent))`（共享 ∪ 独有，同名独有盖共享）。
 - 聊天**不投递指令正文**（聊天 = 原文 + 技能），生成者靠它独有的 3 条技能干活。
 
 ## 7. 独有技能 API
 
 ```
-GET    /api/agents/:id/skills           → { skills: [{slug, name, description?, body}] }
-PUT    /api/agents/:id/skills/:slug     { body }  （校验 = 安装接口同一关 resolvePayloadEntry）
-DELETE /api/agents/:id/skills/:slug     → { removed }
+GET    /api/agents/:id/skills           → { skills: [{name, description?, body}] }
+PUT    /api/agents/:id/skills/:name     { body }  （校验 = 安装接口同一关 resolvePayloadEntry）
+DELETE /api/agents/:id/skills/:name     → { removed }
 ```
 
 - 内置智能体 PUT/DELETE 一律 400 `builtin_agent_readonly`（平台播种，界面同款只读）。
-- slug 即路径段：**不静默规范化**（安装接口会对不规范名字改名，这里目录名 = 使用者
-  给的机器名），按 slug 规则严格拒绝。
+- 路径段就是**技能名**：**不静默规范化**（安装接口会对不规范名字改名，这里目录名 = 使用者
+  给的机器名），按名字规则严格拒绝。
 - store 端口新增 4 个方法（`listExclusiveSkills` / `getExclusiveSkill` /
-  `writeExclusiveSkill` / `removeExclusiveSkill(agentId[, slug])`）；
+  `writeExclusiveSkill` / `removeExclusiveSkill(owner, name)`）；
   sqlite-store 为 stub（抛"不支持"），文档注明未接线。
 
 ## 8. 范围边界与已知取舍
