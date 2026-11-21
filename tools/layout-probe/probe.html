@@ -6366,10 +6366,14 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
              *   而不是某一页偷偷写了个 56px。
              */
             /**
-             * ★★ D186：**一段连续文字的行宽上限**（`--measure` 40rem = 640px）。
-             *   量到的原样：宽屏下任务详情栏 1658px、正文一行 ≈ 115 个汉字。
-             *   这里量"正文真的被这个上限挡住"：往真实的 `.pane-body` 里插一个与
-             *   渲染器同构的 `.markdown` 宿主，量它的宽度与 `max-width`。
+             * ★★ D186 → D209：**Markdown 不再设宽度上限**（使用者："不用约束 MD 的宽度，
+             *   如果需要换行，原文自己回车"）。
+             *
+             * D186 曾给 `.markdown` 加 `max-width: var(--measure)`（640px），结果"看文件"
+             *   这一面被自己砍窄：文件查看器外层 `min(74rem,96vw)`（≈1184）、里面的
+             *   `.fv-md.markdown` 只有 640；聊天的 agent 气泡同理（958 的流里只有 640）。
+             * 现在量的是"它真的跟着栏宽走"：往真实 `.pane-body` 里插一个与渲染器同构的
+             *   `.markdown` 宿主，宽度应当≈栏宽（而不是被上限挡住）。
              */
             facts['type.measure'] = (() => {
               const host = d().createElement('div')
@@ -6381,6 +6385,13 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               const w = Math.round(host.getBoundingClientRect().width)
               const maxW = cs(host).maxWidth
               const fs = parseFloat(cs(host).fontSize)
+              // ⚠️ 比的是 body 的**内容盒**宽度：`clientWidth` 已经扣掉纵向滚动条，
+              //    再减左右内距。第一版用 `getBoundingClientRect().width`（边框盒 + 滚动条），
+              //    差出 10px 判红。
+              const bs = f.contentWindow.getComputedStyle(body)
+              const bodyW = Math.round(
+                body.clientWidth - parseFloat(bs.paddingLeft || '0') - parseFloat(bs.paddingRight || '0'),
+              )
               host.remove()
               return {
                 宽: w,
@@ -6388,6 +6399,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
                 字号: `${fs}px`,
                 每行汉字: fs ? Math.round(w / fs) : null,
                 栏宽: Math.round((d().querySelector('.detail-pane')?.getBoundingClientRect().width ?? 0)),
+                正文区宽: bodyW,
               }
             })()
             facts['density.listRow'] = (() => {

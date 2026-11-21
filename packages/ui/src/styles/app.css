@@ -125,6 +125,9 @@
 
   /**
    * ★★ D186：**一段话的行宽上限**（`--measure`）。量到的样子：2200px 窗口下
+   *   ⚠️ D209 之后它**只管页面顶部的说明段**（`.view-intro p`）——Markdown 渲染
+   *      （正文 / 聊天气泡 / 文件查看器）不再设上限，宽度跟随容器。
+   *
    *   任务详情栏 **1658px**、正文一行 ≈ **115 个汉字**——眼睛换行时会串行。
    *   40rem = 640px ⇒ 14px 字下一个中文行约 **45 字**（西文约 90 个字符缩排处），
    *   这是"一段连续文字"的舒适上限。
@@ -1932,7 +1935,8 @@ hr {
   margin: 0;
   color: var(--text-dim);
   font-size: var(--fs-sm);
-  /* ★ D186：说明段也是"一段连续文字"，跟着同一个行宽上限 */
+  /* ★ D186 / D209：页面顶部的**说明段**仍然用 `--measure`——它不是 Markdown，
+     是"几行导语"；Markdown（正文 / 气泡 / 文件查看器）已经不再设上限。 */
   max-width: var(--measure);
 }
 
@@ -3027,8 +3031,11 @@ a > button { width: 100%; }
     font-size: var(--fs-base);
     line-height: 1.7;
     word-break: break-word;
-    /* ★ D186：一段连续文字的行宽上限（见 `--measure` 的注释） */
-    max-width: var(--measure);
+    /* ★★ D209（使用者："不用约束 MD 的宽度，如果需要换行，原文自己回车"）：
+       **Markdown 不设宽度上限**。D186 曾经在这里加 `max-width: var(--measure)`（640px），
+       结果是"看文件"这一面被自己砍窄：文件查看器外层是 `min(74rem,96vw)`（≈1184），
+       里面的 `.fv-md.markdown` 只有 640，中间 544px 空着；聊天的 agent 气泡同理。
+       现在宽度跟随容器；要断行由原文自己决定（Markdown 的换行本来就是内容的事）。 */
   }
 
 .markdown h1,
