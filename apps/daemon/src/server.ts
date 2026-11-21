@@ -2583,7 +2583,6 @@ async function injectedSkillsOf(
             if (node.startsWith('inline:')) {
               // 内嵌智能体（2026-11）：按名字引用**现有智能体**当执行者。
               const agentName = node.slice('inline:'.length)
-              const agents = await store.listAgents(workspaceId)
               /*
                * ★★ 2026-11（D163）：**解析唯一化**——`resolveWorkflowAgent()` 一处收口。
                *
@@ -2596,7 +2595,15 @@ async function injectedSkillsOf(
                * 现在：找不到 / **重名（歧义）** / 接入点里没有 `workflow` 三种情况分开报，
                * 与采纳校验（`checkWorkflowAgentRefs`）**同一句话**。
                */
-              const resolved = resolveWorkflowAgent(agents, agentName)
+              /*
+               * ★ D232：名字 → 人 走**存储层那一处**（`getAgentByName`，D231 加的），
+               *   不再先 `listAgents` 再在这里 find 一遍——两处各查一遍，
+               *   迟早出现"校验说行、跑起来必炸"。
+               */
+              const resolved = resolveWorkflowAgent(
+                await store.getAgentByName(agentName),
+                agentName,
+              )
               if (!resolved.ok) return { ok: false, runId: null, error: resolved.error }
               const agent = resolved.agent
               agentRef = { id: agent.id as AgentId, name: agent.name as string, instructions: agent.instructions ?? '' }
@@ -8253,7 +8260,10 @@ async function injectedSkillsOf(
        *   重名是"名字存在但选不出是哪条"，`validateWorkflowCode` 那层看不出来（它只查有没有）。
        *   ⚠️ 与引擎解析同一句话（`resolveWorkflowAgent`），否则就是"校验说行、跑起来必炸"。
        */
-      const refs = checkWorkflowAgentRefs(agents, parsed.code)
+      const refs = await checkWorkflowAgentRefs(
+        (name) => store.getAgentByName(name),
+        parsed.code,
+      )
       if (!refs.ok) {
         /*
          * ⚠️ 错误码保持向后兼容：**"不存在"与"存在但不可引用"仍然报

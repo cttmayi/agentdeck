@@ -122,15 +122,24 @@ getAgentByName(ws, name)      → listAgents(ws) 里按 name 精确匹配（唯�
 
 ---
 
-## 8. 端口与调用点
+## 8. 端口与调用点（已实现）
 
 - `store.getAgent(id)` 拆成 **`getAgentById(id)`** 与 **`getAgentByName(workspaceId, name)`**；
 - **不做** `getAgent(idOrName)` 的魔法分派（"猜这个字符串是 id 还是名字"没有定义）；
 - 生产代码 **37 处** `getAgent(` 要各选一个：
   - 绝大多数是历史/快照里带 id（`run.agentId`、`agentRef.id`、`slots`、`executorId`、`memory.agentId`）⇒ `getAgentById`；
   - 少数是"人给的名字"（编排解析、CLI、界面按名字跳转）⇒ `getAgentByName`；
-- `resolveWorkflowAgent(name)` 改为走 `getAgentByName(ws, name)`，**保留**它现有的两道校验（重名歧义、入口 `workflow`）；
+- `resolveWorkflowAgent(name)` 改为走 `getAgentByName(name)`（**不带工作区**：全局池），**保留**它现有的两道校验（重名歧义、入口 `workflow`）；
 - 前端不用 `getAgent`：它拿 `/api/agents` 列表，本地按 id 或名字找。
+
+**落地后的形状**（D232）：解析函数不再吃"一整份 agent 列表"，而是吃 `getAgentByName` 的
+**查找结果**（`AgentNameLookup = found | ambiguous | none`）——名字 → 人 只有存储层一个出处，
+这一层只判断"能不能用"。两处（采纳校验 `checkWorkflowAgentRefs` 与运行时 `submitStep`）
+传的都是 `(name) => store.getAgentByName(name)`，所以"校验说行、跑起来必炸"在结构上不可能。
+
+将来**编排内建智能体**落地时，加第一档就在这一处：入参多一个 inline 池，命中内建时
+把被遮蔽的全局同名那条带出来（`shadowed`），界面标「（遮蔽了全局同名那条）」。
+今天内建池恒为空 ⇒ 行为与改之前完全一样。
 
 ---
 

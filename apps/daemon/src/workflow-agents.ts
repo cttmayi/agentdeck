@@ -29,6 +29,18 @@ export type WorkflowAgentResolution =
   | { ok: false; error: string; code: 'agent_not_found' | 'agent_ambiguous' | 'agent_not_referenceable' }
 
 /**
+ * "按名字找到的候选"——`store.getAgentByName()` 的返回形状（D231）。
+ *
+ * 为什么解析函数吃这个、而不是吃一整份 agent 列表：**名字 → 人** 这件事只有一个出处
+ * （存储层的按名字查），这一层只负责**判断能不能用**（歧义 / 接入点）。
+ * 两处各查一遍，迟早出现"校验说行、跑起来必炸"。
+ */
+export type AgentNameLookup =
+  | { kind: 'found'; agent: Agent }
+  | { kind: 'ambiguous'; agents: Agent[] }
+  | { kind: 'none' }
+
+/**
  * 把编排代码里的一个名字解析成**唯一**那条智能体。
  *
  * 三种失败各有各的处置（不要合成一句"找不到"）：
@@ -36,12 +48,18 @@ export type WorkflowAgentResolution =
  *   · `agent_ambiguous`——**有两条以上同名**（这就是本条模块存在的理由）；
  *   · `agent_not_referenceable`——名字唯一，但那条的接入点里没有 `workflow`
  *     （平台成员默认没有；D145 的"两处都约束"）。
+ *
+ * ★★ 方案 D 的落点（`docs/design/agent-key-by-name.md` §8）：将来**编排内建智能体**
+ *   落地时，解析顺序是"**本编排内建 → 全局池**"，而这一层就是加那一档的地方——
+ *   届时入参多一个 `inline` 池，命中内建时把被遮蔽的全局同名那条带出来
+ *   （`shadowed`），界面标「（遮蔽了全局同名那条）」。今天内建池恒为空，
+ *   所以这里等价于"只看全局池"。
  */
 export function resolveWorkflowAgent(
-  agents: ReadonlyArray<Agent>,
+  lookup: AgentNameLookup,
   name: string,
 ): WorkflowAgentResolution {
-  const matches = agents.filter((a) => (a.name as string) === name)
+  const matches = lookup.kind === 'found' ? [lookup.agent] : lookup.kind === 'ambiguous' ? lookup.agents : []
   if (matches.length === 0) {
     return { ok: false, code: 'agent_not_found', error: `内嵌智能体不存在：${name}` }
   }
@@ -93,14 +111,16 @@ export function literalAgentNamesInWorkflowCode(code: string): string[] {
  *
  * 返回第一处问题（一次只说一件，改完再来看下一件——与其它校验同一口径）。
  */
-export function checkWorkflowAgentRefs(
-  agents: ReadonlyArray<Agent>,
+export async function checkWorkflowAgentRefs(
+  lookupByName: (name: string) => Promise<AgentNameLookup>,
   code: string,
-):
+): Promise<
   | { ok: true }
-  | { ok: false; error: string; code: 'agent_not_found' | 'agent_ambiguous' | 'agent_not_referenceable'; name: string } {
+  | { ok: false; error: string; code: 'agent_not_found' | 'agent_ambiguous' | 'agent_not_referenceable'; name: string }
+> {
   for (const name of literalAgentNamesInWorkflowCode(code)) {
-    const resolved = resolveWorkflowAgent(agents, name)
+    // ★ D231：名字 → 人 走**存储层那一处**（`getAgentByName`），与运行时同一条路
+    const resolved = resolveWorkflowAgent(await lookupByName(name), name)
     if (!resolved.ok) return { ok: false, error: resolved.error, code: resolved.code, name }
   }
   return { ok: true }

@@ -42,16 +42,30 @@ function agent(patch: Record<string, unknown> & { id: string; name: string }): A
   } as unknown as Agent
 }
 
+/**
+ * 把一组 agent 变成 `getAgentByName` 的返回形状（D231：解析函数的入参换成了"查找结果"）。
+ * 名字全等匹配；多条 ⇒ ambiguous（与存储层同一口径）。
+ */
+function lookup(agents: ReadonlyArray<Agent>, name: string): {
+  kind: 'found'
+  agent: Agent
+} | { kind: 'ambiguous'; agents: Agent[] } | { kind: 'none' } {
+  const hits = agents.filter((a) => (a.name as string) === name)
+  if (hits.length === 0) return { kind: 'none' }
+  if (hits.length > 1) return { kind: 'ambiguous', agents: hits }
+  return { kind: 'found', agent: hits[0]! }
+}
+
 describe('★ 编排里的名字解析：唯一才放行', () => {
   test('唯一且能接编排 ⇒ 解析出那一条', () => {
     const a = agent({ id: 'a1', name: '撰稿员' })
-    const r = resolveWorkflowAgent([a], '撰稿员')
+    const r = resolveWorkflowAgent(lookup([a], '撰稿员'), '撰稿员')
     assert.equal(r.ok, true)
     assert.equal(r.ok === true ? (r.agent.id as string) : '', 'a1')
   })
 
   test('没有这个名字 ⇒ agent_not_found', () => {
-    const r = resolveWorkflowAgent([agent({ id: 'a1', name: '撰稿员' })], '助手')
+    const r = resolveWorkflowAgent(lookup([agent({ id: 'a1', name: '撰稿员' })], '助手'), '助手')
     assert.equal(r.ok, false)
     assert.equal(r.ok === false && r.code, 'agent_not_found')
   })
@@ -64,7 +78,7 @@ describe('★ 编排里的名字解析：唯一才放行', () => {
       owner: 'platform',
       entries: ['chat', 'task', 'workflow'],
     })
-    const r = resolveWorkflowAgent([mine, builtin], '助手')
+    const r = resolveWorkflowAgent(lookup([mine, builtin], '助手'), '助手')
     assert.equal(r.ok, false, '重名时不许"随便挑一条"')
     assert.equal(r.ok === false && r.code, 'agent_ambiguous')
     const error = r.ok === false ? r.error : ''
@@ -81,7 +95,7 @@ describe('★ 编排里的名字解析：唯一才放行', () => {
       owner: 'platform',
       entries: ['action:skill-draft'],
     })
-    const r = resolveWorkflowAgent([platformOnly], '起草者')
+    const r = resolveWorkflowAgent(lookup([platformOnly], '起草者'), '起草者')
     assert.equal(r.ok, false)
     assert.equal(r.ok === false && r.code, 'agent_not_referenceable')
   })
@@ -94,7 +108,7 @@ describe('★ 编排里的名字解析：唯一才放行', () => {
       owner: 'platform',
       entries: ['action:skill-draft'],
     })
-    const r = resolveWorkflowAgent([mine, platformOnly], '助手')
+    const r = resolveWorkflowAgent(lookup([mine, platformOnly], '助手'), '助手')
     assert.equal(r.ok === false && r.code, 'agent_ambiguous')
   })
 })
@@ -110,26 +124,37 @@ describe('★ 采纳之前的歧义体检（与引擎同一句话）', () => {
     )
   })
 
-  test('★★ 有重名 ⇒ 体检不通过（返回与引擎同一条错误）', () => {
+  test('★★ 有重名 ⇒ 体检不通过（返回与引擎同一条错误）', async () => {
     const agents = [
       agent({ id: 'mine-1', name: '助手' }),
       agent({ id: 'builtin-1', name: '助手', owner: 'platform' }),
       agent({ id: 'w1', name: '撰稿员' }),
     ]
-    const out = checkWorkflowAgentRefs(agents, `await flow([agent('撰稿员'), agent('助手')])`)
+    const out = await checkWorkflowAgentRefs(
+      async (name) => lookup(agents, name),
+      `await flow([agent('撰稿员'), agent('助手')])`,
+    )
     assert.equal(out.ok, false)
     assert.equal(out.ok === false && out.code, 'agent_ambiguous')
   })
 
-  test('都能唯一解析 ⇒ 通过', () => {
+  test('都能唯一解析 ⇒ 通过', async () => {
     const agents = [agent({ id: 'w1', name: '撰稿员' }), agent({ id: 'w2', name: '审稿员' })]
     assert.equal(
-      checkWorkflowAgentRefs(agents, `await flow([agent('撰稿员'), agent('审稿员')])`).ok,
+      (
+        await checkWorkflowAgentRefs(
+          async (name) => lookup(agents, name),
+          `await flow([agent('撰稿员'), agent('审稿员')])`,
+        )
+      ).ok,
       true,
     )
   })
 
-  test('代码里一个 agent(...) 都没有 ⇒ 通过（空代码不是这里的问题）', () => {
-    assert.equal(checkWorkflowAgentRefs([], `await flow([])`).ok, true)
+  test('代码里一个 agent(...) 都没有 ⇒ 通过（空代码不是这里的问题）', async () => {
+    assert.equal(
+      (await checkWorkflowAgentRefs(async () => ({ kind: 'none' }), `await flow([])`)).ok,
+      true,
+    )
   })
 })
