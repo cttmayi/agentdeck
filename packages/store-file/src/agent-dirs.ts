@@ -246,22 +246,22 @@ export async function migrateExclusiveSkillsDirCase(dataDir: string): Promise<{
   return { renamed, conflicts, failed }
 }
 
-/** 列出这个目录下的独有技能（slug + 正文）。目录由调用方按来源解析（D228）。 */
+/** 列出这个目录下的独有技能（名字 + 正文）。目录由调用方按来源解析（D228）。 */
 export async function listExclusiveSkillBodiesIn(
   skillsDirectory: string,
-): Promise<Array<{ slug: string; body: string }>> {
-  let slugs: string[]
+): Promise<Array<{ name: string; body: string }>> {
+  let names: string[]
   try {
-    slugs = await readdir(skillsDirectory)
+    names = await readdir(skillsDirectory)
   } catch {
     return []
   }
-  const out: Array<{ slug: string; body: string }> = []
-  for (const slug of slugs) {
-    if (slug.startsWith('.')) continue
+  const out: Array<{ name: string; body: string }> = []
+  for (const name of names) {
+    if (name.startsWith('.')) continue
     try {
-      const body = await readFile(join(skillsDirectory, slug, 'SKILL.md'), 'utf8')
-      out.push({ slug, body })
+      const body = await readFile(join(skillsDirectory, name, 'SKILL.md'), 'utf8')
+      out.push({ name, body })
     } catch {
       // 某个 SKILL.md 缺失 ⇒ 跳过（独有技能不是共享技能，缺一个不该让整个列表失败）
     }
@@ -280,10 +280,10 @@ export async function listExclusiveSkillBodiesIn(
  */
 export async function getExclusiveSkillBodyIn(
   skillsDirectory: string,
-  slug: string,
+  name: string,
 ): Promise<string | null> {
   try {
-    return await readFile(join(skillsDirectory, slug, 'SKILL.md'), 'utf8')
+    return await readFile(join(skillsDirectory, name, 'SKILL.md'), 'utf8')
   } catch {
     return null
   }
@@ -291,19 +291,19 @@ export async function getExclusiveSkillBodyIn(
 
 export async function writeExclusiveSkillBodyIn(
   skillsDirectory: string,
-  slug: string,
+  name: string,
   body: string,
 ): Promise<void> {
-  await ensureDir(join(skillsDirectory, slug))
-  await atomicWrite(join(skillsDirectory, slug, 'SKILL.md'), body)
+  await ensureDir(join(skillsDirectory, name))
+  await atomicWrite(join(skillsDirectory, name, 'SKILL.md'), body)
 }
 
 export async function removeExclusiveSkillBodyIn(
   skillsDirectory: string,
-  slug: string,
+  name: string,
 ): Promise<boolean> {
-  const had = await exists(join(skillsDirectory, slug, 'SKILL.md'))
-  await removeQuietly(join(skillsDirectory, slug))
+  const had = await exists(join(skillsDirectory, name, 'SKILL.md'))
+  await removeQuietly(join(skillsDirectory, name))
   return had
 }
 

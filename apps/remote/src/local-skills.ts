@@ -26,7 +26,7 @@ import { SkillSourceError, parseGithubProxy, resolveGithubUrl } from '@agentdeck
  * ══════════════════════════════════════════════════════════════════
  *
  * `resolveGithubUrl`（`@agentdeck/skill-source`）——主机白名单、https、每跳校验、
- * 限额、必须有 `SKILL.md`、slug 怎么收敛，与 daemon 装技能、同步工具抓清单**完全
+ * 限额、必须有 `SKILL.md`、name 怎么收敛，与 daemon 装技能、同步工具抓清单**完全
  * 一致**。所以"远端目录里能装的东西"与"daemon 装得进来的东西"永远是同一集合。
  */
 
@@ -35,7 +35,7 @@ const INDEX_FILE = '.sync.json'
 
 export interface LocalSkillItem {
   url: string
-  slug: string
+  /** 技能名（= 目录名，D236：只有一个名字）。 */
   name: string
   category: string
   origin: 'official' | 'community'
@@ -86,14 +86,14 @@ export interface InstallLocalInput {
   /** 注入 fetch 以便测试（NFR-T-01：测试绝不联网）。 */
   fetchImpl?: typeof fetch
   now?: () => Date
-  /** 已经存在的 slug（同步目录里的也算）：撞上就拒绝，并说清撞在哪儿。 */
-  takenSlugs: ReadonlySet<string>
+  /** 已经存在的 name（同步目录里的也算）：撞上就拒绝，并说清撞在哪儿。 */
+  takenNames: ReadonlySet<string>
 }
 
 /**
  * 从 GitHub 链接**手动装一条**进本地层。
  *
- * ★ 撞名一律拒绝（不覆盖）：技能库按 slug 唯一，静默顶掉一条别人正在用的东西，
+ * ★ 撞名一律拒绝（不覆盖）：技能库按 name 唯一，静默顶掉一条别人正在用的东西，
  *   症状是"某个 agent 的参考突然变了"——那是很久以后才会被发现的那种坏。
  */
 export async function installLocalSkill(
@@ -114,13 +114,13 @@ export async function installLocalSkill(
     },
   )
 
-  if (input.takenSlugs.has(resolved.slug)) {
-    throw new LocalSkillConflict(resolved.slug)
+  if (input.takenNames.has(resolved.name)) {
+    throw new LocalSkillConflict(resolved.name)
   }
 
   const files: Record<string, string> = { 'SKILL.md': resolved.body, ...resolved.files }
   // ★ 先写临时目录再换名：中途失败不会留下"半个技能"（同同步工具那套原子替换）
-  const staging = `${join(root, resolved.slug)}.staging`
+  const staging = `${join(root, resolved.name)}.staging`
   await rm(staging, { recursive: true, force: true })
   for (const [rel, text] of Object.entries(files)) {
     const target = join(staging, rel)
@@ -128,13 +128,12 @@ export async function installLocalSkill(
     await writeFile(target, text, 'utf8')
   }
   await mkdir(root, { recursive: true })
-  await rm(join(root, resolved.slug), { recursive: true, force: true })
-  await rename(staging, join(root, resolved.slug))
+  await rm(join(root, resolved.name), { recursive: true, force: true })
+  await rename(staging, join(root, resolved.name))
 
   const item: LocalSkillItem = {
     url: input.url,
-    slug: resolved.slug,
-    name: input.name?.trim() || resolved.slug,
+    name: resolved.name,
     category: input.category?.trim() || 'other',
     origin: 'community',
     summary: input.summary?.trim() || '',
@@ -153,32 +152,33 @@ export async function installLocalSkill(
   await writeIndex(root, {
     ...index,
     syncedAt: now().toISOString(),
-    items: [...index.items.filter((i) => i.slug !== item.slug), item],
+    items: [...index.items.filter((i) => i.name !== item.name), item],
   })
   return item
 }
 
 /** 卸载一条**本地装的**。同步来的不在这一层，删不到（调用方先行判断）。 */
-export async function uninstallLocalSkill(root: string, slug: string): Promise<boolean> {
+export async function uninstallLocalSkill(root: string, name: string): Promise<boolean> {
   const index = await readIndex(root)
-  const hit = index.items.find((i) => i.slug === slug)
+  const hit = index.items.find((i) => i.name === name)
   if (!hit) return false
-  await rm(join(root, slug), { recursive: true, force: true })
+  await rm(join(root, name), { recursive: true, force: true })
   await writeIndex(root, {
     ...index,
     syncedAt: new Date().toISOString(),
-    items: index.items.filter((i) => i.slug !== slug),
+    items: index.items.filter((i) => i.name !== name),
   })
   return true
 }
 
-/** 撞名（本地层里、或同步目录里已经有了）。带上 slug，调用方要说清撞在哪儿。 */
+/** 撞名（本地层里、或同步目录里已经有了）。带上 name，调用方要说清撞在哪儿。 */
 export class LocalSkillConflict extends Error {
-  readonly slug: string
-  constructor(slug: string) {
-    super(`已经有一个叫「${slug}」的技能了`)
+  /** 见 `SkillCollisionError` 同一条注释：`Error` 自己就有 `name`（D236）。 */
+  readonly skillName: string
+  constructor(name: string) {
+    super(`已经有一个叫「${name}」的技能了`)
     this.name = 'LocalSkillConflict'
-    this.slug = slug
+    this.skillName = name
   }
 }
 

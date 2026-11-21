@@ -65,7 +65,7 @@ after(async () => {
 describe('基本 CRUD 与持久化', () => {
   test('写入 agent / skill / issue 后可读回', async () => {
     const agent = makeAgent({ id: 'a1', workspaceId: WS, skillIds: [makeSkill({ id: 's1' }).id] })
-    const skill = makeSkill({ id: 's1', workspaceId: WS, slug: 'sec-vuln' })
+    const skill = makeSkill({ id: 's1', workspaceId: WS, name: 'sec-vuln' })
     const issue = makeIssue({ id: 'i1', workspaceId: WS, title: '改一下' })
 
     await store.insertAgent(agent)
@@ -73,7 +73,7 @@ describe('基本 CRUD 与持久化', () => {
     await store.insertIssue(issue)
 
     assert.equal((await store.getAgentById(agentId('a1')))?.id, 'a1')
-    assert.equal((await store.getSkill(skill.id))?.slug, 'sec-vuln')
+    assert.equal((await store.getSkill(skill.id))?.name, 'sec-vuln')
     assert.equal((await store.getIssue(issue.id))?.title, '改一下')
     assert.deepEqual(
       (await store.listSkillsByIds([skill.id])).map((s) => s.id),
@@ -275,13 +275,13 @@ describe('基本 CRUD 与持久化', () => {
  *
  * 与 `store-file` 的那一组逐条对齐（同一套端口语义），所以这里只挑 SQL 侧
  * 真正会走样的地方多说一句：`listTools` 按 **rowid** 返回（等于写入顺序），
- * `getToolBySlug` 走的是 `(workspace_id, slug)` 上的索引——索引**故意不是唯一
- * 索引**，理由写在 `sqlite-store.ts` 的建表处（唯一约束会把"装了同 slug 的包"
+ * `getToolByName` 走的是 `(workspace_id, name)` 上的索引——索引**故意不是唯一
+ * 索引**，理由写在 `sqlite-store.ts` 的建表处（唯一约束会把"装了同 name 的包"
  * 从"覆盖写入"变成"报错"，那是与文件适配器不一致的行为改变）。
  */
 /*
  * ⚠️ 2026-11（D123）：这里原来整块是「工具包（D40）：CRUD 与卸载」——insertTool /
- *   getTool / listTools / listToolsByIds / getToolBySlug / deleteTool 六条端口在两个
+ *   getTool / listTools / listToolsByIds / getToolByName / deleteTool 六条端口在两个
  *   适配器上的行为（同名取一条、跨 workspace、卸载一律放行……）。
  *   工具包随动作能力退场，端口删了，这组用例没有对象，整块删。
  */
@@ -755,7 +755,7 @@ describe('审计链（FR-AUDIT-01）', () => {
         runId: rid,
         subject: { type: 'issue', id: 'i1' } as const,
         inputBlobRefs: [],
-        skillRefs: [{ id: makeSkill({ id: 's1' }).id, slug: 'sec-vuln', source: 'local' as const }],
+        skillRefs: [{ id: makeSkill({ id: 's1' }).id, name: 'sec-vuln', source: 'local' as const }],
         runtimeDescriptorKey: 'claude',
         cliVersion: '2.1.220',
         modelId: 'claude-sonnet-4-5',
@@ -780,7 +780,7 @@ describe('审计链（FR-AUDIT-01）', () => {
         audits.map((a) => a.id),
         ['aud-early', 'aud-late'],
       )
-      assert.equal(audits[0]?.skillRefs[0]?.slug, 'sec-vuln')
+      assert.equal(audits[0]?.skillRefs[0]?.name, 'sec-vuln')
       // 成本用整数微美元，避免浮点漂移
       assert.equal(audits[0]?.usage?.costUsdMicros, 1234)
       await s.close()

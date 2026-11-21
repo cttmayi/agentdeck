@@ -379,10 +379,10 @@ describe('远端管理页：手动安装 / 卸载技能（本地层，D52）', (
         201,
       )
       const catalog = (await (await fetch(`${base}/api/catalog`)).json()) as {
-        skills: Array<{ slug: string }>
+        skills: Array<{ name: string }>
       }
       assert.deepEqual(
-        catalog.skills.map((s) => s.slug),
+        catalog.skills.map((s) => s.name),
         ['foo'],
         '相对路径下也要列出来',
       )
@@ -404,14 +404,14 @@ describe('远端管理页：手动安装 / 卸载技能（本地层，D52）', (
           name: '手动装的',
         })
         assert.equal(res.status, 201, await res.clone().text())
-        const body = (await res.json()) as { installed: { slug: string; files: string[] } }
-        assert.equal(body.installed.slug, 'foo')
+        const body = (await res.json()) as { installed: { name: string; files: string[] } }
+        assert.equal(body.installed.name, 'foo')
         assert.deepEqual(body.installed.files.sort(), ['SKILL.md', 'extra.md'])
 
         const catalog = (await (await fetch(`${base}/api/catalog`)).json()) as {
-          skills: Array<{ slug: string; source?: string; files: Record<string, string> }>
+          skills: Array<{ name: string; source?: string; files: Record<string, string> }>
         }
-        const foo = catalog.skills.find((s) => s.slug === 'foo')
+        const foo = catalog.skills.find((s) => s.name === 'foo')
         assert.ok(foo, '装完要立刻出现在目录里')
         assert.equal(foo.source, 'local', '来源要标出来（界面据此显示徽标与卸载按钮）')
         assert.equal(foo.files['extra.md'], '补充', '支持文件要一起带上')
@@ -455,7 +455,7 @@ describe('远端管理页：手动安装 / 卸载技能（本地层，D52）', (
           JSON.stringify({
             schema: 'agentdeck/recommended-skills-sync@1',
             syncedAt: '2026-10-01T00:00:00.000Z',
-            items: [{ url: 'https://github.com/o/r/tree/main/skills/x', slug: 'from-manifest', name: '清单来的', category: 'other', origin: 'official', summary: '', fills: null, needs: null, sourceRef: 'github:o/r@main:skills/x', version: null, fetchedAt: '2026-10-01T00:00:00.000Z', files: ['SKILL.md'], excluded: [] }],
+            items: [{ url: 'https://github.com/o/r/tree/main/skills/x', name: 'from-manifest', category: 'other', origin: 'official', summary: '', fills: null, needs: null, sourceRef: 'github:o/r@main:skills/x', version: null, fetchedAt: '2026-10-01T00:00:00.000Z', files: ['SKILL.md'], excluded: [] }],
           }),
           'utf8',
         )

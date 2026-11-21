@@ -295,7 +295,7 @@ import {
   resolveLocalPath,
   resolvePayloadEntry,
   resolveSkillSource,
-  assertValidSlug,
+  assertValidSkillName,
   type ResolvedSkillSource,
   type SkillSourceSpec,
 } from '@agentdeck/skill-source'
@@ -810,23 +810,23 @@ async function runBelongsToIssue(store: Store, run: Run, issueId: IssueId): Prom
 async function installSkillPayloads(input: {
   store: Store
   workspaceId: WorkspaceId
-  payloads: Array<Partial<Skill> & { slug?: string }>
+  payloads: Array<Partial<Skill> & { name?: string }>
   overwrite: boolean
   now: number
 }): Promise<{
   installed: Skill[]
-  skipped: Array<{ slug: string; reason: string; existingSource: string }>
+  skipped: Array<{ name: string; reason: string; existingSource: string }>
 }> {
   const { store, workspaceId, payloads, overwrite, now } = input
   const existing = await store.listSkills(workspaceId)
-  const bySlug = new Map(existing.map((s) => [s.slug, s]))
+  const byName = new Map(existing.map((s) => [s.name, s]))
   const installed: Skill[] = []
-  const skipped: Array<{ slug: string; reason: string; existingSource: string }> = []
+  const skipped: Array<{ name: string; reason: string; existingSource: string }> = []
 
   for (const payload of payloads) {
-    const slug = typeof payload.slug === 'string' ? payload.slug : ''
-    if (slug === '') {
-      skipped.push({ slug: '(空)', reason: 'slug 是 skill 的权威标识，不能为空', existingSource: '' })
+    const name = typeof payload.name === 'string' ? payload.name : ''
+    if (name === '') {
+      skipped.push({ name: '(空)', reason: 'name 是 skill 的权威标识，不能为空', existingSource: '' })
       continue
     }
 
@@ -844,24 +844,24 @@ async function installSkillPayloads(input: {
     let validated
     try {
       validated = resolvePayloadEntry({
-        slug,
+        name,
         body: typeof payload.body === 'string' ? payload.body : '',
         files: payload.files ?? null,
-        sourceRef: payload.sourceRef ?? `remote:${slug}`,
+        sourceRef: payload.sourceRef ?? `remote:${name}`,
       })
     } catch (err) {
       skipped.push({
-        slug,
+        name,
         existingSource: '',
         reason: err instanceof Error ? err.message : String(err),
       })
       continue
     }
 
-    const clash = bySlug.get(slug)
+    const clash = byName.get(name)
     if (clash && !overwrite) {
       skipped.push({
-        slug,
+        name,
         existingSource: clash.source,
         reason:
           `已有同名 skill（来源：${clash.source}）。` +
@@ -875,13 +875,12 @@ async function installSkillPayloads(input: {
       // 同名替换时**复用原 id**：否则会留下一条永远没人引用的孤儿记录
       id: (clash?.id ?? payload.id ?? (ulid() as Skill['id'])) as Skill['id'],
       workspaceId,
-      slug,
-      name: payload.name ?? slug,
+      name,
       // ★ payload 给了就用 payload 的；没有就从 SKILL.md frontmatter 解析
       //   （作者写的那句用途说明）。都没有才是真的"没有说明"。
       description: payload.description ?? extractSkillMeta(validated.body).description ?? null,
       // 用**校验过的**正文与支持文件，而不是原始入参：规范化（比如 frontmatter
-      // 里的 name 与 slug 对齐）在 `resolvePayloadEntry` 那边已经做过了
+      // 里的 name 与 name 对齐）在 `resolvePayloadEntry` 那边已经做过了
       body: validated.body,
       // 支持文件要落库，否则"装进来了但注入时只有 SKILL.md"——
       // 那种技能是坏的，而且坏得很安静
@@ -904,7 +903,7 @@ async function installSkillPayloads(input: {
       updatedAt: now,
     }
     await store.insertSkill(skill)
-    bySlug.set(slug, skill)
+    byName.set(name, skill)
     installed.push(skill)
   }
 
@@ -953,10 +952,10 @@ function parseInstallSource(
   }
 
   if (kind === 'payload') {
-    const slug = obj['slug']
+    const name = obj['name']
     const body = obj['body']
-    if (typeof slug !== 'string' || slug.trim() === '') {
-      return { ok: false, error: 'source.kind=payload 需要非空的 slug' }
+    if (typeof name !== 'string' || name.trim() === '') {
+      return { ok: false, error: 'source.kind=payload 需要非空的 name' }
     }
     if (typeof body !== 'string') {
       return { ok: false, error: 'source.kind=payload 需要 body（字符串）' }
@@ -979,10 +978,10 @@ function parseInstallSource(
       ok: true,
       spec: {
         kind: 'payload',
-        slug: slug.trim(),
+        name: name.trim(),
         body,
         ...(files ? { files: files as Record<string, string> } : {}),
-        sourceRef: typeof sourceRef === 'string' && sourceRef ? sourceRef : `remote:${slug.trim()}`,
+        sourceRef: typeof sourceRef === 'string' && sourceRef ? sourceRef : `remote:${name.trim()}`,
         version: typeof version === 'string' ? version : null,
       },
     }
@@ -993,8 +992,8 @@ function parseInstallSource(
 
 /*
  * ⚠️ 2026-11（D123）：这里原来是**工具包的安装层**——`sendToolError`、
- *   `parseToolInstallSource`（来源逐字段校验）、`slugDisagreement`、
- *   `installToolPackage`（slug 唯一性 + id/时间 + 写库）、`resolveToolInstall`
+ *   `parseToolInstallSource`（来源逐字段校验）、`nameDisagreement`、
+ *   `installToolPackage`（name 唯一性 + id/时间 + 写库）、`resolveToolInstall`
  *   （path / payload 两条来源合成一份校验过的包）。工具包与动作能力一起退场：
  *   `POST/DELETE /api/tools` 没了，没有调用方，整段删掉（`tool-source.ts` 同批删）。
  *
@@ -2059,9 +2058,7 @@ async function injectedSkillsOf(
   _taskDir: string,
 ): Promise<
   Array<{
-    ref: { id: Skill['id']; slug: string; source: Skill['source'] }
-    slug: string
-    name: string
+    ref: { id: Skill['id']; name: string; source: Skill['source'] }
     body: string
     description?: string
     files: Record<string, string>
@@ -2073,9 +2070,7 @@ async function injectedSkillsOf(
   return all
     .filter((skill) => wanted.has(skill.id as string))
     .map((s) => ({
-      ref: { id: s.id, slug: s.slug, source: s.source },
-      slug: s.slug,
-      name: s.name,
+      ref: { id: s.id, name: s.name, source: s.source },
       body: s.body,
       ...(s.description ? { description: s.description } : {}),
       files: (s.files ?? {}) as Record<string, string>,
@@ -2261,7 +2256,7 @@ async function injectedSkillsOf(
     const revisePrompt = buildDraftPrompt({
       materialDir: 'material',
       outputDir: 'skill',
-      skillSlugs: reviseSkills.map((s) => s.slug),
+      skillNames: reviseSkills.map((s) => s.ref.name),
       // 按**事实**给（分批第 211 批）：上一轮没交 SKILL.md ⇒ 不是"在上一版上改"。
       revised: hasOutput,
       ...(hasOutput ? {} : { continuing: true }),
@@ -2429,7 +2424,7 @@ async function injectedSkillsOf(
     const prompt = buildDraftPrompt({
       materialDir: 'material',
       outputDir: 'skill',
-      skillSlugs: skills.map((s) => s.slug),
+      skillNames: skills.map((s) => s.ref.name),
       continuing: true,
     })
     const outcome = await executor.submit({
@@ -3012,12 +3007,12 @@ async function injectedSkillsOf(
         // ★ 分批第 187 批：设置页要能读到当前值（空串 = 直连）
         githubProxy: settings.githubProxy,
         /**
-         * ★ 分批第 207 批：**起草者挂的那条技能的 slug**（`distilly`）。
+         * ★ 分批第 207 批：**起草者挂的那条技能的 name**（`distilly`）。
          *
-         * 界面需要它才能把「未安装」说出来（智能体页那颗灰 chip）——不给的话前端只能把 slug
+         * 界面需要它才能把「未安装」说出来（智能体页那颗灰 chip）——不给的话前端只能把 name
          * 硬编码一份，两处迟早漂。挂载本身仍然只存在 `Agent.skillIds` 上（这里只是"应该挂哪条"）。
          */
-        drafterSkillSlug: DRAFTER_SKILL_SLUG,
+        drafterSkillName: DRAFTER_SKILL_SLUG,
         /**
          * ★ 分批第 47 批：新建智能体时会**预填**的守则（设置页那个框读它，
          * 新建表单也用它做初值——否则使用者看到空框、保存后才有内容，像"没预填"）。
@@ -3944,7 +3939,7 @@ async function injectedSkillsOf(
       if (unknownSkill !== undefined) {
         sendJson(res, 400, {
           error: `skill 不存在：${unknownSkill}。可用的：${
-            existing.map((s) => s.slug).join(', ') || '（还没有 skill）'
+            existing.map((s) => s.name).join(', ') || '（还没有 skill）'
           }`,
         })
         return
@@ -4116,7 +4111,7 @@ async function injectedSkillsOf(
       }
     }
 
-    // ── 智能体的独有技能（D111：`agents/<id>/skills/<slug>/SKILL.md` 文件资产）──
+    // ── 智能体的独有技能（D111：`agents/<id>/skills/<name>/SKILL.md` 文件资产）──
     //
     // 两类技能的分界（设计定稿 `docs/design/agent-directory.md` §4）：
     //   · **独有** = 这个智能体目录里的文件——不进技能库、不进技能页、不可卸载。
@@ -4141,8 +4136,7 @@ async function injectedSkillsOf(
       const skills = rows.map((row) => {
         const meta = extractSkillMeta(row.body)
         return {
-          slug: row.slug,
-          name: meta.name ?? row.slug,
+          name: row.name,
           ...(meta.description ? { description: meta.description } : {}),
           body: row.body,
         }
@@ -4154,7 +4148,7 @@ async function injectedSkillsOf(
     const agentSkillsMatch = /^\/api\/agents\/([^/]+)\/skills\/([^/]+)$/.exec(path)
     if (agentSkillsMatch) {
       const agentId = decodeURIComponent(agentSkillsMatch[1]!) as Agent['id']
-      const skillSlug = decodeURIComponent(agentSkillsMatch[2]!)
+      const skillName = decodeURIComponent(agentSkillsMatch[2]!)
       if (req.method === 'PUT') {
         const agent = await store.getAgentById(agentId)
         if (!agent) {
@@ -4174,18 +4168,18 @@ async function injectedSkillsOf(
           sendJson(res, 400, { error: '缺少正文（body 为空）', code: 'skill_body_required' })
           return
         }
-        // ★ 与安装接口同一关：规范化 + 限额检查（slug 规则也在里面）。
+        // ★ 与安装接口同一关：规范化 + 限额检查（name 规则也在里面）。
         //   sourceRef 只用于校验上下文（独有技能没有库记录，不落任何来源字段）。
         //   ⚠️ 校验失败是**使用者的输入问题**（400），不是服务端故障（500）——
         //     安装接口对同一条规则就是这么回答的。
-        //   ⚠️ 路径段就是 slug：**不静默规范化**（安装接口会对不规范的名字改名，
+        //   ⚠️ 路径段就是 name：**不静默规范化**（安装接口会对不规范的名字改名，
         //     这里目录名 = 使用者给的机器名，改了会让他找不到自己写的文件），
-        //     所以先按 slug 规则严格拒绝。
+        //     所以先按 name 规则严格拒绝。
         let validated
         try {
-          assertValidSlug(skillSlug, `智能体的独有技能 slug「${skillSlug}」。`)
+          assertValidSkillName(skillName, `智能体的独有技能 name「${skillName}」。`)
           validated = resolvePayloadEntry({
-            slug: skillSlug,
+            name: skillName,
             body: raw,
             sourceRef: `agent:${agentId}`,
           })
@@ -4196,8 +4190,8 @@ async function injectedSkillsOf(
           })
           return
         }
-        await store.writeExclusiveSkill(agentSkillOwner(agentId), skillSlug, validated.body)
-        sendJson(res, 200, { slug: skillSlug })
+        await store.writeExclusiveSkill(agentSkillOwner(agentId), skillName, validated.body)
+        sendJson(res, 200, { name: skillName })
         return
       }
       if (req.method === 'DELETE') {
@@ -4213,9 +4207,9 @@ async function injectedSkillsOf(
           })
           return
         }
-        const removed = await store.removeExclusiveSkill(agentSkillOwner(agentId), skillSlug)
+        const removed = await store.removeExclusiveSkill(agentSkillOwner(agentId), skillName)
         if (!removed) {
-          sendJson(res, 404, { error: `这个智能体没有独有技能「${skillSlug}」` })
+          sendJson(res, 404, { error: `这个智能体没有独有技能「${skillName}」` })
           return
         }
         sendJson(res, 200, { removed: true })
@@ -4396,7 +4390,7 @@ async function injectedSkillsOf(
           if (unknownSkill !== undefined) {
             sendJson(res, 400, {
               error: `skill 不存在：${unknownSkill}。可用的：${
-                skills.map((s) => s.slug).join(', ') || '（还没有 skill）'
+                skills.map((s) => s.name).join(', ') || '（还没有 skill）'
               }`,
             })
             return
@@ -5384,7 +5378,7 @@ async function injectedSkillsOf(
      * （与全局同名**允许**——解析时内建优先，命中时会说出来）。
      *
      * 存储形状与账号智能体同形（`agent.json` 不含指令 + `instructions.md`），
-     * 目录名是名字的 slug、`agent.json` 里的 `id` 是身份（run 引用 `inline:<wid>/<id>`）。
+     * 目录名是名字的 name、`agent.json` 里的 `id` 是身份（run 引用 `inline:<wid>/<id>`）。
      */
     const wfAgentsMatch = /^\/api\/workflows\/([^/]+)\/agents$/.exec(path)
     const wfAgentMatch = /^\/api\/workflows\/([^/]+)\/agents\/([^/]+)$/.exec(path)
@@ -5951,13 +5945,13 @@ async function injectedSkillsOf(
 
       // 更新场景带上"当前版本"，界面才能算 A/M/D 与对比（P1 的 diff 也吃这份）
       const draftTarget = draftRun.crystallizeTarget
-      let baseline: { slug: string; files: Record<string, string> } | null = null
+      let baseline: { name: string; files: Record<string, string> } | null = null
       if (draftTarget?.kind === 'update') {
         const mine = await store.listSkills(workspaceId)
         const current = mine.find((s) => (s.id as string) === draftTarget.skillId)
         if (current) {
           baseline = {
-            slug: current.slug,
+            name: current.name,
             files: { 'SKILL.md': current.body, ...((current.files ?? {}) as Record<string, string>) },
           }
         }
@@ -6046,12 +6040,12 @@ async function injectedSkillsOf(
         const firstRecord = versions?.versions[0]
         const candidateDirs: Array<{ dir: string; label: string }> = []
         if (target?.kind === 'update') {
-          const slug = (await store.listSkills(workspaceId)).find(
+          const name = (await store.listSkills(workspaceId)).find(
             (sk) => (sk.id as string) === target.skillId,
-          )?.slug
+          )?.name
           candidateDirs.push({
             dir: join(taskDir, 'material', 'existing-skill'),
-            label: slug === undefined ? '原 skill（要改的那一份）' : `原 skill（${slug}）`,
+            label: name === undefined ? '原 skill（要改的那一份）' : `原 skill（${name}）`,
           })
         }
         if (firstRecord !== undefined && firstRecord.snapshot !== null) {
@@ -6105,7 +6099,7 @@ async function injectedSkillsOf(
               'SKILL.md': current.body,
               ...((current.files ?? {}) as Record<string, string>),
             }
-            baselineLabel = `${current.slug} 的当前版本`
+            baselineLabel = `${current.name} 的当前版本`
           }
         } else {
           baselineLabel = '空（新建）'
@@ -6682,12 +6676,10 @@ async function injectedSkillsOf(
       const existingSkills =
         targets !== null
           ? targets.loadedSkills.map((s) => ({
-              slug: s.slug,
               name: s.name,
               description: s.description,
             }))
           : (await store.listSkills(workspaceId)).map((s) => ({
-              slug: s.slug,
               name: s.name,
               description: s.description,
             }))
@@ -6704,7 +6696,6 @@ async function injectedSkillsOf(
           return
         }
         updateSnapshot = {
-          slug: skill.slug,
           name: skill.name,
           description: skill.description,
           body: skill.body,
@@ -6766,9 +6757,7 @@ async function injectedSkillsOf(
       const mount = await syncDrafterSkillMount(store, workspaceId)
       const allForDraft = await store.listSkills(workspaceId)
       const draftSkills: Array<{
-        ref: { id: Skill['id']; slug: string; source: Skill['source'] }
-        slug: string
-        name: string
+        ref: { id: Skill['id']; name: string; source: Skill['source'] }
         body: string
         description?: string
         files: Record<string, string>
@@ -6777,9 +6766,7 @@ async function injectedSkillsOf(
         const found = allForDraft.find((sk) => (sk.id as string) === id)
         if (!found) continue
         draftSkills.push({
-          ref: { id: found.id, slug: found.slug, source: found.source },
-          slug: found.slug,
-          name: found.name,
+          ref: { id: found.id, name: found.name, source: found.source },
           body: found.body,
           ...(found.description ? { description: found.description } : {}),
           files: (found.files ?? {}) as Record<string, string>,
@@ -6795,12 +6782,12 @@ async function injectedSkillsOf(
       }
       /**
        * 任务块（③）要在**技能解析之后**才组装：里面点名"照哪份技能写"（分批第 210 批），
-       * 点的是这一轮真的会注入到工作目录里的那几份，不是写死的 slug。
+       * 点的是这一轮真的会注入到工作目录里的那几份，不是写死的 name。
        */
       const draftPrompt = buildDraftPrompt({
         materialDir: 'material',
         outputDir: 'skill',
-            skillSlugs: draftSkills.map((sk) => sk.slug),
+            skillNames: draftSkills.map((sk) => sk.ref.name),
       })
       /**
        * 记录（**不是输入**）：这一版照着哪条技能写的。下一轮仍然按**挂载**取，
@@ -6920,7 +6907,7 @@ async function injectedSkillsOf(
       const raw = (await readJsonBody(req)) as {
         draftRunId?: unknown
         target?: unknown
-        slug?: unknown
+        name?: unknown
         /** 整份产出（相对路径 → 文本）。2026-10-19 四轮：**只有这一个内容入口**。 */
         files?: unknown
       }
@@ -6956,7 +6943,7 @@ async function injectedSkillsOf(
 
       // ── 入库只认产出文件本身（2026-10-19 四轮）──
       //
-      // 改之前：前端把 name / description / slug / body 从草稿文本里"拆"出来重传，
+      // 改之前：前端把 name / description / name / body 从草稿文本里"拆"出来重传，
       // 于是同一份内容有两个出处（框里的和文件里的），改一处就漂。现在只传 files，
       // name/description 由服务端从 SKILL.md 的 frontmatter 现解析——客户端的界面
       // 只是展示，说的不算。
@@ -7007,9 +6994,9 @@ async function injectedSkillsOf(
         return
       }
       const parsed = parseSkillMd(skillMdRaw)
-      const slug = (typeof raw?.slug === 'string' && raw.slug.trim() !== '' ? raw.slug.trim() : parsed.name).toLowerCase()
-      if (slug === '') {
-        sendJson(res, 400, { error: '需要 slug（SKILL.md 的 name 为空）', code: 'slug_required' })
+      const name = (typeof raw?.name === 'string' && raw.name.trim() !== '' ? raw.name.trim() : parsed.name).toLowerCase()
+      if (name === '') {
+        sendJson(res, 400, { error: '需要 name（SKILL.md 的 name 为空）', code: 'name_required' })
         return
       }
 
@@ -7017,13 +7004,13 @@ async function injectedSkillsOf(
       let validated
       try {
         validated = resolvePayloadEntry({
-          slug,
+          name,
           body: skillMdRaw,
           // 正文那一份不进支持文件：装出来的技能里再放一份 SKILL.md 就是重复。
           files: Object.fromEntries(
             Object.entries(normalizedFiles).filter(([rel]) => rel !== spot.path),
           ),
-          sourceRef: `mine:${slug}`,
+          sourceRef: `mine:${name}`,
         })
       } catch (err) {
         sendJson(res, 400, {
@@ -7117,13 +7104,13 @@ async function injectedSkillsOf(
       let clashMine: Skill | null = null
       let clashInstalled: Skill | null = null
       for (const s of existing) {
-        if (s.slug !== validated.slug) continue
+        if (s.name !== validated.name) continue
         if (s.source === 'mine') clashMine = s
         else clashInstalled = s
       }
       // 更新目标：提炼的 = 进化（复用原 id 覆盖 + commit）；安装的 = **基于它
-      // 创建你的版本**（设计 §4.1 第 1 步：同 slug 落 skills-mine 并遮蔽安装版，
-      // **安装根原文件不动**——安装的是外部内容，平台不碰）。两者都不允许改 slug
+      // 创建你的版本**（设计 §4.1 第 1 步：同 name 落 skills-mine 并遮蔽安装版，
+      // **安装根原文件不动**——安装的是外部内容，平台不碰）。两者都不允许改 name
       // （改名请走"新建"）。
       if (target.kind === 'update') {
         const targetSkill = existing.find((s) => (s.id as string) === target.skillId)
@@ -7131,17 +7118,17 @@ async function injectedSkillsOf(
           sendJson(res, 404, { error: `skill 不存在（${target.skillId}）`, code: 'skill_not_found' })
           return
         }
-        if (targetSkill.slug !== validated.slug) {
-          sendJson(res, 400, { error: '更新不允许改 slug（改名请新建）', code: 'slug_mismatch' })
+        if (targetSkill.name !== validated.name) {
+          sendJson(res, 400, { error: '更新不允许改 name（改名请新建）', code: 'name_mismatch' })
           return
         }
       } else {
-        // 新建撞提炼根已有同 slug → 让前端切到"更新"（进化）或改名。
+        // 新建撞提炼根已有同 name → 让前端切到"更新"（进化）或改名。
         if (clashMine) {
           sendJson(res, 409, {
-            error: `已有你提炼的同名 skill（${clashMine.slug}）`,
+            error: `已有你提炼的同名 skill（${clashMine.name}）`,
             code: 'clash_mine',
-            existing: { slug: clashMine.slug, name: clashMine.name, id: clashMine.id },
+            existing: { name: clashMine.name, id: clashMine.id },
           })
           return
         }
@@ -7151,7 +7138,7 @@ async function injectedSkillsOf(
       // 落库 id 的决定：
       //   · 新建 → 新 id；
       //   · 更新提炼的 → 复用它的 id（进化，不留孤儿记录）；
-      //   · 更新安装的 → **你的版本**：提炼根已有同 slug 就复用那条（继续进化你的
+      //   · 更新安装的 → **你的版本**：提炼根已有同 name 就复用那条（继续进化你的
       //     遮蔽版），没有就新开一条（基于安装版创建你的版本，设计 §4.1 第 1 步）。
       //     ⚠️ 无论哪种，安装根那条**原样不动**。
       let targetId: Skill['id']
@@ -7162,7 +7149,7 @@ async function injectedSkillsOf(
           targetId = targetSkill.id
           targetCreatedAt = targetSkill.createdAt
         } else {
-          // 安装的 → 落到提炼根（遮蔽）：你的版本优先复用已有 mine 同 slug 那条
+          // 安装的 → 落到提炼根（遮蔽）：你的版本优先复用已有 mine 同 name 那条
           targetId = clashMine?.id ?? (ulid() as Skill['id'])
           targetCreatedAt = clashMine?.createdAt ?? now
         }
@@ -7174,15 +7161,16 @@ async function injectedSkillsOf(
       const skill: Skill = {
         id: targetId,
         workspaceId,
-        slug: validated.slug,
-        // name / description 一律来自 SKILL.md 的 frontmatter（上面现解析的 parsed）
-        name: parsed.name !== '' ? parsed.name : validated.slug,
+        name: validated.name,
+        // description 来自 SKILL.md 的 frontmatter（上面现解析的 parsed）；
+        // **名字不再取 frontmatter 的 name**——规范要求它与目录名一致，而目录名
+        // 就是 `validated.name`（不一致时注入侧也会改写成它，D236）
         description: parsed.description !== '' ? parsed.description : null,
         body: validated.body,
         ...(Object.keys(incomingFiles).length > 0 ? { files: incomingFiles } : {}),
         verdictSchemaVersion: 1,
         source: 'mine',
-        sourceRef: `mine:${validated.slug}`,
+        sourceRef: `mine:${validated.name}`,
         version: null,
         createdAt: targetCreatedAt,
         updatedAt: now,
@@ -7204,8 +7192,8 @@ async function injectedSkillsOf(
         } else {
           const message =
             target.kind === 'update'
-              ? `skill ${skill.slug} 进化（更新）`
-              : `skill ${skill.slug} 沉淀（新建）`
+              ? `skill ${skill.name} 进化（更新）`
+              : `skill ${skill.name} 沉淀（新建）`
           const committed = await commitMine(skillsMineRoot, message)
           if (committed.ok) {
             versioning = { enabled: true }
@@ -7310,7 +7298,7 @@ async function injectedSkillsOf(
     // （GitHub 链接 / 本地路径）。它与「远端目录」不同：远端那份是**已经抓好的内容**，
     // 这份是**安装方法**——点一下才由 daemon 现去取（走 `POST /api/skills/install`）。
     //
-    // ★ 这条接口**不联网**：只读本地那份 JSON、算 slug（`skill-list.ts`），不抓 GitHub。
+    // ★ 这条接口**不联网**：只读本地那份 JSON、算 name（`skill-list.ts`），不抓 GitHub。
     //   真正的下载发生在使用者点「安装」之后，由 install 那条路负责（那才是刻意例外）。
     //
     // ⚠️ 清单本身坏掉时**明确报错**（抛 ⇒ 全局 500），而不是回一张空表——"我以为
@@ -7332,7 +7320,7 @@ async function injectedSkillsOf(
     // 候选目录是**内置表**，只给路径与 id：显示名在界面词表里（`skills.dirTool*`）
     // ——daemon 的字符串不翻译，把中文写在这里等于让这个功能只有一种语言。
     if (req.method === 'GET' && path === '/api/skills/local-dirs') {
-      const installed = new Set((await store.listSkills(workspaceId)).map((s) => s.slug))
+      const installed = new Set((await store.listSkills(workspaceId)).map((s) => s.name))
       const candidates = (options.skillDirCandidates ?? localSkillDirCandidates)()
       const dirs = []
       for (const candidate of candidates) {
@@ -7344,20 +7332,19 @@ async function injectedSkillsOf(
         //   坏了——真正的原因（"那个没有 SKILL.md，所以它不是技能"）一个字都没说。
         const skipped = [...scan.skipped]
         for (const found of scan.found) {
-          // ★ 每个发现的技能都走**安装同一条解析**（`resolveLocalPath`）来拿 slug 与
-          //   description——不能在这儿自己算一遍 slug：那样"扫描显示的 slug"和
-          //   "装进来后的 slug"就各有一处规则，迟早分叉（界面显示装 A，库里出现 B）。
+          // ★ 每个发现的技能都走**安装同一条解析**（`resolveLocalPath`）来拿 name 与
+          //   description——不能在这儿自己算一遍 name：那样"扫描显示的 name"和
+          //   "装进来后的 name"就各有一处规则，迟早分叉（界面显示装 A，库里出现 B）。
           try {
             const resolved = await resolveLocalPath(found.dir)
             skills.push({
-              slug: resolved.slug,
+              name: resolved.name,
               // 相对根目录的路径（`.system/skill-creator` 这种）——界面按它分组
               rel: found.rel,
               dir: found.dir,
-              name: found.name,
               description: extractSkillMeta(resolved.body).description ?? null,
-              // 库里已经有同 slug 的 ⇒ 界面显示「已安装」并禁用按钮
-              installed: installed.has(resolved.slug),
+              // 库里已经有同 name 的 ⇒ 界面显示「已安装」并禁用按钮
+              installed: installed.has(resolved.name),
             })
           } catch (err) {
             // 解析不了 ⇒ 如实说出来（"看到了但装不了"），不静默略过
@@ -7393,7 +7380,7 @@ async function injectedSkillsOf(
     //    （FR-AGENT-10）这条保证在数据上就无从判断，因为根本分不清谁是谁。
     //
     // **② 它没有任何同名处理。** `insertSkill` 是按 **id** 写入的，所以
-    //    两个 slug 相同、id 不同的 skill 会**同时存在**——同名冲突不是
+    //    两个 name 相同、id 不同的 skill 会**同时存在**——同名冲突不是
     //    "被覆盖"，而是"悄悄多出一条"，而 `loadAgentSkills` 只会取到其中
     //    一条。哪种结果都不对，且都没有提示。
     //
@@ -7417,7 +7404,7 @@ async function injectedSkillsOf(
       const outcome = await installSkillPayloads({
         store,
         workspaceId,
-        payloads: raw.skills.map((entry) => entry as Partial<Skill> & { slug?: string }),
+        payloads: raw.skills.map((entry) => entry as Partial<Skill> & { name?: string }),
         overwrite: raw.overwrite === true,
         now: Date.now(),
       })
@@ -7520,7 +7507,7 @@ async function injectedSkillsOf(
       await store.insertAgent(updated)
       sendJson(res, 200, {
         agent: updated,
-        adopted: { fromSkills: mounted.map((s) => s.slug) },
+        adopted: { fromSkills: mounted.map((s) => s.name) },
       })
       return
     }
@@ -7554,12 +7541,12 @@ async function injectedSkillsOf(
       if (skill.source !== 'mine') {
         sendJson(res, 200, {
           available: false,
-          reason: `「${skill.slug}」是安装来的技能（外部内容，重新装就行）——只有「我提炼的」才有 git 历史`,
+          reason: `「${skill.name}」是安装来的技能（外部内容，重新装就行）——只有「我提炼的」才有 git 历史`,
         })
         return
       }
       if (sub === 'history') {
-        sendJson(res, 200, await listMineHistory(skillsMineRoot, skill.slug))
+        sendJson(res, 200, await listMineHistory(skillsMineRoot, skill.name))
         return
       }
       const currentFiles: Record<string, string> = {
@@ -7578,7 +7565,7 @@ async function injectedSkillsOf(
           sendJson(res, 200, { available: true, rev: 'current', files: currentFiles })
           return
         }
-        sendJson(res, 200, await readMineRevision(skillsMineRoot, skill.slug, rev))
+        sendJson(res, 200, await readMineRevision(skillsMineRoot, skill.name, rev))
         return
       }
       // compare
@@ -7596,7 +7583,7 @@ async function injectedSkillsOf(
       sendJson(
         res,
         200,
-        await compareMineRevisions(skillsMineRoot, skill.slug, side(fromRaw), side(toRaw)),
+        await compareMineRevisions(skillsMineRoot, skill.name, side(fromRaw), side(toRaw)),
       )
       return
     }
@@ -7625,8 +7612,8 @@ async function injectedSkillsOf(
        *    要提前摘挂；生成者的分支整个删掉（上一版那个"允许卸载、下次启动再装回来"
        *    的特殊处理被统一机制取代了）。
        */
-      const platformMountSlugs = [DRAFTER_SKILL_SLUG]
-      if (platformMountSlugs.includes(skill.slug)) {
+      const platformMountNames = [DRAFTER_SKILL_SLUG]
+      if (platformMountNames.includes(skill.name)) {
         /*
          * ⚠️ 2026-11（S4）：这里原来按 `a.role === 'drafter'` 认"平台替你挂的那条"。
          * ★ 2026-11（D154）：再换成**查槽位表**——"我那条起草者"只在表里说。
@@ -7657,7 +7644,7 @@ async function injectedSkillsOf(
         const names = holders.map((a) => a.name).join('、')
         sendJson(res, 400, {
           error:
-            `还有 ${holders.length} 个智能体挂着「${skill.slug}」：${names}。` +
+            `还有 ${holders.length} 个智能体挂着「${skill.name}」：${names}。` +
             (needsAdopt.length > 0
               ? `其中「${needsAdopt.map((a) => a.name).join('、')}」还没有自己的判断依据` +
                 `——它现在正拿这条 skill 当标准。去智能体页点开它，按「把这份判断依据 ` +
@@ -7672,14 +7659,14 @@ async function injectedSkillsOf(
       // ★ 分批第 207 批：卸了技能 ⇒ 对齐起草者的挂载（卸掉的是 distilly 就摘下来，
       //   然后"装好之前不能沉淀"这条门槛会重新亮起来）
       await syncDrafterSkillMount(store, workspaceId)
-      sendJson(res, 200, { removed, slug: skill.slug })
+      sendJson(res, 200, { removed, name: skill.name })
       return
     }
 
     if (req.method === 'POST' && path === '/api/skills/install') {
       const raw = (await readJsonBody(req)) as {
         source?: unknown
-        slug?: unknown
+        name?: unknown
         overwrite?: unknown
         /**
          * ⚠️ **老契约的字段，不再读**（D40 收口）。
@@ -7699,13 +7686,13 @@ async function injectedSkillsOf(
         return
       }
 
-      let slugOverride: string | null = null
-      if (raw.slug !== undefined && raw.slug !== null && raw.slug !== '') {
-        if (typeof raw.slug !== 'string') {
-          sendJson(res, 400, { error: 'slug 必须是字符串' })
+      let nameOverride: string | null = null
+      if (raw.name !== undefined && raw.name !== null && raw.name !== '') {
+        if (typeof raw.name !== 'string') {
+          sendJson(res, 400, { error: 'name 必须是字符串' })
           return
         }
-        slugOverride = raw.slug.trim()
+        nameOverride = raw.name.trim()
       }
 
       // ★ 整段（解析 + 参数校验 + 入库）都归同一个 catch 管。
@@ -7726,7 +7713,7 @@ async function injectedSkillsOf(
       try {
         resolved = await resolveSkillSource(
           source.spec,
-          { slug: slugOverride },
+          { name: nameOverride },
           {
             ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
             githubToken: options.githubToken ?? process.env['AGENTDECK_GITHUB_TOKEN'] ?? null,
@@ -7746,8 +7733,7 @@ async function injectedSkillsOf(
           workspaceId,
           payloads: [
             {
-              slug: resolved.slug,
-              name: resolved.slug,
+              name: resolved.name,
               // ★ 作者在 SKILL.md frontmatter 里写的 description 要落库，
               //   否则列表里永远是"没有说明"（与本地目录扫描同一做法）。
               description: extractSkillMeta(resolved.body).description ?? null,
@@ -7762,7 +7748,7 @@ async function injectedSkillsOf(
               //    老客户端传进来的那个字段被忽略（不是"装错了"，只是那一项不再
               //    属于 skill），所以它连写库都不该被带上——`Skill` 实体上已经没有
               //    这个字段了。
-            } as Partial<Skill> & { slug: string },
+            } as Partial<Skill> & { name: string },
           ],
           overwrite: raw.overwrite === true,
           now: Date.now(),
@@ -8290,7 +8276,7 @@ async function injectedSkillsOf(
     // ════════════════════════════════════════════════════════════════════
     //
     // 岗位卡（agent-draft.md）是**智能体生成者在聊天里写的产物**，这两条路由只负责
-    // "读出来给人审"与"确认生成"。配套技能草稿（skill/<slug>/SKILL.md）在确认时
+    // "读出来给人审"与"确认生成"。配套技能草稿（skill/<name>/SKILL.md）在确认时
     // 与智能体一起落库（先技能后智能体，skillIds 指向已存在的技能）。
     const agentDraftMatch = /^\/api\/conversations\/([^/]+)\/agent-draft$/.exec(path)
 
@@ -8513,26 +8499,26 @@ async function injectedSkillsOf(
        *   **角色退场** ⇒ 没有角色可校验（`parseAgentDraft` 也不再问它）。
        */
 
-      // ── 配套技能：人审过的最终版（slug + SKILL.md 正文）。每一条与安装/沉淀
+      // ── 配套技能：人审过的最终版（name + SKILL.md 正文）。每一条与安装/沉淀
       //    同一关（`resolvePayloadEntry`）。
       //
       // ★ 2026-11（使用者拍板："生成的 SKILL 被放进了共享技能池，应该作为智能体的
       //    内置技能"）：配套技能是**这个新智能体自己的**——落成它的**独有技能**
-      //    （`agents/<id>/skills/<slug>/SKILL.md`），**不进共享技能池**（skills-mine、
+      //    （`agents/<id>/skills/<name>/SKILL.md`），**不进共享技能池**（skills-mine、
       //    无 git）。配套技能给这个岗位用，就是 D111"智能体自己的东西住进它的目录"
       //    的同一句语义；共享沉淀（mine）是使用者主动提炼的动作，生成流程不替
       //    使用者往共享池写。独有技能随智能体删除而删除（文件资产语义）。
       const rawSkills = Array.isArray(body?.skills) ? body.skills : []
       const now = Date.now()
       // 先校验全部配套技能（质量关在写之前），收集落盘清单
-      const exclusiveSkills: Array<{ slug: string; body: string }> = []
+      const exclusiveSkills: Array<{ name: string; body: string }> = []
       for (const raw of rawSkills) {
         const item = raw as Record<string, unknown> | null
-        const slug = typeof item?.['slug'] === 'string' ? item['slug'].trim() : ''
+        const name = typeof item?.['name'] === 'string' ? item['name'].trim() : ''
         const skillBody = typeof item?.['body'] === 'string' ? item['body'] : ''
-        if (slug === '' || skillBody.trim() === '') {
+        if (name === '' || skillBody.trim() === '') {
           sendJson(res, 400, {
-            error: `配套技能「${slug || '(缺 slug)'}」缺 slug 或 SKILL.md 正文`,
+            error: `配套技能「${name || '(缺 name)'}」缺 name 或 SKILL.md 正文`,
             code: 'agent_skill_invalid',
           })
           return
@@ -8540,18 +8526,18 @@ async function injectedSkillsOf(
         let validated
         try {
           validated = resolvePayloadEntry({
-            slug,
+            name,
             body: skillBody,
-            sourceRef: `exclusive:${slug}`,
+            sourceRef: `exclusive:${name}`,
           })
         } catch (err) {
           sendJson(res, 400, {
-            error: `配套技能「${slug}」不合格：${err instanceof Error ? err.message : String(err)}`,
+            error: `配套技能「${name}」不合格：${err instanceof Error ? err.message : String(err)}`,
             code: 'agent_skill_invalid',
           })
           return
         }
-        exclusiveSkills.push({ slug: validated.slug, body: validated.body })
+        exclusiveSkills.push({ name: validated.name, body: validated.body })
       }
 
       // ── 创建智能体（与 POST /api/agents 同一批字段；动作权限不落智能体，属组）──
@@ -8574,7 +8560,7 @@ async function injectedSkillsOf(
       }
       await store.insertAgent(agent)
       for (const s of exclusiveSkills) {
-        await store.writeExclusiveSkill(agentSkillOwner(agent.id), s.slug, s.body)
+        await store.writeExclusiveSkill(agentSkillOwner(agent.id), s.name, s.body)
       }
       info(
         `生成智能体「${agent.name}」（内置配套技能 ${exclusiveSkills.length} 条）` +
@@ -8582,7 +8568,7 @@ async function injectedSkillsOf(
       )
       sendJson(res, 201, {
         agent,
-        exclusiveSlugs: exclusiveSkills.map((s) => s.slug),
+        exclusiveNames: exclusiveSkills.map((s) => s.name),
       })
       return
     }
@@ -10180,15 +10166,15 @@ async function loadAgentSkills(store: Store, agent: Agent): Promise<Skill[]> {
     const skill = byId.get(id as string)
     return skill ? [skill] : []
   })
-  // ★ 同 slug 遮蔽（D80，设计 §1.1）：提炼的（mine）优先于安装的。
-  //   使用者挂的是安装版的 id，但库里已有他提炼的同 slug 版本——注入的是
+  // ★ 同 name 遮蔽（D80，设计 §1.1）：提炼的（mine）优先于安装的。
+  //   使用者挂的是安装版的 id，但库里已有他提炼的同 name 版本——注入的是
   //   提炼版（那是他的资产；安装版被遮蔽，列表里标注）。
-  const mineBySlug = new Map(
-    all.filter((s) => s.source === 'mine').map((s) => [s.slug, s]),
+  const mineByName = new Map(
+    all.filter((s) => s.source === 'mine').map((s) => [s.name, s]),
   )
   return resolved.map((skill) => {
     if (skill.source === 'mine') return skill
-    const mine = mineBySlug.get(skill.slug)
+    const mine = mineByName.get(skill.name)
     return mine ?? skill
   })
 }

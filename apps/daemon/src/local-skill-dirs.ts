@@ -24,7 +24,7 @@ import type { Skill } from '@agentdeck/protocol'
  * ⚠️ 这里曾经是"自动对账读入"（`reconcileLocalSkillDirs`）：勾一个目录，
  *   每次读技能列表都把里面的技能自动读进库、并让库跟着磁盘走。撤掉的代价是
  *   "源目录改了不会自动生效"——换来的是**模型统一**：装进来的技能正文一律落在
- *   `~/.agentdeck/skills/<slug>/`（磁盘为准），和其它来源**一模一样**，不再有
+ *   `~/.agentdeck/skills/<name>/`（磁盘为准），和其它来源**一模一样**，不再有
  *   "内容藏在记录里"的特例（那正是 `FileStore` 一度要开 `externalContentPrefixes`
  *   口子的原因）。
  *
@@ -49,9 +49,9 @@ const SKIP_DIRS = new Set(['.git', 'node_modules', '.github', '__pycache__', '.v
  * 一个目录往下找几层。
  *
  * ⚠️ 这一层是**必须的**，不是保险：`~/.codex/skills` 底下不是
- * `<slug>/SKILL.md`，而是 `.system/<slug>/SKILL.md`（实测）。claude 与 cursor
- * 是扁平的 `<slug>/SKILL.md`。所以按"往下找 SKILL.md、用**它所在目录**的名字
- * 当 slug"来做，两种形状一起认。
+ * `<name>/SKILL.md`，而是 `.system/<name>/SKILL.md`（实测）。claude 与 cursor
+ * 是扁平的 `<name>/SKILL.md`。所以按"往下找 SKILL.md、用**它所在目录**的名字
+ * 当 name"来做，两种形状一起认。
  *
  * 再深就不认了：技能目录里也能有子目录（`references/`、`scripts/`），
  * 无限往下找会把技能**内部**的文件当成一个技能。
@@ -91,7 +91,7 @@ export function localSkillDirCandidates(home: string = homedir()): LocalSkillDir
 export interface ScannedSkillDir {
   /** 技能目录的绝对路径。 */
   dir: string
-  /** 目录名（`resolveLocalPath` 会据此派生 slug，这里只用于报告）。 */
+  /** 目录名（`resolveLocalPath` 会据此派生 name，这里只用于报告）。 */
   name: string
   /** 相对被扫描的那个根目录的路径（`.system/skill-creator` 这种）。 */
   rel: string
@@ -134,7 +134,7 @@ export async function scanSkillDir(root: string, maxDepth = MAX_DEPTH): Promise<
   /**
    * `depth` = 相对根目录**往下第几层**（根目录的直接子目录是第 1 层）。
    *
-   * ⚠️ 这个"第几层"的定义决定 `.system/<slug>` 认不认得出——根目录是 0 层，
+   * ⚠️ 这个"第几层"的定义决定 `.system/<name>` 认不认得出——根目录是 0 层，
    *    `.system` 是 1 层，`.system/skill-creator` 是 2 层。所以上限必须是
    *    "能走到第 2 层"，写成 `depth + 1 >= maxDepth` 那种写法会把它切掉
    *    （本模块的第一版就是这么错的，测试当场抓住）。

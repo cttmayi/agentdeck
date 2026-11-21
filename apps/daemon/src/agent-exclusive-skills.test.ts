@@ -4,7 +4,7 @@ import { startDaemon } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
- * 智能体的**独有技能** API（2026-11，D111）——`agents/<id>/skills/<slug>/SKILL.md`
+ * 智能体的**独有技能** API（2026-11，D111）——`agents/<id>/skills/<name>/SKILL.md`
  * 文件资产。与技能库两码事：不进技能页、不可卸载、删智能体连目录一起删。
  *
  * ══════════════════════════════════════════════════════════════════
@@ -57,8 +57,8 @@ async function createAgent(url: string): Promise<string> {
   return body.id
 }
 
-function goodBody(slug: string): string {
-  return `---\nname: ${slug} 的名字\ndescription: 一段说明\n---\n## When to Use\n什么时候用\n## Procedure\n怎么做。`
+function goodBody(name: string): string {
+  return `---\nname: ${name} 的名字\ndescription: 一段说明\n---\n## When to Use\n什么时候用\n## Procedure\n怎么做。`
 }
 
 describe('★ 独有技能 API（D111）', () => {
@@ -77,11 +77,10 @@ describe('★ 独有技能 API（D111）', () => {
       // 列表
       const list = await fetch(`${url}/api/agents/${agentId}/skills`)
       const { skills } = (await list.json()) as {
-        skills: Array<{ slug: string; name: string; description?: string; body: string }>
+        skills: Array<{ name: string; description?: string; body: string }>
       }
       assert.equal(skills.length, 1)
-      assert.equal(skills[0]!.slug, 'private-notes')
-      assert.equal(skills[0]!.name, 'private-notes 的名字')
+      assert.equal(skills[0]!.name, 'private-notes', 'D236：名字只有一个（= 目录名）')
       assert.equal(skills[0]!.description, '一段说明')
       assert.ok(skills[0]!.body.includes('## When to Use'))
 
@@ -93,7 +92,7 @@ describe('★ 独有技能 API（D111）', () => {
       })
       assert.equal(put2.status, 200)
       const list2 = (await (await fetch(`${url}/api/agents/${agentId}/skills`)).json()) as {
-        skills: Array<{ slug: string; body: string }>
+        skills: Array<{ name: string; body: string }>
       }
       assert.equal(list2.skills[0]!.body, '# 新版\n\n新正文。')
 
@@ -109,7 +108,7 @@ describe('★ 独有技能 API（D111）', () => {
     })
   })
 
-  test('★★ 校验与安装接口同一关：坏 slug / 空正文 / 没有 frontmatter 全部 400', async () => {
+  test('★★ 校验与安装接口同一关：坏 name / 空正文 / 没有 frontmatter 全部 400', async () => {
     await withDaemon(async (url) => {
       const agentId = await createAgent(url)
       const put = async (body: unknown) =>
@@ -122,23 +121,23 @@ describe('★ 独有技能 API（D111）', () => {
       // 空正文
       assert.equal((await put({ body: '' })).status, 400)
       assert.equal((await put({ body: '   ' })).status, 400)
-      // 没有 frontmatter 也**收**（那关只要求"有 SKILL.md 的内容"；名字回退到 slug）
+      // 没有 frontmatter 也**收**（那关只要求"有 SKILL.md 的内容"；名字回退到 name）
       const noFrontmatter = await put({ body: '# 没有头\n\n只有正文。' })
       assert.equal(noFrontmatter.status, 200)
       // 超过 SKILL.md 上限（256 KB）⇒ 400（同一份限额）
       const oversized = await put({ body: 'x'.repeat(300 * 1024) })
       assert.equal(oversized.status, 400)
-      // 坏 slug：路由会匹配（[^/]+），但 resolvePayloadEntry 那关按 slug 规则拒绝
-      const badSlug = await fetch(`${url}/api/agents/${agentId}/skills/UPPER_CASE`, {
+      // 坏 name：路由会匹配（[^/]+），但 resolvePayloadEntry 那关按 name 规则拒绝
+      const badName = await fetch(`${url}/api/agents/${agentId}/skills/UPPER_CASE`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ body: goodBody('x') }),
       })
-      assert.equal(badSlug.status, 400)
+      assert.equal(badName.status, 400)
       assert.match(
-        String(((await badSlug.json()) as { error: string }).error),
-        /slug/,
-        '要说出是 slug 不对',
+        String(((await badName.json()) as { error: string }).error),
+        /name/,
+        '要说出是 name 不对',
       )
       // 不存在的 agent ⇒ 404
       const noAgent = await fetch(`${url}/api/agents/not-there/skills/x`, {
@@ -172,10 +171,10 @@ describe('★ 独有技能 API（D111）', () => {
       // 生成者播种的 3 条独有技能在列表里（GET 只读，仍可见）
       const maker = agents.agents.find((a) => a.slot === 'agent-maker')!
       const list = (await (await fetch(`${url}/api/agents/${maker.id}/skills`)).json()) as {
-        skills: Array<{ slug: string }>
+        skills: Array<{ name: string }>
       }
-      const slugs = list.skills.map((s) => s.slug).sort()
-      assert.deepEqual(slugs, ['agent-design-norms', 'boundary-checklist', 'skill-eligibility'])
+      const names = list.skills.map((s) => s.name).sort()
+      assert.deepEqual(names, ['agent-design-norms', 'boundary-checklist', 'skill-eligibility'])
     })
   })
 
@@ -188,7 +187,7 @@ describe('★ 独有技能 API（D111）', () => {
         body: JSON.stringify({ body: goodBody('private-notes') }),
       })
       const all = (await (await fetch(`${url}/api/skills`)).json()) as {
-        skills: Array<{ slug: string }>
+        skills: Array<{ name: string }>
       }
       assert.deepEqual(all.skills, [], '独有技能不该出现在技能页（技能页 = 技能库）')
     })

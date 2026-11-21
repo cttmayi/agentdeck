@@ -47,7 +47,7 @@ after(async () => {
 describe('基本 CRUD 与持久化', () => {
   test('写入 agent / skill / issue 后可读回', async () => {
     const agent = makeAgent({ id: 'a1', workspaceId: WS, skillIds: [makeSkill({ id: 's1' }).id] })
-    const skill = makeSkill({ id: 's1', workspaceId: WS, slug: 'sec-vuln' })
+    const skill = makeSkill({ id: 's1', workspaceId: WS, name: 'sec-vuln' })
     const issue = makeIssue({ id: 'i1', workspaceId: WS, title: '改一下' })
 
     await store.insertAgent(agent)
@@ -55,7 +55,7 @@ describe('基本 CRUD 与持久化', () => {
     await store.insertIssue(issue)
 
     assert.equal((await store.getAgentById(agentId('a1')))?.id, 'a1')
-    assert.equal((await store.getSkill(skill.id))?.slug, 'sec-vuln')
+    assert.equal((await store.getSkill(skill.id))?.name, 'sec-vuln')
     assert.equal((await store.getIssue(issue.id))?.title, '改一下')
   })
 
@@ -199,13 +199,13 @@ describe('基本 CRUD 与持久化', () => {
  *
  * 与 skill 是同一套形状（装进来、列出来、按 id 批量取、卸载），所以用例也
  * 逐条对齐；不同的只有两条**工具特有的语义**，都单独钉住了：
- *   · slug 只在**一个 workspace 内**唯一 ⇒ 同名 slug 跨工作区各有一份是合法的；
+ *   · name 只在**一个 workspace 内**唯一 ⇒ 同名 name 跨工作区各有一份是合法的；
  *   · 包内文件与清单**就在记录里**（`files` / `manifest`），所以"重开后还在"
- *     必须连它们一起验，否则会漏掉"只把 id 与 slug 存对了"这种半截持久化。
+ *     必须连它们一起验，否则会漏掉"只把 id 与 name 存对了"这种半截持久化。
  */
 /*
  * ⚠️ 2026-11（D123）：这里原来整块是「工具包（D40）：CRUD 与卸载」——insertTool /
- *   getTool / listTools / listToolsByIds / getToolBySlug / deleteTool 六条端口在两个
+ *   getTool / listTools / listToolsByIds / getToolByName / deleteTool 六条端口在两个
  *   适配器上的行为（同名取一条、跨 workspace、卸载一律放行……）。
  *   工具包随动作能力退场，端口删了，这组用例没有对象，整块删。
  */
@@ -343,7 +343,7 @@ describe('★ D227：日志回收（compact 终于有调用点）与迁移留档
       })
       // 同一个 id 写 250 版：`pendingOps` 250，远大于 max(200, 3×1)
       for (let i = 0; i < 250; i += 1) {
-        await a.insertSkill(makeSkill({ id: 's1', workspaceId: WS, slug: 'bloat', name: `v${i}` }))
+        await a.insertSkill(makeSkill({ id: 's1', workspaceId: WS, name: 'bloat' }))
       }
       await a.close()
 
@@ -354,7 +354,7 @@ describe('★ D227：日志回收（compact 终于有调用点）与迁移留档
         `开库应当压缩 skill 日志，实际日志：${logs.join(' / ')}`,
       )
       // 物化之后：状态还在（最后一版），快照文件在
-      assert.equal((await b.getSkill(skillId('s1')))?.name, 'v249')
+      assert.equal((await b.getSkill(skillId('s1')))?.name, 'bloat')
       await access(join(d, 'workspaces', String(WS), 'log', 'skill.jsonl.snapshot'))
       await b.close()
     } finally {
@@ -371,7 +371,7 @@ describe('★ D227：日志回收（compact 终于有调用点）与迁移留档
         defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1,
       })
       for (let i = 0; i < 250; i += 1) {
-        await a.insertSkill(makeSkill({ id: 's1', workspaceId: WS, slug: 'bloat', name: `v${i}` }))
+        await a.insertSkill(makeSkill({ id: 's1', workspaceId: WS, name: 'bloat' }))
       }
       /*
        * ⚠️ 这一步是这条判据的关键：自动压缩只在**开库时**跑，而现在这个 store 还活着
@@ -385,9 +385,9 @@ describe('★ D227：日志回收（compact 终于有调用点）与迁移留档
       assert.equal(report[0]!.after, 0, '增量日志被丢弃')
       assert.equal(report[0]!.records, 1, '快照里是 1 条现存记录')
       // 压完还能读能写（句柄自动重建）
-      assert.equal((await a.getSkill(skillId('s1')))?.name, 'v249')
-      await a.insertSkill(makeSkill({ id: 's2', workspaceId: WS, slug: 'after', name: '压后新增' }))
-      assert.equal((await a.getSkill(skillId('s2')))?.name, '压后新增')
+      assert.equal((await a.getSkill(skillId('s1')))?.name, 'bloat')
+      await a.insertSkill(makeSkill({ id: 's2', workspaceId: WS, name: 'after' }))
+      assert.equal((await a.getSkill(skillId('s2')))?.name, 'after')
       // 再按一次：没有可压的了（幂等）
       assert.deepEqual(await a.compactNow(), [])
       await a.close()
@@ -425,7 +425,7 @@ describe('★ D227：日志回收（compact 终于有调用点）与迁移留档
   })
 })
 
-describe('★ D231：目录名 = 名字的 slug（id 仍是身份）', () => {
+describe('★ D231：目录名 = 名字的 name（id 仍是身份）', () => {
   test('★★ 建目录按名字；`getAgentById` 走索引仍然取得到；改名字不改 id', async () => {
     const d = await makeTempDir('agent-dir-name')
     try {
@@ -699,8 +699,7 @@ describe('★ D230：迁移账本（`migrations.json`）——判据贵的迁移
           value: {
             id: 'late-legacy',
             workspaceId: String(WS),
-            slug: 'late-legacy',
-            name: '迟到的老技能',
+            name: 'late-legacy',
             description: '',
             body: '# 迟到的老技能\n',
             source: 'local',
@@ -1063,7 +1062,7 @@ describe('审计链（FR-AUDIT-01）', () => {
         runId: rid,
         subject: { type: 'issue', id: 'i1' },
         inputBlobRefs: [],
-        skillRefs: [{ id: makeSkill({ id: 's1' }).id, slug: 'sec-vuln', source: 'local' }],
+        skillRefs: [{ id: makeSkill({ id: 's1' }).id, name: 'sec-vuln', source: 'local' }],
         runtimeDescriptorKey: 'claude',
         cliVersion: '2.1.220',
         modelId: 'claude-sonnet-4-5',
@@ -1084,7 +1083,7 @@ describe('审计链（FR-AUDIT-01）', () => {
 
       const audits = await s.listAuditsByRun(rid)
       assert.equal(audits.length, 1)
-      assert.equal(audits[0]?.skillRefs[0]?.slug, 'sec-vuln')
+      assert.equal(audits[0]?.skillRefs[0]?.name, 'sec-vuln')
       // 成本用整数微美元，避免浮点漂移
       assert.equal(audits[0]?.usage?.costUsdMicros, 1234)
       await s.close()
@@ -1420,7 +1419,7 @@ describe('deleteIssue：删掉一条任务连同挂它名下的一切', () => {
 // 技能内容落盘（2026-10）
 // ══════════════════════════════════════════════════════════════════
 //
-// 改动的要点：技能正文 + 支持文件**存成真文件**放在 `<skillsRoot>/<slug>/`，
+// 改动的要点：技能正文 + 支持文件**存成真文件**放在 `<skillsRoot>/<name>/`，
 // `skill.jsonl` 退化成索引（只留元数据）。**磁盘为准**——改文件就生效。
 // ⚠️ **没有例外**（2026-10）：`localdir:` 那类也一律落盘（那条例外已随"本地技能
 //    目录改成显式安装"撤掉，见 D73）。
@@ -1467,14 +1466,14 @@ describe('技能内容落盘：正文与支持文件存成真文件', () => {
     return rec
   }
 
-  test('★ 装一条 ⇒ 文件真落在 <skillsRoot>/<slug>/，记录里没有 body/files', async () => {
+  test('★ 装一条 ⇒ 文件真落在 <skillsRoot>/<name>/，记录里没有 body/files', async () => {
     const { d, s } = await openStore()
     try {
       await s.insertSkill(
         makeSkill({
           id: 'sk1',
           workspaceId: WS2,
-          slug: 'pptx',
+          name: 'pptx',
           body: '# 幻灯片\n正文',
           files: { 'ref/note.md': '支持文件' },
         }),
@@ -1486,7 +1485,7 @@ describe('技能内容落盘：正文与支持文件存成真文件', () => {
       const rec = await rawRecord(d, 'sk1')
       assert.equal(rec['body'], undefined, '索引记录不该留正文')
       assert.equal(rec['files'], undefined, '索引记录不该留支持文件')
-      assert.equal(rec['slug'], 'pptx', '元数据仍在记录里')
+      assert.equal(rec['name'], 'pptx', '元数据仍在记录里')
     } finally {
       await s.close()
       await cleanup(d)
@@ -1499,7 +1498,7 @@ describe('技能内容落盘：正文与支持文件存成真文件', () => {
       const skill = makeSkill({
         id: 'sk2',
         workspaceId: WS2,
-        slug: 'research',
+        name: 'research',
         body: '正文A',
         files: { 'a.md': 'x' },
       })
@@ -1521,7 +1520,7 @@ describe('技能内容落盘：正文与支持文件存成真文件', () => {
   test('★★ 磁盘为准：手改 SKILL.md ⇒ 再读回来是改后的内容', async () => {
     const { d, s } = await openStore()
     try {
-      const skill = makeSkill({ id: 'sk3', workspaceId: WS2, slug: 'editme', body: '旧内容' })
+      const skill = makeSkill({ id: 'sk3', workspaceId: WS2, name: 'editme', body: '旧内容' })
       await s.insertSkill(skill)
       // 直接改盘上的文件——这正是"使用者改技能"的路径
       await writeFile(join(d, 'skills', 'editme', 'SKILL.md'), '新内容', 'utf8')
@@ -1535,7 +1534,7 @@ describe('技能内容落盘：正文与支持文件存成真文件', () => {
   test('卸载 ⇒ 记录与目录都没了', async () => {
     const { d, s } = await openStore()
     try {
-      const skill = makeSkill({ id: 'sk4', workspaceId: WS2, slug: 'gone', body: 'x' })
+      const skill = makeSkill({ id: 'sk4', workspaceId: WS2, name: 'gone', body: 'x' })
       await s.insertSkill(skill)
       assert.ok(await exists(join(d, 'skills', 'gone')))
 
@@ -1566,7 +1565,7 @@ describe('技能内容落盘：正文与支持文件存成真文件', () => {
       await a.close()
 
       // 直接写一条**老式**记录（正文藏在记录里、盘上没有目录）——模拟升级前的数据
-      const old = makeSkill({ id: 'sk-old', workspaceId: WS2, slug: 'legacy', body: '# 老正文' })
+      const old = makeSkill({ id: 'sk-old', workspaceId: WS2, name: 'legacy', body: '# 老正文' })
       await mkdir(dirname(skillLogPath(d)), { recursive: true })
       await writeFile(
         skillLogPath(d),
@@ -1619,7 +1618,7 @@ describe('技能内容落盘：正文与支持文件存成真文件', () => {
       const old = makeSkill({
         id: 'sk-l',
         workspaceId: WS2,
-        slug: 'local-one',
+        name: 'local-one',
         source: 'local',
         sourceRef: 'localdir:/home/u/.claude/skills/local-one',
         body: '本地正文',
@@ -1652,7 +1651,7 @@ describe('技能内容落盘：正文与支持文件存成真文件', () => {
   test('手删目录 ⇒ 读回正文空（由注入侧守卫把它变成响亮失败）', async () => {
     const { d, s } = await openStore()
     try {
-      const skill = makeSkill({ id: 'sk5', workspaceId: WS2, slug: 'deleted', body: 'x' })
+      const skill = makeSkill({ id: 'sk5', workspaceId: WS2, name: 'deleted', body: 'x' })
       await s.insertSkill(skill)
       await rm(join(d, 'skills', 'deleted'), { recursive: true, force: true })
       // 记录还在、内容没了 ⇒ 正文空；不在这里报错（读路径无副作用），
@@ -1671,7 +1670,7 @@ describe('技能内容落盘：正文与支持文件存成真文件', () => {
 //
 // 设计定稿（`docs/design/skill-crystallization.md` §1.1）：
 // "不应该把安装的 skill 和我自己提炼的 skill 混在一起"——提炼的落
-// `<skillsMineRoot>/<slug>/`，读回走同一个根，删除也走同一个根。
+// `<skillsMineRoot>/<name>/`，读回走同一个根，删除也走同一个根。
 // 安装根（`skillsRoot`）不受影响：安装的照旧落那边。
 describe('技能双根（D80）：mine 落提炼根，与安装根分离', () => {
   const WS3 = wsId('ws-mine')
@@ -1701,7 +1700,7 @@ describe('技能双根（D80）：mine 落提炼根，与安装根分离', () =>
         makeSkill({
           id: 'mine1',
           workspaceId: WS3,
-          slug: 'my-review-flow',
+          name: 'my-review-flow',
           body: '# 我的流程\n提炼的正文',
           source: 'mine',
         }),
@@ -1710,7 +1709,7 @@ describe('技能双根（D80）：mine 落提炼根，与安装根分离', () =>
         makeSkill({
           id: 'inst1',
           workspaceId: WS3,
-          slug: 'general-review',
+          name: 'general-review',
           body: '# 通用审核\n安装的正文',
           source: 'remote',
         }),
@@ -1729,15 +1728,15 @@ describe('技能双根（D80）：mine 落提炼根，与安装根分离', () =>
     }
   })
 
-  test('★ 同 slug 两条（mine + 安装）并存：索引按 id、磁盘按来源分流', async () => {
+  test('★ 同 name 两条（mine + 安装）并存：索引按 id、磁盘按来源分流', async () => {
     const { d, s } = await openStore()
     try {
-      // 设计 §1.1：提炼的与安装的可以同 slug 并存（mine 遮蔽安装的）
+      // 设计 §1.1：提炼的与安装的可以同 name 并存（mine 遮蔽安装的）
       await s.insertSkill(
-        makeSkill({ id: 'a', workspaceId: WS3, slug: 'pptx', body: '我的版本', source: 'mine' }),
+        makeSkill({ id: 'a', workspaceId: WS3, name: 'pptx', body: '我的版本', source: 'mine' }),
       )
       await s.insertSkill(
-        makeSkill({ id: 'b', workspaceId: WS3, slug: 'pptx', body: '安装版本', source: 'remote' }),
+        makeSkill({ id: 'b', workspaceId: WS3, name: 'pptx', body: '安装版本', source: 'remote' }),
       )
 
       assert.equal(
@@ -1763,14 +1762,14 @@ describe('技能双根（D80）：mine 落提炼根，与安装根分离', () =>
     }
   })
 
-  test('删除：mine 只删提炼根里的文件，安装根的同 slug 不受影响', async () => {
+  test('删除：mine 只删提炼根里的文件，安装根的同 name 不受影响', async () => {
     const { d, s } = await openStore()
     try {
       await s.insertSkill(
-        makeSkill({ id: 'c', workspaceId: WS3, slug: 'pptx', body: '我的版本', source: 'mine' }),
+        makeSkill({ id: 'c', workspaceId: WS3, name: 'pptx', body: '我的版本', source: 'mine' }),
       )
       await s.insertSkill(
-        makeSkill({ id: 'd', workspaceId: WS3, slug: 'pptx', body: '安装版本', source: 'remote' }),
+        makeSkill({ id: 'd', workspaceId: WS3, name: 'pptx', body: '安装版本', source: 'remote' }),
       )
       assert.equal(await s.deleteSkill(skillId('c')), true)
       // mine 目录被删、安装目录还在
@@ -1782,11 +1781,86 @@ describe('技能双根（D80）：mine 落提炼根，与安装根分离', () =>
       assert.equal(
         await readFile(join(d, 'skills', 'pptx', 'SKILL.md'), 'utf8'),
         '安装版本',
-        '安装的同 slug 原样保留',
+        '安装的同 name 原样保留',
       )
       assert.equal((await s.getSkill(skillId('d')))?.body, '安装版本')
     } finally {
       await s.close()
+      await cleanup(d)
+    }
+  })
+  /*
+   * ★★ D236 的兼容判据：名字那一栏合并了。
+   *
+   * 老 `skill.jsonl` 记录里有两个字段——`slug`（= 目录名）与 `name`（显示标签）。
+   * 现在只有一个 `name`，而它必须是目录名 ⇒ **老记录以 `slug` 为准**（磁盘赢），
+   * 显示标签丢掉。读出来的记录里也不许再留 `slug`（留着就是第二个真相）。
+   */
+  test('★★ 老记录里叫 slug 的名字 ⇒ 读回成 name，且记录里不再留 slug', async () => {
+    const d = await makeTempDir('skill-name-compat')
+    try {
+      const ws = 'ws-c' as never
+      const s = await FileStore.open({ dataDir: d, fsync: false })
+      await s.insertWorkspace({
+        executeTemplate: '', reviewTemplate: '', chatTemplate: '',
+        defaultAgentId: null, locale: 'zh', id: ws, name: 'w', createdAt: 1, updatedAt: 1,
+      })
+      await s.close()
+
+      // 直接往日志里写一条"改之前形状"的记录（正文在磁盘上，索引里只有元数据）
+      const { mkdir, writeFile } = await import('node:fs/promises')
+      await mkdir(join(d, 'skills', 'research'), { recursive: true })
+      await writeFile(join(d, 'skills', 'research', 'SKILL.md'), '# 正文', 'utf8')
+      const legacy = {
+        id: 'sk-legacy',
+        workspaceId: ws,
+        slug: 'research',
+        name: '研究',
+        description: null,
+        verdictSchemaVersion: 1,
+        source: 'local',
+        sourceRef: 'local:research',
+        version: null,
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      await mkdir(join(d, 'workspaces', String(ws), 'log'), { recursive: true })
+      await writeFile(
+        join(d, 'workspaces', String(ws), 'log', 'skill.jsonl'),
+        `${JSON.stringify({ seq: 1, at: 1, op: 'put', id: 'sk-legacy', value: legacy })}\n`,
+        'utf8',
+      )
+
+      const s2 = await FileStore.open({ dataDir: d, fsync: false })
+      const got = await s2.getSkill(skillId('sk-legacy'))
+      assert.ok(got !== null, '老记录要照常读得回来')
+      assert.equal(got.name, 'research', '老记录以 slug 为准——它就是磁盘上的目录名')
+      assert.equal(got.body, '# 正文', '正文照旧从磁盘补齐')
+      const rec = got as unknown as Record<string, unknown>
+      assert.equal('slug' in rec, false, '读出来的记录里不许再留 slug（第二个真相）')
+      await s2.close()
+
+      /*
+       * 名字那一栏彻底缺失时也读得出名字（更老的形状）——直接用 slug。
+       * ⚠️ 顺序要紧：**先写盘、再开库**（库里那份日志是启动时读进内存的，
+       *   开库后再改文件，它看不到）。
+       */
+      await writeFile(
+        join(d, 'workspaces', String(ws), 'log', 'skill.jsonl'),
+        `${JSON.stringify({ seq: 1, at: 1, op: 'put', id: 'sk-legacy', value: legacy })}\n` +
+          `${JSON.stringify({
+            seq: 2,
+            at: 2,
+            op: 'put',
+            id: 'sk-only-slug',
+            value: { ...legacy, id: 'sk-only-slug', name: '' },
+          })}\n`,
+        'utf8',
+      )
+      const s4 = await FileStore.open({ dataDir: d, fsync: false })
+      assert.equal((await s4.getSkill(skillId('sk-only-slug')))?.name, 'research')
+      await s4.close()
+    } finally {
       await cleanup(d)
     }
   })

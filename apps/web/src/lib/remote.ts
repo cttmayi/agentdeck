@@ -131,11 +131,12 @@ export interface PluginInfo {
  *    安静——界面显示"已安装"，跑起来才发现少东西。
  */
 export interface CatalogSkill {
-  slug: string
+  /** 技能名（= 目录名；远端目录里的条目键，D236 起叫 name）。 */
+  name: string
+  /** 推荐清单里那句中文标题（只是措辞，不是身份）。 */
+  title: string
   /** 上游那个目录最近一次提交的短 sha；取不到时是 null。 */
   version: string | null
-  /** 给人看的名字（清单里写的）。 */
-  name?: string
   summary: string
   /** SKILL.md 的正文。 */
   content: string

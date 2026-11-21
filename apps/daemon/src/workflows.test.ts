@@ -274,7 +274,7 @@ test('★★ 内建智能体落成目录：agent.json（不含指令）+ instruc
 
 /*
  * ★★ D235 的回归判据：改之前"找已有目录"是按**名字前缀**猜的
- *    （`readdir(...).find(n => n.startsWith(slug(name)))`），而 `readdir` 顺序不保证。
+ *    （`readdir(...).find(n => n.startsWith(name(name)))`），而 `readdir` 顺序不保证。
  *    于是「甲」和「甲乙」并存时，改甲的名字 / 删甲会**找上甲乙的目录**——
  *    删错人的数据比目录名不对严重得多。现在按 `agent.json` 里的 id 精确匹配。
  */

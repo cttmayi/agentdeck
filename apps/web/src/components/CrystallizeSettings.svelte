@@ -62,10 +62,9 @@
 
   async function reload(): Promise<void> {
     try {
-      const res = await api<{ skills: Array<{ id: string; slug: string; name: string }> }>('/api/skills')
-      const found = res.skills.find((sk) => sk.slug === 'distilly' || sk.slug.startsWith('distilly'))
+      const res = await api<{ skills: Array<{ id: string; name: string }> }>('/api/skills')
+      const found = res.skills.find((sk) => sk.name === 'distilly' || sk.name.startsWith('distilly'))
       draftSkill.id = found?.id ?? ''
-      draftSkill.slug = found?.slug ?? ''
       draftSkill.name = found?.name ?? ''
       draftSkill.error = ''
     } catch (err) {
@@ -115,7 +114,7 @@
     <p class="faint fs-xs">{$t('crystallize.settingsSkillHint')}</p>
     {#if draftSkill.id !== ''}
       <p>
-        {$t('crystallize.draftSkillInstalled', { name: draftSkill.name || draftSkill.slug })}
+        {$t('crystallize.draftSkillInstalled', { name: draftSkill.name || draftSkill.name })}
       </p>
     {:else}
       <div class="notice warn fs-xs">

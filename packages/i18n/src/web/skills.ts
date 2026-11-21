@@ -71,8 +71,8 @@ export const skillsText = {
    * ⚠️ 这里原来直接写着 `slug`（2026-09 改写）：那是我们自己代码里的叫法，界面上
    *    一律说「标识」——它在这一页就是"这条 skill 叫什么名字"。
    */
-  'skills.slugLabel': { zh: '标识（留空则用目录名）', en: 'ID (empty = use the directory name)' },
-  'skills.colSlug': { zh: '技能', en: 'Skill' },
+  'skills.nameLabel': { zh: '名字（留空则用目录名）', en: 'Name (empty = use the directory name)' },
+  'skills.colName': { zh: '技能', en: 'Skill' },
 
   'skills.remoteUnavailable': { zh: '远端不可用：{error}', en: 'Remote unavailable: {error}' },
   'skills.remoteDownBefore': { zh: '远端目录在', en: 'The remote catalog runs in ' },
@@ -184,7 +184,7 @@ export const skillsText = {
     en: ' — they live in the reviewer’s Instructions (Agents page → open that reviewer).',
   },
 
-  'skills.colName': { zh: '名称', en: 'Name' },
+  // ⚠️ 列头「技能」那条在文件更上面（`skills.colName`，D236 前叫 `colSlug`）。
   'skills.colSource': { zh: '来源', en: 'Source' },
   'skills.colFiles': { zh: '文件', en: 'Files' },
   // ⚠️ 这里原来还有一条 `colAllowedActions`（列表里那一列动作）——那一列随

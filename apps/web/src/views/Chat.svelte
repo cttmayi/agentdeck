@@ -389,9 +389,9 @@
    * 不显示的话，使用者以为选的只是能力包，而实际上执行者也可能被一起换了——
    * 这种"没告诉他的替换"是这一页最能骗人的地方。
    */
-  $: activeSkillSlugs = ((activeConversation?.skillIds ?? []) as string[])
-    .map((id) => $skills.find((s) => s.id === id)?.slug)
-    .filter((slug): slug is string => typeof slug === 'string')
+  $: activeSkillNames = ((activeConversation?.skillIds ?? []) as string[])
+    .map((id) => $skills.find((s) => s.id === id)?.name)
+    .filter((name): name is string => typeof name === 'string')
   $: agentOfActive = $agents.find((a) => a.id === activeConversation?.agentId) ?? null
   /**
    * 那个 daemon 认不认「对话的工作目录」那条接口。
@@ -1185,8 +1185,8 @@
             {agentOfActive?.name ?? '—'} ·
             {activeConversation.turnCount === 0
               ? $t('chat.neverUsed')
-              : $t('chat.turnCount', { count: activeConversation.turnCount })}{#if activeSkillSlugs.length > 0}
-              · {activeSkillSlugs.join(' + ')}{/if}
+              : $t('chat.turnCount', { count: activeConversation.turnCount })}{#if activeSkillNames.length > 0}
+              · {activeSkillNames.join(' + ')}{/if}
           </span>
         </div>
         <div class="detail-actions pane-actions">
@@ -1275,9 +1275,9 @@
               {#each skillChoices as choice (choice.value)}
                 <option value={choice.value}>
                   {choice.agentId === ''
-                    ? $t('chat.skillOptionSelf', { skill: choice.skill?.slug ?? '' })
+                    ? $t('chat.skillOptionSelf', { skill: choice.skill?.name ?? '' })
                     : $t('chat.skillOptionOwned', {
-                        skill: choice.skill?.slug ?? '',
+                        skill: choice.skill?.name ?? '',
                         agent: agentNames.get(choice.agentId) ?? '—',
                       })}
                 </option>
@@ -1291,7 +1291,7 @@
         {#if heldBackSkills.length > 0}
           <p class="hint" data-skills-need-restart>
             {$t('chat.skillsNeedRestart', {
-              skills: heldBackSkills.map((s) => s.slug).join(', '),
+              skills: heldBackSkills.map((s) => s.name).join(', '),
             })}
           </p>
         {/if}
@@ -1332,11 +1332,11 @@
             {draftSkillOwned
               ? $t('chat.skillOwner', {
                   agent: agentNames.get(draftPick.agentId) ?? '—',
-                  skill: draftSkill.slug,
+                  skill: draftSkill.name,
                 })
               : $t('chat.skillSelfCarried', {
                   agent: agentNames.get(draftPick.agentId) ?? '—',
-                  skill: draftSkill.slug,
+                  skill: draftSkill.name,
                 })}
           </p>
         {/if}

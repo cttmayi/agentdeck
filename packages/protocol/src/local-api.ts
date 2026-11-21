@@ -35,16 +35,18 @@ import { EpochMs, Issue, CrystallizeTargetRef, SkillRef, SubjectRef, TokenUsage 
 
 /** skill 内容由**页面**取好并内联——daemon 不访问网络。 */
 export const SkillPayload = z.object({
+  /**
+   * 来源与名字。**名字只在这里出现一次**（D236：原来是 `ref.slug` + 顶层
+   * `slug` + 顶层 `name` 三份，三份迟早不一致）。
+   */
   ref: SkillRef,
-  slug: z.string().min(1),
-  name: z.string().min(1),
   /**
    * 一句话说明这个 skill 是干什么的。
    *
    * ★ 它必须写进 `SKILL.md` 的 frontmatter。
    *
    *   CLI 自己扫技能目录时会生成一份**带描述的清单**（progressive disclosure：
-   *   模型看描述决定要不要加载正文），而我们的 context 里只列 slug——所以
+   *   模型看描述决定要不要加载正文），而我们的 context 里只列名字——所以
    *   **描述是 CLI 那份清单唯一的路由信号**。此前这个字段从来没被带到执行侧，
    *   于是写出来的 `SKILL.md` 只有 `name`：技能在 CLI 的清单里没有用途说明，
    *   模型基本不会主动选它。和"文件写下去了但没人读"是同一类失效。

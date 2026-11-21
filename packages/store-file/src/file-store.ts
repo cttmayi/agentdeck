@@ -303,6 +303,26 @@ function toIndexRecord(skill: Skill): Skill {
 }
 
 /**
+ * 技能索引记录的**唯一读闸**（D236；与 `Skill` 那条"一个实体一个真相"同源）。
+ *
+ * 老记录里有两个字段：`slug`（= 目录名）与 `name`（显示标签）。现在只有一个 `name`，
+ * 而**它必须是目录名**——所以老记录一律**以 `slug` 为准**（磁盘上的目录就是它拼出来的），
+ * 那个显示标签直接丢掉。
+ *
+ * ⚠️ 这个方向不能反。第一版写的是"优先 `name`"，实测立刻炸：一条 `slug: research` /
+ *   `name: 研究` 的老记录，读正文时会去 `skills/研究/SKILL.md` 找——目录不存在 ⇒
+ *   正文空 ⇒ 注入侧报"技能正文是空的"。**名字与目录名不一致时，磁盘赢。**
+ */
+function cleanSkillRecord(raw: Skill & { id: string }): Skill {
+  const rec = raw as Skill & { id: string; slug?: unknown }
+  const dirName = typeof rec.slug === 'string' && rec.slug !== '' ? rec.slug : ''
+  const name = dirName !== '' ? dirName : rec.name
+  const { slug: _legacy, ...rest } = rec
+  void _legacy
+  return { ...rest, name } as Skill
+}
+
+/**
  * 这条 run 是否属于某条 issue（顺着 subject 链往上找，最多 3 层）。
  *
  * 判据与 server 侧 `runBelongsToIssue` 同一条：执行 run 的 subject 是 issue，
@@ -1126,9 +1146,10 @@ export class FileStore implements Store {
    * （`agent-core` 的 `writeSkill`）把它变成一次**响亮的失败**，而不是
    * 静默写一个空 `SKILL.md` 出去。
    */
-  async #hydrate(rec: Skill & { id: string }): Promise<Skill> {
+  async #hydrate(raw: Skill & { id: string }): Promise<Skill> {
+    const rec = cleanSkillRecord(raw)
     if (typeof rec.body === 'string' && rec.body !== '') return rec
-    const content = await readSkillContent(this.#rootFor(rec.source), rec.slug)
+    const content = await readSkillContent(this.#rootFor(rec.source), rec.name)
     if (content === null) return { ...rec, body: '' }
     return {
       ...rec,
@@ -1414,36 +1435,36 @@ export class FileStore implements Store {
   //   解析（`agent` 那一种的路径归 `agent-dirs.ts`，`workflow-agent` 的由 daemon 注入）。
   //   四个方法因此对"账号智能体"和"编排内建智能体"是**同一份实现**。
 
-  /** 列出这个来源的独有技能（slug + 正文）。 */
+  /** 列出这个来源的独有技能（名字 + 正文）。 */
   async listExclusiveSkills(
     owner: ExclusiveSkillOwner,
-  ): Promise<Array<{ slug: string; body: string }>> {
+  ): Promise<Array<{ name: string; body: string }>> {
     const dir = await this.#exclusiveSkillsDirOf(owner)
     if (dir === null) return [] // 智能体不存在 ⇒ 没有独有技能（读不该抛）
     return listExclusiveSkillBodiesIn(dir)
   }
 
-  async getExclusiveSkill(owner: ExclusiveSkillOwner, slug: string): Promise<string | null> {
+  async getExclusiveSkill(owner: ExclusiveSkillOwner, name: string): Promise<string | null> {
     const dir = await this.#exclusiveSkillsDirOf(owner)
     if (dir === null) return null
-    return getExclusiveSkillBodyIn(dir, slug)
+    return getExclusiveSkillBodyIn(dir, name)
   }
 
   async writeExclusiveSkill(
     owner: ExclusiveSkillOwner,
-    slug: string,
+    name: string,
     body: string,
   ): Promise<void> {
     const dir = await this.#exclusiveSkillsDirOf(owner)
     // 写要抛：往一个不存在的智能体写技能，只会造出一个没有 agent.json 的孤儿目录
     if (dir === null) throw new Error(`智能体不存在，不能给它写独有技能：${owner.kind === 'agent' ? owner.agentId : owner.workflowId}`)
-    await this.#agentsMutex.run(() => writeExclusiveSkillBodyIn(dir, slug, body))
+    await this.#agentsMutex.run(() => writeExclusiveSkillBodyIn(dir, name, body))
   }
 
-  async removeExclusiveSkill(owner: ExclusiveSkillOwner, slug: string): Promise<boolean> {
+  async removeExclusiveSkill(owner: ExclusiveSkillOwner, name: string): Promise<boolean> {
     const dir = await this.#exclusiveSkillsDirOf(owner)
     if (dir === null) return false
-    return this.#agentsMutex.run(() => removeExclusiveSkillBodyIn(dir, slug))
+    return this.#agentsMutex.run(() => removeExclusiveSkillBodyIn(dir, name))
   }
 
   /*
@@ -1575,7 +1596,7 @@ export class FileStore implements Store {
       const removed = await ws.mutex.run(() => ws.skill().del(id))
       // 记录真删掉了才动磁盘（落点同样按来源分流）
       if (removed) {
-        await removeSkillFiles(this.#rootFor(rec.source), rec.slug)
+        await removeSkillFiles(this.#rootFor(rec.source), cleanSkillRecord(rec as Skill & { id: string }).name)
       }
       return removed
     }

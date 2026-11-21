@@ -106,7 +106,7 @@ import { memoryBlockText, type RankableMemory } from './memory.ts'
 export type MemoryItem = RankableMemory
 
 export interface SkillBrief {
-  slug: string
+  /** 技能名（= 目录名，D236：只有一个名字）。 */
   name: string
   /** 审核标准正文。 */
   body: string
@@ -116,7 +116,7 @@ export interface SkillBrief {
  * 执行者**干活时能用的工具包**（D40 挂载的落点，D42 接线）。
  *
  * 与 skill 的差别：工具不是"CLI 会自己扫的目录"，而是**平台把包放进工作目录、
- * 由模型自己读说明、自己决定怎么调用**。所以 brief 里除了 slug 还要给：
+ * 由模型自己读说明、自己决定怎么调用**。所以 brief 里除了 name 还要给：
  * 说明（它干什么用）与位置（模型要去哪儿读 TOOL.md / 找脚本）。
  *
  * ⚠️⚠️ **现在没有任何调用方会给出非空值**：挂载能力整个撤掉了（`Agent.toolIds`
@@ -128,11 +128,10 @@ export interface SkillBrief {
  * 那段永远不出现。想恢复工具注入见 `apps/daemon/src/executor.ts` 里那段说明。
  */
 export interface ToolBrief {
-  slug: string
   name: string
   /** 包在 `tool.json` 里的 description。 */
   description: string
-  /** 在工作目录里的相对路径（如 `.agentdeck/tools/<slug>`）。 */
+  /** 在工作目录里的相对路径（如 `.agentdeck/tools/<name>`）。 */
   dir: string
 }
 
@@ -475,7 +474,7 @@ export const TEMPLATE_VARIABLES: readonly TemplateVariable[] = [
     kinds: ALL_KINDS,
     multiline: false,
     requiredFor: [],
-    label: '这个 agent 挂载的 skill 的 slug，用「、」连成一行（没有 skill 时是空字符串）',
+    label: '这个 agent 挂载的 skill 的 name，用「、」连成一行（没有 skill 时是空字符串）',
   },
   /*
    * ⚠️ 2026-11（D125）：这里原来还有四个只给审核用的变量——`reportKind`（被审/上报的
@@ -857,7 +856,7 @@ function instructionsValue(instructions: string | null | undefined): string {
 }
 
 /**
- * `{{skills}}`：slug 用「、」连成一行（D35）。
+ * `{{skills}}`：name 用「、」连成一行（D35）。
  *
  * 以前它自带一行"能用到的技能："提示——那是**标签**，现在归模版。
  * 没挂 skill 时是空字符串，模版用 `{{#skills}}…{{/skills}}` 决定"有才出现"。
@@ -865,7 +864,7 @@ function instructionsValue(instructions: string | null | undefined): string {
 function skillsValue(skills: readonly SkillBrief[]): string {
   // ★ 只列名字：技能正文已经写在 CLI 原生会扫的目录里，命令它去读正文等于把
   //   同一份内容买两遍。而**清单本身**要留：那是唯一一份平台能控制的技能清单。
-  return skills.map((s) => s.slug).join('、')
+  return skills.map((s) => s.name).join('、')
 }
 
 /**
@@ -882,7 +881,7 @@ function toolsValue(tools: readonly ToolBrief[]): string {
   return tools
     .map(
       (t) =>
-        `- \`${t.slug}\`${t.name ? `（${t.name}）` : ''}：${t.description || '（没有说明）'}` +
+        `- \`${t.name}\`${t.name ? `（${t.name}）` : ''}：${t.description || '（没有说明）'}` +
         ` —— 包在 \`${t.dir}\`，先读里面的 TOOL.md 再决定怎么用`,
     )
     .join('\n')
@@ -1260,8 +1259,8 @@ export const SAMPLE_EXECUTE_INPUT: ExecuteFirstSentenceInput = {
    * `body` 在执行那条路上用不到（只有 `{{standards}}` 读正文，那是审核的事）。
    */
   skills: [
-    { slug: 'algorithmic-art', name: '算法艺术', body: '' },
-    { slug: 'writing-notes', name: '写笔记', body: '' },
+    { name: 'algorithmic-art', body: '' },
+    { name: 'writing-notes', body: '' },
   ],
   tools: [],
   instructions: '你是一个严谨的协作者。先理解任务，再动手。',
@@ -1280,7 +1279,7 @@ export const SAMPLE_CHAT_INPUT: ChatFirstSentenceInput = {
   runId: '01M2CHAT000000000000000001',
   subject: { type: 'conversation', id: '01M2CONVO00000000000000001' },
   prompt: '给我画一个冒泡算法',
-  skills: [{ slug: 'algorithmic-art', name: '算法艺术', body: '' }],
+  skills: [{ name: 'algorithmic-art', body: '' }],
   instructions: '你是一个严谨的协作者。先理解任务，再动手。',
   language: '简体中文',
 }

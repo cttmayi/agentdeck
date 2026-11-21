@@ -18,7 +18,7 @@
    能 diff）。`agent.json` 里**没有** `instructions`，正文在 `instructions.md`——
    这是同一个决定的两半。
 2. **一个实体 = 一个目录**（而不是"一堆实体挤一个 JSON 文件"）。
-   智能体是 `agents/<名字>/`、技能是 `<root>/<slug>/`、编排是 `workflows/<id>/`（§7）、
+   智能体是 `agents/<名字>/`、技能是 `<root>/<名字>/`、编排是 `workflows/<id>/`（§7）、
    定时任务是 `schedules/<id>/`（§8）——都是「一个实体一个目录」。
    目录化换来三件好事：人能直接打开、删一个不影响别的、坏一个不会毁掉全部。
 3. **权威只有一个。** 正文文件（`.md` / `.js`）是权威，索引记录里只留元数据；
@@ -205,22 +205,36 @@ daemon 在装配 `FileStore` 时把"owner → 目录"的解析函数注入进去
 ## 4. SKILL —— 一个技能一个目录
 
 ```
-~/.agentdeck/skills/<slug>/                ← 装进来的（source: github / local）
+~/.agentdeck/skills/<名字>/                ← 装进来的（source: github / local）
 ├── SKILL.md                               ← 权威正文
 └── references/…                           ← 支持文件（任意相对路径）
 
-~/.agentdeck/skills-mine/<slug>/SKILL.md   ← 自己提炼的（source: 'mine'），**整个根是 git 仓库**
+~/.agentdeck/skills-mine/<名字>/SKILL.md   ← 自己提炼的（source: 'mine'），**整个根是 git 仓库**
 ```
+
+**名字只有一个，而且是业界规范的那个 `name`**（D236，2026-11）：
+
+| | 值 | 约束 |
+|---|---|---|
+| 技能名 | `research-and-write-article` | 小写字母/数字/连字符、≤64、**必须与目录名一致**（[Agent Skills 规范](https://agentskills.io/specification)：frontmatter 只有 `name` + `description`，没有 `slug` 这一说） |
+| 它同时是 | 目录名、注入目录名（`<CLI技能根>/<名字>/SKILL.md`）、引用键（装/覆盖、`mine` 遮蔽安装、受管清单、路由） | —— |
+
+> ⚠️ 改之前有两个字段：`slug`（权威名）+ `name`（显示标签，≤200 任意字符）。
+> 实测 13 条技能里 12 条两者逐字相同、2 条没写 name、1 条不同名（`asd-ste100-skill`
+> 的 frontmatter 写 `asd-ste100`），而注入时那条"不一致"会被**改写成 slug**。
+> 也就是说显示名几乎恒等于 slug —— 合并成一个，用规范的名字叫它。
+> **代价如实记**：中文显示名没有地方放了，标题要写进 `description`（规范里 ≤1024，
+> 也是模型挑技能的信号）。老 `skill.jsonl` 记录里的 `slug` 按 `name ?? slug` 读兼容。
 
 **正文在磁盘、索引在日志**（2026-10 起，没有例外）：
 
 | 在哪 | 有什么 |
 |---|---|
-| `<root>/<slug>/SKILL.md` + 支持文件 | **权威**：正文与全部文件。改这里就生效 |
-| `log/skill.jsonl`（一条 put 记录） | 索引与元数据：`id` / `workspaceId` / `slug` / `name` / `description` / `source` / `sourceRef` / `version` / 时间 |
+| `<root>/<名字>/SKILL.md` + 支持文件 | **权威**：正文与全部文件。改这里就生效 |
+| `log/skill.jsonl`（一条 put 记录） | 索引与元数据：`id` / `workspaceId` / `name` / `description` / `source` / `sourceRef` / `version` / 时间（老记录里名字那一栏叫 `slug`，读时兼容） |
 
 > ⚠️ 层次要说清：**索引是按 workspace 的**（`workspaces/<ws>/log/skill.jsonl`），
-> **正文是全局一个根**（`skillsRoot`，跨 workspace 共享）。同一个 slug 在两个 workspace
+> **正文是全局一个根**（`skillsRoot`，跨 workspace 共享）。同一个名字在两个 workspace
 > 里装两次，盘上是一份文件、日志里是两条索引。
 
 **新记录不再带 `body`**（正文在磁盘上）。老记录里仍可能有 `body` / `allowedActions` /
@@ -233,8 +247,8 @@ daemon 在装配 `FileStore` 时把"owner → 目录"的解析函数注入进去
 - **`skills-mine` 是 git 仓库**：daemon 自动 commit，人能 `git log` 看"这条什么时候沉淀的、怎么变的"。
 
 **注入到工作目录时的归属清单**：`<workDir>/<skills.dir>/.agentdeck-managed.json`
-（内容 `{ slugs: [...] }`；**它落在工作目录的注入目录里，不在技能根里**——技能根本身没有
-任何清单文件，`<root>/<slug>/` 下只有 SKILL.md 与支持文件）。清理时读的是**这份盘上的清单**，不是内存里的数组——
+（内容 `{ names: [...] }`；**老清单写的是 `{ slugs: [...] }`，读时两种都认**；**它落在工作目录的注入目录里，不在技能根里**——技能根本身没有
+任何清单文件，`<root>/<名字>/` 下只有 SKILL.md 与支持文件）。清理时读的是**这份盘上的清单**，不是内存里的数组——
 所以哪怕参数传错，也删不到使用者自己放的技能；清单读不到/坏掉 ⇒ 当空（**宁可少删**）。
 
 ---

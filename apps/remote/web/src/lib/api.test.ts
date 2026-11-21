@@ -28,13 +28,13 @@ const okJson = (body: unknown): Response =>
 
 describe('远端管理页：接口层', () => {
   test('★ 目录：原样解析（skills/tools/loginMethods 都在）', async () => {
-    const catalog = { skills: [{ slug: 'pptx' }], tools: [], loginMethods: [] }
+    const catalog = { skills: [{ name: 'pptx' }], tools: [], loginMethods: [] }
     await withFetch(
       (async () => okJson(catalog)) as FetchLike,
       async () => {
         const got = await api.catalog()
         assert.equal(got.skills.length, 1)
-        assert.equal(got.skills[0]!.slug, 'pptx')
+        assert.equal(got.skills[0]!.name, 'pptx')
       },
     )
   })
@@ -97,15 +97,15 @@ describe('远端管理页：接口层', () => {
 })
 
 describe('远端管理页：装 / 卸的客户端', () => {
-  test('★ 装成功 ⇒ 回 slug 与文件清单（界面要显示装了几个文件）', async () => {
+  test('★ 装成功 ⇒ 回 name 与文件清单（界面要显示装了几个文件）', async () => {
     await withFetch(
       (async () =>
-        new Response(JSON.stringify({ installed: { slug: 'foo', files: ['SKILL.md'] } }), {
+        new Response(JSON.stringify({ installed: { name: 'foo', files: ['SKILL.md'] } }), {
           status: 201,
         })) as FetchLike,
       async () => {
         const got = await api.installSkill({ url: 'https://github.com/o/r' })
-        assert.equal(got.slug, 'foo')
+        assert.equal(got.name, 'foo')
         assert.deepEqual(got.files, ['SKILL.md'])
       },
     )

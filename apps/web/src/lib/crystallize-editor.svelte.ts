@@ -35,7 +35,7 @@ export interface Artifacts {
   skillMd: { name: string; description: string; body: string; raw: string }
   validation: { ok: boolean; problems: Array<{ file: string; message: string }> }
   target: { kind: 'new' } | { kind: 'update'; skillId: string } | null
-  baseline: { slug: string; files: Record<string, string> } | null
+  baseline: { name: string; files: Record<string, string> } | null
   materialDir: string
   /** 「按意见改一版」来的草稿：上一版 run id（有它才给"对比上一版"）。 */
   revisedFrom: string | null
@@ -121,12 +121,12 @@ class DraftEditor {
   reviewTab = $state<'content' | 'diff'>('content')
 
   /**
-   * 改 SKILL.md 时让 slug 跟着 frontmatter 的 name 走。
+   * 改 SKILL.md 时让 name 跟着 frontmatter 的 name 走。
    *
-   * 为什么用**回调**而不是把 slug 也搬进这里：slug 的归属是"入库"（`confirm-with-slug`），
+   * 为什么用**回调**而不是把 name 也搬进这里：name 的归属是"入库"（`confirm-with-name`），
    * 只在结论条上用，而且"新建才允许改"的规则在 view 那边。这里只负责**报告**"名字变了"。
    */
-  onSlugName: (name: string) => void = () => {}
+  onNameName: (name: string) => void = () => {}
 
   /** 编辑 → diff 的防抖计时器（每敲一个字发一次请求是不可接受的）。 */
   #diffTimer: ReturnType<typeof setTimeout> | null = null
@@ -206,7 +206,7 @@ class DraftEditor {
   /**
    * 读这条草稿的产出（`GET /api/crystallize/artifacts`）。
    *
-   * 读写不到就**抛**（调用方 catch 之后决定"还在起草中 / 出错"）。**目标与 slug 的处理留在
+   * 读写不到就**抛**（调用方 catch 之后决定"还在起草中 / 出错"）。**目标与 name 的处理留在
    * 调用方**：目标来自落库的 `crystallizeTarget`，界面上的 `targetKind` 要跟着它走。
    */
   async open(runId: string): Promise<Artifacts> {
@@ -279,10 +279,10 @@ class DraftEditor {
       this.#diffTimer = null
       void this.loadDiff()
     }, 500)
-    // 改的就是 SKILL.md → slug 跟着 frontmatter 的 name 走（"新建才允许改"由调用方判）
+    // 改的就是 SKILL.md → name 跟着 frontmatter 的 name 走（"新建才允许改"由调用方判）
     if (this.selectedFile === 'SKILL.md') {
       const name = parseFrontmatterName(text)
-      if (name !== '') this.onSlugName(name)
+      if (name !== '') this.onNameName(name)
     }
   }
 
@@ -342,7 +342,7 @@ class DraftEditor {
   }
 }
 
-/** 极简 frontmatter 取 name（只用于"改 SKILL.md 时 slug 跟着变"）。 */
+/** 极简 frontmatter 取 name（只用于"改 SKILL.md 时 name 跟着变"）。 */
 export function parseFrontmatterName(text: string): string {
   const m = text.match(/^name\s*:\s*(.+)$/m)
   return m?.[1] ? m[1].trim().replace(/^["']|["']$/g, '') : ''
@@ -381,7 +381,6 @@ if (typeof window !== 'undefined') {
 export const draftSkill = $state({
   /** 装好后这条技能的 id（`POST /api/crystallize/draft` 的 `skillIds`）。 */
   id: '',
-  slug: '',
   name: '',
   /** 最近一次扫描/安装的错误（界面上说清为什么装不上）。 */
   error: '',

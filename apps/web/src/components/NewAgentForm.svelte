@@ -265,9 +265,8 @@
             {#each $skills as s (s.id)}
               <label class="skill-option">
                 <input type="checkbox" value={s.id} bind:group={selectedSkills} />
-                <!-- ★ 2026-10：以**名字**为主（与「新建私有」同款）；slug 只在和
-                     名字不同时才补充（已安装技能名字常等于 slug，一起印会重复）。 -->
-                <span>{s.name}{#if s.name !== s.slug}<code class="skill-slug">{s.slug}</code>{/if}</span>
+                <!-- ★ D236：一个技能只有一个名字（规范里的 `name`，也是目录名） -->
+                <span>{s.name}</span>
               </label>
             {/each}
           </div>
@@ -491,7 +490,7 @@
   }
 
   /* 补充显示的名字之外的机器名：弱化，不抢主显示的存在感 */
-  .skill-slug {
+  .skill-name {
     margin-left: var(--sp-1);
     font-size: var(--fs-sm);
     color: var(--text-faint);

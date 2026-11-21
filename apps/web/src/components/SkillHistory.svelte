@@ -34,8 +34,8 @@
   import { relativeTime } from '../lib/time.ts'
   import { FoldSection } from '@agentdeck/ui/components'
 
-  /** 技能（只要 id / slug / source——历史只对 `source: 'mine'` 有意义）。 */
-  export let skill: { id: string; slug: string; source?: string }
+  /** 技能（只要 id / name / source——历史只对 `source: 'mine'` 有意义）。 */
+  export let skill: { id: string; name: string; source?: string }
 
   interface Entry {
     rev: string

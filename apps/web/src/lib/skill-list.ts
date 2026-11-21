@@ -36,10 +36,9 @@ export interface SkillListEntry {
   /**
    * 由取包规则算出（与 daemon 装的时候**逐字相同**）——界面拿它判断"装没装过"。
    *
-   * ★ 它**不在清单里**：清单声明 slug 会与安装时重算出来的不一致，那样界面会拿
-   *   错 slug 去比，把一条已装的技能显示成「安装」。所以它只由 daemon 算。
+   * ★ 它**不在清单里**：清单声明 name 会与安装时重算出来的不一致，那样界面会拿
+   *   错 name 去比，把一条已装的技能显示成「安装」。所以它只由 daemon 算。
    */
-  slug: string
   name: string
   summary: string
   /**

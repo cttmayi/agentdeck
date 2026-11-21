@@ -83,8 +83,8 @@ describe('编排生成者的平台技能：播种', () => {
       await ensureBuiltinWorkflowMakerSkills(store, WS)
       const maker = (await platformMemberOf(store, WS, 'workflow-maker'))!
       const payloads = await loadInjectableSkills(store, skillSourcesOfAgent(maker))
-      const refs = payloads.map((p) => ({ slug: p.ref.slug, source: p.ref.source, id: p.ref.id }))
-      assert.deepEqual(refs, [{ slug: 'orchestration-authoring', source: 'agent', id: null }])
+      const refs = payloads.map((p) => ({ name: p.ref.name, source: p.ref.source, id: p.ref.id }))
+      assert.deepEqual(refs, [{ name: 'orchestration-authoring', source: 'agent', id: null }])
       assert.ok(payloads[0]!.body.includes('## When to Use'))
     } finally {
       await store.close()

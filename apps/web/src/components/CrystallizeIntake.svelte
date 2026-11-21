@@ -13,12 +13,12 @@
 
   interface LoadedSkill {
     id: string
-    name: string
     /**
-     * 技能的 slug（daemon 两处来源都给）。**只作显示名的兜底**：万一某条记录的名字是空的，
-     * 那一行不能只剩一个徽标（使用者报过"第一个选项只显示了『安装的』"那种形状）。
+     * 技能的名字（daemon 两处来源都给；D236 起它是唯一的字段——以前的"显示名"没了）。
+     * 万一某条记录的名字是空的，那一行不能只剩一个徽标（使用者报过"第一个选项只显示
+     * 了『安装的』"那种形状），所以下面还有 id 兜底。
      */
-    slug?: string
+    name?: string
     description: string | null
     /** 技能来源（`mine` = 你提炼的 / `installed` = 装的）：决定"更新"是进化还是遮蔽。 */
     source?: string
@@ -139,7 +139,7 @@
    * 但候选本来就该是**技能库里的全部技能**（"上一版"是库里那条，跟来源 run 无关），
    * 所以空白起时直接问 `GET /api/skills`。
    */
-  let blankSkills = $state<Array<{ id: string; slug: string; name: string; description: string | null; source: 'mine' | 'installed' }>>([])
+  let blankSkills = $state<Array<{ id: string; name: string; description: string | null; source: 'mine' | 'installed' }>>([])
   $effect(() => {
     if (!blank) return
     void (async () => {
@@ -164,15 +164,14 @@
   }
 
   /**
-   * 选项上那个**名字**：名字 → slug → id。
+   * 选项上那个**名字**：名字 → name → id。
    *
    * 一个选项必须能回答"这是哪一份"，所以三级兜底都要有——只剩一个「安装的」徽标，
    * 等于让人对着两个看不出差别的按钮猜。
    */
   function optionLabel(option: LoadedSkill): string {
-    if (option.name !== '') return option.name
-    const slug = option.slug ?? ''
-    return slug !== '' ? slug : option.id
+    const name = option.name ?? ''
+    return name !== '' ? name : option.id
   }
 
   function pickDetail(id: string): void {
@@ -264,7 +263,7 @@
                 onclick={() => pickDetail(option.id)}
               >
                 <span class="skill-head">
-                  <!-- 名字是主角；万一那条记录没有名字，退回 slug / id——绝不能只剩一个徽标 -->
+                  <!-- 名字是主角；万一那条记录没有名字，退回 name / id——绝不能只剩一个徽标 -->
                   <span class="skill-name ellipsis" title={optionLabel(option)}>{optionLabel(option)}</span>
                   <span
                     class="skill-badge"
@@ -443,7 +442,7 @@
    * 不是应该是 SKILL 名字"）：**名字是主角**。
    *
    * 上一版把名字排在 14px 常规字重里，下面紧跟一段同样大小的描述——于是有描述的那一项
-   * 读起来像"一段英文"，没描述的那一项只剩个徽标。名字是 slug 形态的标识（含连字符、
+   * 读起来像"一段英文"，没描述的那一项只剩个徽标。名字是 name 形态的标识（含连字符、
    * 无空格），用等宽字体 + 字重才是它该有的样子：一眼就是"这一份叫什么"。
    */
   /* 统一高度：有描述（两行）与没描述（一行）看起来一样高——否则列表参差，不好扫 */

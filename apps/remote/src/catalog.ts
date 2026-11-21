@@ -32,8 +32,15 @@ import { resolveLocalPath } from '@agentdeck/skill-source'
  *   `remote:…`：远端在这里是中转，不是出处。落库记录因此仍指回上游，审计链不断。
  */
 export interface CatalogSkillEntry {
-  slug: string
+  /** 技能名（= 目录名；D236：只有这一个名字）。 */
   name: string
+  /**
+   * 维护者在推荐清单里写的**标题**（中文那句）。
+   *
+   * 与 `name` 是两件事：`name` 是技能的身份（kebab、与目录名一致），
+   * `title` 只是列表上那一格措辞。老索引没有这一栏时是空串。
+   */
+  title: string
   version: string | null
   summary: string
   category: string
@@ -71,13 +78,13 @@ export interface CatalogSkillLoadResult {
  * 扫技能目录，把内容与索引合成条目。
  *
  * 布局：
- *   `<root>/<slug>/SKILL.md`（+ 支持文件）   ← 同步工具写的**内容**
+ *   `<root>/<name>/SKILL.md`（+ 支持文件）   ← 同步工具写的**内容**
  *   `<root>/.sync.json`                      ← 同一个工具写的**元数据**（一个文件）
  *
  * ⚠️ 元数据**不能放进技能目录里**：`@agentdeck/skill-source` 的本地取包规则会把
  *    技能目录里的每个文本文件都当成**支持文件**收走——元数据的 JSON 会被装进
  *    使用者的技能里。所以它在技能目录**旁边**，而 `resolveLocalPath` 只吃
- *    `<slug>/` 那一层。
+ *    `<name>/` 那一层。
  */
 export async function loadCatalogSkills(root: string): Promise<CatalogSkillLoadResult> {
   const skills: CatalogSkillEntry[] = []
@@ -101,18 +108,22 @@ export async function loadCatalogSkills(root: string): Promise<CatalogSkillLoadR
   const items = Array.isArray(index.items) ? (index.items as Record<string, unknown>[]) : []
 
   for (const item of items) {
-    const slug = typeof item['slug'] === 'string' ? item['slug'] : ''
-    if (slug === '') {
-      skipped.push({ path: '.sync.json', reason: '有一条没有 slug' })
+    /*
+     * ★ D236：索引里技能名这一栏现在叫 `name`；老索引（同步工具更早的版本写的）
+     *   叫 `slug`。两种都认——不认老键就等于"远端目录整页空"，而那个失效没有任何报错。
+     */
+    const name = typeof item['name'] === 'string' ? item['name'] : typeof item['slug'] === 'string' ? item['slug'] : ''
+    if (name === '') {
+      skipped.push({ path: '.sync.json', reason: '有一条既没有 name 也没有 slug' })
       continue
     }
     // ★ 用**与 daemon 同一个**本地取包规则读内容：限额、必须有 SKILL.md、
     //   二进制跳过——这一步顺带把"有人手改了目录"也查出来了。
     try {
-      const resolved = await resolveLocalPath(join(root, slug))
+      const resolved = await resolveLocalPath(join(root, name))
       skills.push({
-        slug,
-        name: typeof item['name'] === 'string' ? item['name'] : slug,
+        name,
+        title: typeof item['title'] === 'string' ? item['title'] : '',
         version: typeof item['version'] === 'string' ? item['version'] : null,
         summary: typeof item['summary'] === 'string' ? item['summary'] : '',
         category: typeof item['category'] === 'string' ? item['category'] : 'other',
@@ -124,17 +135,17 @@ export async function loadCatalogSkills(root: string): Promise<CatalogSkillLoadR
         excluded: Array.isArray(item['excluded'])
           ? (item['excluded'] as unknown[]).filter((p): p is string => typeof p === 'string')
           : [],
-        sourceRef: typeof item['sourceRef'] === 'string' ? item['sourceRef'] : `remote:${slug}`,
+        sourceRef: typeof item['sourceRef'] === 'string' ? item['sourceRef'] : `remote:${name}`,
         fetchedAt: typeof item['fetchedAt'] === 'string' ? item['fetchedAt'] : '',
       })
     } catch (err) {
       skipped.push({
-        path: slug,
+        path: name,
         reason: `索引里有、但内容读不出来：${err instanceof Error ? err.message : String(err)}`,
       })
     }
   }
 
-  skills.sort((a, b) => a.slug.localeCompare(b.slug))
+  skills.sort((a, b) => a.name.localeCompare(b.name))
   return { skills, skipped }
 }

@@ -32,24 +32,24 @@ export const installText = {
 
   // ── 目录条目的说明：为什么是那个动作 ──────────────────────────────
   'install.foundInDir': {
-    zh: '目录里有 {slug} {version}，本地还没有。',
-    en: 'The catalog has {slug} {version}, and nothing is installed locally yet.',
+    zh: '目录里有 {name} {version}，本地还没有。',
+    en: 'The catalog has {name} {version}, and nothing is installed locally yet.',
   },
   /**
    * 目录里这条**没有版本号**（推荐清单取不到上游提交）时的两句话。
    * ⚠️ 别拿 `{version}` 硬套：那会渲染成一个空位（"目录里有 foo ，本地还没有"）。
    */
   'install.foundInDirNoVersion': {
-    zh: '目录里有 {slug}，本地还没有（这条没有版本号：取不到上游提交）。',
-    en: 'The catalog has {slug} and nothing is installed locally (no version for this one — the upstream commit could not be read).',
+    zh: '目录里有 {name}，本地还没有（这条没有版本号：取不到上游提交）。',
+    en: 'The catalog has {name} and nothing is installed locally (no version for this one — the upstream commit could not be read).',
   },
   'install.replaceNoRemoteVersion': {
-    zh: '本地已有一个同名的 {slug}，而目录里这条也没有版本号（取不到上游提交）——所以无法判断是不是同一份内容。替换会用目录里的内容覆盖它。',
-    en: 'A local {slug} with the same name exists, and the catalog entry has no version either (the upstream commit could not be read), so we cannot tell whether it is the same content. Replacing overwrites it with the catalog copy.',
+    zh: '本地已有一个同名的 {name}，而目录里这条也没有版本号（取不到上游提交）——所以无法判断是不是同一份内容。替换会用目录里的内容覆盖它。',
+    en: 'A local {name} with the same name exists, and the catalog entry has no version either (the upstream commit could not be read), so we cannot tell whether it is the same content. Replacing overwrites it with the catalog copy.',
   },
   'install.replaceLocalHint': {
-    zh: '本地已有一个同名的 {slug}，但它没有版本信息（本机自建，或从路径/GitHub 装的）——所以无法判断是不是同一份内容。替换会用目录里的 {version} 覆盖它。',
-    en: 'A local {slug} with the same name already exists, but it carries no version information (built on this machine, or installed from a path/GitHub), so we cannot tell whether it is the same content. Replacing overwrites it with {version} from the catalog.',
+    zh: '本地已有一个同名的 {name}，但它没有版本信息（本机自建，或从路径/GitHub 装的）——所以无法判断是不是同一份内容。替换会用目录里的 {version} 覆盖它。',
+    en: 'A local {name} with the same name already exists, but it carries no version information (built on this machine, or installed from a path/GitHub), so we cannot tell whether it is the same content. Replacing overwrites it with {version} from the catalog.',
   },
   'install.installedHint': {
     zh: '本地这份就是目录里的 {version}，目录里没有更新的版本。',
@@ -71,18 +71,18 @@ export const installText = {
   },
 
   // ── 安装结果的说明（`describeInstallMessages`）──────────────────────
-  // 结果里可能有**一串** slug、**一串**被忽略的文件，所以列表由界面 join：
-  // `{slugs}` / `{items}` 的值是数组，界面用下面这条分隔符连接（见
+  // 结果里可能有**一串** name、**一串**被忽略的文件，所以列表由界面 join：
+  // `{names}` / `{items}` 的值是数组，界面用下面这条分隔符连接（见
   // `skill-install.ts` 的 `renderInstallMessage`）。
-  'install.installedList': { zh: '已安装 {slugs}', en: 'Installed {slugs}' },
+  'install.installedList': { zh: '已安装 {names}', en: 'Installed {names}' },
   // 与 `agents.listSeparator` 同形同值，仍按"一个区域一份"单列：这里连接的是
-  // skill slug，那边连接的是动作名，语境不同，不跟着词表走。
+  // skill name，那边连接的是动作名，语境不同，不跟着词表走。
   'install.listSeparator': { zh: '、', en: ', ' },
   // zh 没有前导空格（中文全角括号自带间隔），en 有——空格是**渲染结果的一部分**。
   'install.fromSource': { zh: '（来自 {source}）', en: ' (from {source})' },
   'install.ignoredList': { zh: '；没装进来：{items}', en: '; not installed: {items}' },
   'install.ignoredItem': { zh: '{path}（{reason}）', en: '{path} ({reason})' },
-  'install.skipped': { zh: '；跳过 {slug}：{reason}', en: '; skipped {slug}: {reason}' },
+  'install.skipped': { zh: '；跳过 {name}：{reason}', en: '; skipped {name}: {reason}' },
   'install.noChange': { zh: '没有任何改动', en: 'Nothing changed' },
   // ★ 下面两条是**只有括号**的词条（括号里装的是 daemon 给的值，值本身不翻译）。
   //   为什么要单独两条：`install.ignoredItem` 把路径包在句子里面，而界面上那处
@@ -106,7 +106,7 @@ export const installText = {
     zh: '技能是一个目录，里面必须有 SKILL.md（大写）。请把链接/路径指到那个目录。',
     en: 'A skill is a directory, and it must contain SKILL.md (uppercase). Point the link/path at that directory.',
   },
-  'install.errBadSlug': {
+  'install.errBadName': {
     zh: '标识只能用小写字母、数字与连字符。也可以自己指定一个。',
     en: 'An ID may only contain lowercase letters, digits and hyphens. You can also specify one yourself.',
   },

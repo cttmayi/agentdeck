@@ -227,13 +227,13 @@ describe('D49 端到端：聊天投递的就是那句话', () => {
     // 而不是照着请求对象自己念一遍。
     const made = await postJson('/api/skills', {
       skills: [
-        { slug: 'chat-e2e-carried', name: '对话自带的夹具', body: '# 夹具\n', source: 'local' },
+        { name: 'chat-e2e-carried', body: '# 夹具\n', source: 'local' },
       ],
     })
     assert.equal(made.status, 201, `造夹具 skill 失败：${JSON.stringify(made.body)}`)
     const all = await json('/api/skills')
-    const skillId = (all.body as { skills: Array<{ id: string; slug: string }> }).skills.find(
-      (s) => s.slug === 'chat-e2e-carried',
+    const skillId = (all.body as { skills: Array<{ id: string; name: string }> }).skills.find(
+      (s) => s.name === 'chat-e2e-carried',
     )!.id
 
     const created = await postJson('/api/conversations', {

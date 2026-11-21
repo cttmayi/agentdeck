@@ -12,7 +12,7 @@
  *   ② draft：202 + materialStats，起草 run 的 subject 是 `skill-draft`；
  *   ③ commit：新建落 skills-mine（磁盘真文件 + /api/skills source:'mine' +
  *      git log 有提交）；
- *   ④ 撞 slug：同一 slug 再新建 → 409 clash_mine + existing 指向旧那条；
+ *   ④ 撞 name：同一 name 再新建 → 409 clash_mine + existing 指向旧那条；
  *   ⑤ 更新（进化）：复用原 id、正文覆盖、git 再提交一条。
  */
 
@@ -276,9 +276,8 @@ before(async () => {
       skills: [
         {
           // ★ 分批第 207 批：起草 run 的技能集合来自**起草者的挂载**（`Agent.skillIds`），
-          //   而平台按 slug 自动挂 `distilly` ⇒ 夹具技能必须叫这个名字，否则门禁不通过。
-          slug: 'distilly',
-          name: '起草夹具技能（distilly）',
+          //   而平台按 name 自动挂 `distilly` ⇒ 夹具技能必须叫这个名字，否则门禁不通过。
+          name: 'distilly',
           source: 'mine',
           sourceRef: 'mine:distilly',
           body:
@@ -386,7 +385,7 @@ async function draftAndWait(payload: Record<string, unknown>): Promise<string> {
  */
 async function draftPost(payload: Record<string, unknown>): Promise<Response> {
   // ★ 分批第 207 批：**不再拼 `skillIds`**——起草 run 注入的技能来自起草者这条智能体的挂载
-  //   （daemon 按 slug `distilly` 自动对齐）。夹具只要保证库里有一条 `distilly` 即可。
+  //   （daemon 按 name `distilly` 自动对齐）。夹具只要保证库里有一条 `distilly` 即可。
   return fetch(`${daemon.url}/api/crystallize/draft`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -568,7 +567,7 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     const { status, body } = await commit({
       draftRunId,
       target: { kind: 'new' },
-      slug: 'my-flow',
+      name: 'my-flow',
       files: {
         'SKILL.md':
           '---\nname: my-flow\ndescription: 审 xx 类报告时用\n---\n\n# 我的流程\n\n## When to Use\n审报告时。\n\n## Procedure\n1. 看证据。\n',
@@ -576,11 +575,11 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
       },
     })
     assert.equal(status, 201, JSON.stringify(body))
-    const skill = body['skill'] as { id: string; slug: string; source: string; name: string }
-    assert.equal(skill.slug, 'my-flow')
+    const skill = body['skill'] as { id: string; name: string; source: string }
+    assert.equal(skill.name, 'my-flow')
     assert.equal(skill.source, 'mine', '入库的来源是 mine')
 
-    // 磁盘：<skillsMineRoot>/<slug>/ 下的真文件（正文 + 支持文件都落）
+    // 磁盘：<skillsMineRoot>/<name>/ 下的真文件（正文 + 支持文件都落）
     assert.match(await readFile(join(mineRoot, 'my-flow', 'SKILL.md'), 'utf8'), /# 我的流程/)
     assert.equal(
       await readFile(join(mineRoot, 'my-flow', 'references', 'fields.md'), 'utf8'),
@@ -595,8 +594,8 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
       'description 从 frontmatter 解析',
     )
     // 列表接口：source 'mine' 可见
-    const list = (await (await fetch(`${daemon.url}/api/skills`)).json()) as { skills: Array<{ slug: string; source: string }> }
-    const mine = list.skills.find((s) => s.slug === 'my-flow')
+    const list = (await (await fetch(`${daemon.url}/api/skills`)).json()) as { skills: Array<{ name: string; source: string }> }
+    const mine = list.skills.find((s) => s.name === 'my-flow')
     assert.equal(mine?.source, 'mine')
     // git：仓库初始化了，且有这次提交（版本管理开着）
     assert.equal((body['versioning'] as { enabled: boolean }).enabled, true)
@@ -633,7 +632,7 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     const bad = await commit({
       draftRunId,
       target: { kind: 'new' },
-      slug: 'exec-check-bad',
+      name: 'exec-check-bad',
       files: {
         'SKILL.md':
           '---\nname: exec-check-bad\ndescription: 定检拦\n---\n\n# 定检\n\n## When to Use\nX。\n\n## Procedure\n1. 看 `scripts/broken.py`。\n',
@@ -647,15 +646,15 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
 
     // 一条都没入库（拦在写库之前）
     const list = (await (await fetch(`${daemon.url}/api/skills`)).json()) as {
-      skills: Array<{ slug: string }>
+      skills: Array<{ name: string }>
     }
-    assert.equal(list.skills.some((x) => x.slug === 'exec-check-bad'), false)
+    assert.equal(list.skills.some((x) => x.name === 'exec-check-bad'), false)
 
     // 同一份内容去掉坏脚本 ⇒ 正常入库（不许因为加了闸就把好的也拦）
     const good = await commit({
       draftRunId,
       target: { kind: 'new' },
-      slug: 'exec-check-good',
+      name: 'exec-check-good',
       files: {
         'SKILL.md':
           '---\nname: exec-check-good\ndescription: 干净的\n---\n\n# 干净\n\n## When to Use\nX。\n\n## Procedure\n1. 照做。\n',
@@ -691,7 +690,7 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     const done = await commit({
       draftRunId: v2,
       target: { kind: 'new' },
-      slug: 'chain-commit',
+      name: 'chain-commit',
       files: {
         'SKILL.md':
           '---\nname: chain-commit\ndescription: 链入库\n---\n\n# 链入库\n\n## When to Use\nX。\n\n## Procedure\n1. Y。\n',
@@ -742,14 +741,14 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     const first = await commit({
       draftRunId: v1,
       target: { kind: 'new' },
-      slug: 'keep-iterating',
+      name: 'keep-iterating',
       files: {
         'SKILL.md':
           '---\nname: keep-iterating\ndescription: 第一版\n---\n\n# 一\n\n## When to Use\nX。\n\n## Procedure\n1. A。\n',
       },
     })
     assert.equal(first.status, 201, JSON.stringify(first.body))
-    const firstSkill = first.body['skill'] as { id: string; slug: string }
+    const firstSkill = first.body['skill'] as { id: string; name: string }
 
     // ① 入库之后**照样**能按意见改一版（从前 `revise` 在这一点上没有拦，但材料/接着说会拦）
     const rev = await fetch(`${daemon.url}/api/crystallize/revise`, {
@@ -765,7 +764,7 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     const second = await commit({
       draftRunId: v2,
       target: { kind: 'update', skillId: firstSkill.id },
-      slug: 'keep-iterating',
+      name: 'keep-iterating',
       files: {
         'SKILL.md':
           '---\nname: keep-iterating\ndescription: 第二版\n---\n\n# 二\n\n## When to Use\nX。\n\n## Procedure\n1. B。\n',
@@ -778,16 +777,16 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     assert.equal(secondSkill.description, '第二版', 'frontmatter 也跟着换了')
 
     const after = (await (await fetch(`${daemon.url}/api/skills`)).json()) as {
-      skills: Array<{ id: string; slug: string }>
+      skills: Array<{ id: string; name: string }>
     }
     assert.equal(
-      after.skills.filter((x) => x.slug === 'keep-iterating').length,
+      after.skills.filter((x) => x.name === 'keep-iterating').length,
       1,
       '持续入库不许在库里堆出同名的第二条',
     )
   })
 
-  test('★ 撞 slug：同一 slug 再新建 ⇒ 409 clash_mine + existing 指回旧那条', async () => {
+  test('★ 撞 name：同一 name 再新建 ⇒ 409 clash_mine + existing 指回旧那条', async () => {
     const runId = await runReviewed('又一个流程任务')
     const draftRunId = await draftAndWait({
       runId,
@@ -796,7 +795,7 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     const { status, body } = await commit({
       draftRunId,
       target: { kind: 'new' },
-      slug: 'my-flow',
+      name: 'my-flow',
       files: {
         'SKILL.md':
           '---\nname: my-flow\ndescription: 重复的\n---\n\n# 重复\n\n## When to Use\n- x\n\n## Procedure\n1. y\n',
@@ -804,8 +803,8 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     })
     assert.equal(status, 409)
     assert.equal(body['code'], 'clash_mine')
-    const existing = body['existing'] as { slug: string; id: string }
-    assert.equal(existing.slug, 'my-flow')
+    const existing = body['existing'] as { name: string; id: string }
+    assert.equal(existing.name, 'my-flow')
     assert.equal(typeof existing.id, 'string', 'existing 带 id，前端好切「更新」')
   })
 
@@ -815,15 +814,15 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        skills: [{ slug: 'installed-flow', name: '安装的流程', body: '# 安装版\n原样保留' }],
+        skills: [{ name: 'installed-flow', body: '# 安装版\n原样保留' }],
         overwrite: false,
       }),
     })
     assert.equal(installRes.status, 201)
     const installedList = (await (await fetch(`${daemon.url}/api/skills`)).json()) as {
-      skills: Array<{ id: string; slug: string; source: string; body: string }>
+      skills: Array<{ id: string; name: string; source: string; body: string }>
     }
-    const installed = installedList.skills.find((s) => s.slug === 'installed-flow')!
+    const installed = installedList.skills.find((s) => s.name === 'installed-flow')!
     assert.notEqual(installed.source, 'mine', '装出来的是安装来源')
 
     // 以"安装的"为目标起草 + 入库（设计 §4.1 第 1 步：选中安装的 = 基于它创建你的版本）
@@ -832,25 +831,25 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     const { status, body } = await commit({
       draftRunId,
       target: { kind: 'update', skillId: installed.id },
-      slug: 'installed-flow',
+      name: 'installed-flow',
       files: {
         'SKILL.md':
           '---\nname: installed-flow\ndescription: 基于安装版\n---\n\n# 我的版本\n\n## When to Use\n- x\n\n## Procedure\n1. 基于安装版沉淀\n',
       },
     })
     assert.equal(status, 201, JSON.stringify(body))
-    const skill = body['skill'] as { id: string; source: string; slug: string }
+    const skill = body['skill'] as { id: string; source: string; name: string }
     assert.equal(skill.source, 'mine', '落的是你的版本')
     assert.notEqual(skill.id, installed.id, '不是改安装那条——新建你的版本')
 
     // 安装那条原样不动
     const after = (await (await fetch(`${daemon.url}/api/skills`)).json()) as {
-      skills: Array<{ id: string; slug: string; source: string; body: string }>
+      skills: Array<{ id: string; name: string; source: string; body: string }>
     }
     const installedAfter = after.skills.find((s) => s.id === installed.id)!
     assert.equal(installedAfter.body, '# 安装版\n原样保留', '安装根原文件不动')
-    // 遮蔽：mine 版与安装版同 slug 并存
-    const mineNow = after.skills.find((s) => s.slug === 'installed-flow' && s.source === 'mine')!
+    // 遮蔽：mine 版与安装版同 name 并存
+    const mineNow = after.skills.find((s) => s.name === 'installed-flow' && s.source === 'mine')!
     assert.match(mineNow.body, /基于安装版沉淀/)
     // git 提交在（你的版本进仓库）
     const log = await git('log', '--oneline')
@@ -860,9 +859,9 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
   test('★ 更新（进化）：复用原 id、正文覆盖、git 再提交一条', async () => {
     const runId = await runReviewed('流程被纠正过一次')
     const skillId = (await (await fetch(`${daemon.url}/api/skills`)).json()) as {
-      skills: Array<{ id: string; slug: string }>
+      skills: Array<{ id: string; name: string }>
     }
-    const mine = skillId.skills.find((s) => s.slug === 'my-flow')!
+    const mine = skillId.skills.find((s) => s.name === 'my-flow')!
     const draftRunId = await draftAndWait({
       runId,
       target: { kind: 'update', skillId: mine.id },
@@ -870,7 +869,7 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     const { status, body } = await commit({
       draftRunId,
       target: { kind: 'update', skillId: mine.id },
-      slug: 'my-flow',
+      name: 'my-flow',
       files: {
         'SKILL.md':
           '---\nname: my-flow\ndescription: 审 xx 类报告时用（更新版）\n---\n\n# 我的流程 v2\n\n## When to Use\n- x\n\n## Procedure\n1. 先校验证据。\n2. 再下结论。\n',
@@ -950,7 +949,7 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     const { status } = await commit({
       draftRunId,
       target: { kind: 'new' },
-      slug: 'no-discard',
+      name: 'no-discard',
       files: {
         'SKILL.md':
           '---\nname: no-discard\ndescription: 入库后不许放弃\n---\n\n# 不能放弃\n\n## When to Use\n- 时\n\n## Procedure\n1. 做。\n',
@@ -1045,7 +1044,7 @@ describe('四轮：素材落盘 + 产出读目录', () => {
     const { status, body } = await commit({
       draftRunId,
       target: { kind: 'new' },
-      slug: 'draft-flow',
+      name: 'draft-flow',
       files: res.files,
     })
     assert.equal(status, 201, JSON.stringify(body))
@@ -1063,7 +1062,7 @@ describe('四轮：素材落盘 + 产出读目录', () => {
     const { status, body } = await commit({
       draftRunId,
       target: { kind: 'new' },
-      slug: 'no-frontmatter',
+      name: 'no-frontmatter',
       files: { 'SKILL.md': '# 只有标题\n' },
     })
     assert.equal(status, 400)
@@ -1124,7 +1123,7 @@ describe('四轮：素材落盘 + 产出读目录', () => {
     const done = await commit({
       draftRunId,
       target: { kind: 'new' },
-      slug: 'colleague-flow',
+      name: 'colleague-flow',
       files: {
         'colleague-flow/SKILL.md': art.files['colleague-flow/SKILL.md']!,
         'colleague-flow/work.md': art.files['colleague-flow/work.md'] ?? '',
@@ -1166,7 +1165,7 @@ describe('四轮：素材落盘 + 产出读目录', () => {
     const created = await commit({
       draftRunId: firstDraft,
       target: { kind: 'new' },
-      slug: 'baseline-flow',
+      name: 'baseline-flow',
       files: {
         'SKILL.md':
           '---\nname: baseline-flow\ndescription: 基线用\n---\n\n# 基线\n\n## When to Use\n- x\n\n## Procedure\n1. y\n',
@@ -1180,9 +1179,9 @@ describe('四轮：素材落盘 + 产出读目录', () => {
     const draftRunId = await draftAndWait({ runId: runId2, target: { kind: 'update', skillId } })
     const res = (await (
       await fetch(`${daemon.url}/api/crystallize/artifacts?draftRunId=${draftRunId}`)
-    ).json()) as { baseline: { slug: string; files: Record<string, string> } | null }
+    ).json()) as { baseline: { name: string; files: Record<string, string> } | null }
     assert.ok(res.baseline, '更新场景必须带当前版本')
-    assert.equal(res.baseline!.slug, 'baseline-flow')
+    assert.equal(res.baseline!.name, 'baseline-flow')
     assert.match(res.baseline!.files['SKILL.md'] ?? '', /# 基线/)
     assert.ok('references/old.md' in res.baseline!.files, '基线含支持文件（界面能算出删除项）')
   })
@@ -1196,7 +1195,7 @@ describe('四轮：没写出目录的草稿更新时不删支持文件', () => {
     const created = await commit({
       draftRunId: firstDraft,
       target: { kind: 'new' },
-      slug: 'keep-refs',
+      name: 'keep-refs',
       files: {
         'SKILL.md':
           '---\nname: keep-refs\ndescription: 保留支持文件\n---\n\n# 保留\n\n## When to Use\n- x\n\n## Procedure\n1. y\n',
@@ -1228,7 +1227,7 @@ describe('四轮：没写出目录的草稿更新时不删支持文件', () => {
     const { status, body } = await commit({
       draftRunId: textDraftId,
       target: { kind: 'update', skillId },
-      slug: 'keep-refs',
+      name: 'keep-refs',
       files: {
         'SKILL.md':
           '---\nname: keep-refs\ndescription: 文本版更新\n---\n\n# 保留 v2\n\n## When to Use\n- x\n\n## Procedure\n1. z\n',
@@ -1275,7 +1274,7 @@ describe('五轮：变更集 diff（P1）', () => {
     const created = await commit({
       draftRunId: first,
       target: { kind: 'new' },
-      slug: 'diff-target',
+      name: 'diff-target',
       files: {
         'SKILL.md':
           '---\nname: diff-target\ndescription: 差异目标\n---\n\n# 标题\n\n## When to Use\n- 第一行\n\n' +
@@ -1476,8 +1475,8 @@ describe('六轮：git 历史与版本对比（P2，§7.4）', () => {
    * ⚠️ 复用 P1 那条真实路径（起草 → 入库），不直接往 store 里塞：这一组要量的
    *    正是"沉淀时真的打了 commit ⇒ 历史里真的有一条"——绕过入库就量不到它。
    */
-  async function makeMineSkill(slug: string, marker: string): Promise<string> {
-    const runId = await runReviewed(`历史夹具 ${slug}`)
+  async function makeMineSkill(name: string, marker: string): Promise<string> {
+    const runId = await runReviewed(`历史夹具 ${name}`)
     const draftRunId = await draftAndWait({ runId, target: { kind: 'new' } })
     // ⚠️ 正文必须过**入库校验**（`## When to Use` / `## Procedure` 两节）：少了它
     //    入库路由会 400 `invalid_artifacts`，而那条错看起来像"历史接口坏了"。
@@ -1485,10 +1484,10 @@ describe('六轮：git 历史与版本对比（P2，§7.4）', () => {
     const created = await commit({
       draftRunId,
       target: { kind: 'new' },
-      slug,
+      name,
       files: {
         'SKILL.md':
-          `---\nname: ${slug}\ndescription: 历史夹具 ${slug}\n---\n\n# ${slug}\n\n` +
+          `---\nname: ${name}\ndescription: 历史夹具 ${name}\n---\n\n# ${name}\n\n` +
           `## When to Use\n- ${marker}\n\n## Procedure\n1. ${marker}\n`,
       },
     })
@@ -1551,7 +1550,6 @@ describe('六轮：git 历史与版本对比（P2，§7.4）', () => {
       body: JSON.stringify({
         skills: [
           {
-            slug: 'hist-installed',
             name: 'hist-installed',
             body: '---\nname: hist-installed\n---\n\n装来的\n',
             source: 'local',
@@ -1950,11 +1948,11 @@ describe('§10.17 起草门禁：没装「沉淀用技能」不许沉淀（分�
    */
   test('★★★ 库里没有 distilly ⇒ 400 draft_skill_required；装回去就受理', async () => {
     const runId = await runReviewed('审过的流程（门禁）')
-    // 前提：夹具装了一条 slug=distilly 的技能（见 `before`）
+    // 前提：夹具装了一条 name=distilly 的技能（见 `before`）
     const installed = (await (await fetch(`${daemon.url}/api/skills`)).json()) as {
-      skills: Array<{ id: string; slug: string; source: string }>
+      skills: Array<{ id: string; name: string; source: string }>
     }
-    const distilly = installed.skills.find((sk) => sk.slug === 'distilly')
+    const distilly = installed.skills.find((sk) => sk.name === 'distilly')
     assert.ok(distilly, '前提：夹具里装着 distilly')
     // 只装了一份夹具技能 ⇒ 删掉它就是"没装 distilly"
     const removed = await fetch(`${daemon.url}/api/skills/${distilly.id}`, { method: 'DELETE' })
@@ -1972,14 +1970,14 @@ describe('§10.17 起草门禁：没装「沉淀用技能」不许沉淀（分�
     assert.equal(blocked.status, 400, await blocked.clone().text())
     assert.equal(((await blocked.json()) as { code?: string }).code, 'draft_skill_required')
 
-    // 装回去（同 slug，会复用原 id）⇒ 起草者的挂载由 daemon 自动对齐
+    // 装回去（同 name，会复用原 id）⇒ 起草者的挂载由 daemon 自动对齐
     const reinstalled = await fetch(`${daemon.url}/api/skills/install`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         source: {
           kind: 'payload',
-          slug: 'distilly',
+          name: 'distilly',
           body: '---\nname: distilly\ndescription: 起草用的夹具技能\n---\n\n# 怎么起草\n\n## Procedure\n\n1. 先读索引。\n',
           files: {},
         },
@@ -2015,7 +2013,7 @@ describe('§10.18 起草用的是装着 distilly 的那个智能体（分批第 
   /** 读一条 run 记录（`skillRefs` 是"这次用了哪几条技能"的权威，FR-REVIEW-06）。 */
   const runOf = async (
     runId: string,
-  ): Promise<{ status?: string; skillRefs?: Array<{ slug: string }> }> =>
+  ): Promise<{ status?: string; skillRefs?: Array<{ name: string }> }> =>
     await getJsonFile(`/api/runs/${runId}`)
 
   test('★★★ 起草 run 真的注入了起草者挂着的 distilly（`skillRefs` 里有它）', async () => {
@@ -2024,9 +2022,9 @@ describe('§10.18 起草用的是装着 distilly 的那个智能体（分批第 
       target: { kind: 'new', purpose: '注入实证' },
     })
     const run = await runOf(draftRunId)
-    const slugs = (run.skillRefs ?? []).map((s) => s.slug)
+    const names = (run.skillRefs ?? []).map((s) => s.name)
     assert.deepEqual(
-      slugs,
+      names,
       ['distilly'],
       '★ 这一轮拿到的技能就是起草者挂的那一条——在此之前这里是空的（`skills: []`），' +
         '于是它只能照 prompt 里内联的规范写',
@@ -2048,7 +2046,7 @@ describe('§10.18 起草用的是装着 distilly 的那个智能体（分批第 
     await waitRunStatus(v2, ['completed', 'failed', 'cancelled'])
     const run = await runOf(v2)
     assert.deepEqual(
-      (run.skillRefs ?? []).map((s) => s.slug),
+      (run.skillRefs ?? []).map((s) => s.name),
       ['distilly'],
       '改一版同样是"按那份技能改"——否则它只能凭记忆重写',
     )
@@ -2209,13 +2207,13 @@ describe('§10.16 只说话没交 skill → 人接着说（分批第 211 批）'
 
   test('★★★ 选中的技能真的被注入到工作目录（"不要预置在仓库里、让用户自己装"那条的前半段）', async () => {
     const skill = (await (await fetch(`${daemon.url}/api/skills`)).json()) as {
-      skills: Array<{ id: string; slug: string }>
+      skills: Array<{ id: string; name: string }>
     }
-    // ★ 207 批：注入的是**起草者挂的那条**（slug = distilly），不是"列表里第一条"
-    const skillId = skill.skills.find((sk) => sk.slug === 'distilly')?.id
+    // ★ 207 批：注入的是**起草者挂的那条**（name = distilly），不是"列表里第一条"
+    const skillId = skill.skills.find((sk) => sk.name === 'distilly')?.id
     assert.ok(skillId, '夹具里要先有一条 distilly')
     const runId = await runReviewed('审过的流程（注入技能）')
-    // ★ 207 批：注入的技能集合来自**起草者的挂载**（daemon 按 slug 自动对齐），请求里不再带。
+    // ★ 207 批：注入的技能集合来自**起草者的挂载**（daemon 按 name 自动对齐），请求里不再带。
     const res = await draftPost({ runId, target: { kind: 'new', purpose: '注入技能' } })
     assert.equal(res.status, 202, await res.clone().text())
     const draftRunId = ((await res.json()) as { draftRunId: string }).draftRunId
@@ -2315,7 +2313,7 @@ describe('§10.12 从空白/材料起：无源 run 的草稿（分批第 133 批
       body: JSON.stringify({
         draftRunId,
         target: { kind: 'new' },
-        slug: 'blank-update-fixture',
+        name: 'blank-update-fixture',
         files: {
           'SKILL.md':
             '---\nname: blank-update-fixture\ndescription: 空白起更新的夹具\n---\n\n## When to Use\n\n当需要夹具时。\n\n## Procedure\n\n1. 跑。\n',
@@ -2769,7 +2767,7 @@ describe('返工：默认接上一版的会话，人改过就不接', () => {
     const created = await commit({
       draftRunId: firstDraft,
       target: { kind: 'new' },
-      slug: 'original-baseline',
+      name: 'original-baseline',
       files: {
         'SKILL.md':
           '---\nname: original-baseline\ndescription: 原 skill 基线用\n---\n\n# 原来的标题\n\n' +

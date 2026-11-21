@@ -23,7 +23,7 @@ import {
  * 全程不需要出网。
  *
  * ★ **抓取规则与 daemon 装技能时是同一份实现**（`@agentdeck/skill-source`）：
- *   主机白名单、每跳校验、限额、必须有 `SKILL.md`、slug 怎么收敛——全都一样。
+ *   主机白名单、每跳校验、限额、必须有 `SKILL.md`、name 怎么收敛——全都一样。
  *   各写一份就会长出这个仓库最忌讳的那种不一致（"远端说 A、daemon 按 B"），
  *   而这一次的后果特别具体：**远端会把一份 daemon 装不进来的东西列成"推荐"**。
  *
@@ -62,8 +62,13 @@ import {
 export interface RecommendedItem {
   /** GitHub 链接（含目录）；仓库根也认。 */
   url: string
-  /** 给人看的名字（列表里那一格）。 */
-  name: string
+  /**
+   * 给人看的**标题**（列表里那一格）。
+   *
+   * ★ D236：以前这栏叫 `name`，与"技能名"混在一起。技能名只有一个、且由取包规则
+   *   从 URL 算出（必须与目录名一致），所以这一栏只是措辞——叫 `title`。
+   */
+  title: string
   /** 粗分类：slides / docs / report / research。界面按它提示用途。 */
   category: string
   origin: 'official' | 'community'
@@ -92,8 +97,8 @@ export interface RecommendedManifest {
  *   里那条比对），否则"我明明加了 exclude，怎么还是旧的那份"。
  */
 export interface SyncIndexItem extends RecommendedItem {
-  /** 由取包规则算出来的 slug——与 daemon 装出来的是同一个。 */
-  slug: string
+  /** 由取包规则算出来的**技能名**——与 daemon 装出来的是同一个（D236）。 */
+  name: string
   /** 原始 GitHub 来源（`github:owner/repo@ref:dir`）。落库时原样交给 daemon，审计链指回上游。 */
   sourceRef: string
   /** 这份内容取自上游哪个提交（短 sha）。上游一动，它就不一样了。 */
@@ -128,9 +133,9 @@ export interface SyncReport {
    *   结论一个字都不会变。
    */
   failures: Array<{ url: string; reason: string }>
-  /** 沿用了本地那份、**没有重新下载**的 slug（已发布目录 1 小时窗口内）。 */
+  /** 沿用了本地那份、**没有重新下载**的 name（已发布目录 1 小时窗口内）。 */
   reused: string[]
-  /** 沿用了**断点目录**那份、没有重新下载的 slug（上一轮抓过、还没发布的）。 */
+  /** 沿用了**断点目录**那份、没有重新下载的 name（上一轮抓过、还没发布的）。 */
   fromCheckpoint: string[]
   /** 因为第一条失败就停了（后面 `remaining` 条没有再试）。 */
   stoppedEarly: boolean
@@ -212,7 +217,7 @@ export async function readRecommendedManifest(path: string): Promise<Recommended
     }
     out.push({
       url,
-      name: String(it['name']),
+      title: String(it['title']),
       category: String(it['category']),
       origin: it['origin'] === 'official' ? 'official' : 'community',
       summary: String(it['summary']),
@@ -329,8 +334,13 @@ async function readPreviousIndex(
     const list = Array.isArray(parsed.items) ? parsed.items : []
     for (const entry of list) {
       const rec = entry as Record<string, unknown>
-      if (typeof rec['url'] === 'string' && typeof rec['slug'] === 'string') {
-        map.set(rec['url'], rec as unknown as SyncIndexItem)
+      /*
+       * ★ D236 兼容：老索引里技能名那一栏叫 `slug`（那时还有一栏显示用的 `name`）。
+       *   现在只有一个 `name`。所以跑过一次老索引盘的人不会"全部重抓"。
+       */
+      const legacyName = typeof rec['name'] === 'string' ? '' : typeof rec['slug'] === 'string' ? rec['slug'] : ''
+      if (typeof rec['url'] === 'string' && (typeof rec['name'] === 'string' || legacyName !== '')) {
+        map.set(rec['url'], { ...rec, name: typeof rec['name'] === 'string' ? rec['name'] : legacyName } as unknown as SyncIndexItem)
       }
     }
   } catch (err) {
@@ -387,7 +397,7 @@ async function tryReuse(
   // 时间读不出来（NaN）⇒ 当作过期：宁可多抓一次，也不能拿一个说不清时间的东西当"新的"
   if (!Number.isFinite(age) || age > deps.reuseWindowMs) return null
 
-  const dir = join(deps.rootDir, prev.slug)
+  const dir = join(deps.rootDir, prev.name)
   try {
     const resolved = await resolveLocalPath(dir)
     const files: Record<string, string> = {}
@@ -396,7 +406,7 @@ async function tryReuse(
     }
     return {
       // ★ 展示文案用**清单里现在的**（改名字/改说明立刻生效），身份与版本沿用本地那份
-      //   （slug / sourceRef / version / fetchedAt / files）——内容没重新抓，那些就不该变。
+      //   （name / sourceRef / version / fetchedAt / files）——内容没重新抓，那些就不该变。
       entry: { ...prev, ...item, files: Object.keys(files).sort() },
       files,
       ageMinutes: Math.max(0, Math.round(age / 60000)),
@@ -404,7 +414,7 @@ async function tryReuse(
     }
   } catch (err) {
     deps.warn(
-      `${deps.source}那份读不出来（${prev.slug}：${err instanceof Error ? err.message : String(err)}）：改为重新抓`,
+      `${deps.source}那份读不出来（${prev.name}：${err instanceof Error ? err.message : String(err)}）：改为重新抓`,
     )
     return null
   }
@@ -424,7 +434,7 @@ async function checkpointItem(
   files: Record<string, string>,
 ): Promise<void> {
   for (const [rel, text] of Object.entries(files)) {
-    const target = join(checkpointDir, entry.slug, rel)
+    const target = join(checkpointDir, entry.name, rel)
     await mkdir(dirname(target), { recursive: true })
     await writeFile(target, text, 'utf8')
   }
@@ -509,21 +519,21 @@ export async function syncRecommendedSkills(options: SyncOptions): Promise<SyncR
           })))
         : null
       if (kept) {
-        if (payloads.has(kept.entry.slug)) {
+        if (payloads.has(kept.entry.name)) {
           failures.push({
             url: item.url,
-            reason: `slug 与清单里另一条撞了（${kept.entry.slug}）——技能库按 slug 唯一，装第二条会顶掉第一条`,
+            reason: `name 与清单里另一条撞了（${kept.entry.name}）——技能库按 name 唯一，装第二条会顶掉第一条`,
           })
           break
         }
-        payloads.set(kept.entry.slug, kept.files)
+        payloads.set(kept.entry.name, kept.files)
         items.push(kept.entry)
-        if (kept.source === '断点') fromCheckpoint.push(kept.entry.slug)
-        else reused.push(kept.entry.slug)
+        if (kept.source === '断点') fromCheckpoint.push(kept.entry.name)
+        else reused.push(kept.entry.name)
         log(
           kept.source === '断点'
-            ? `⏭ ${kept.entry.slug}（沿用**断点目录**里那份——上一轮抓过、还没发布 ⇒ 不重抓）`
-            : `⏭ ${kept.entry.slug}（本地那份是 ${kept.ageMinutes} 分钟前抓的，未过 1 小时 ⇒ 跳过下载，沿用本地）`,
+            ? `⏭ ${kept.entry.name}（沿用**断点目录**里那份——上一轮抓过、还没发布 ⇒ 不重抓）`
+            : `⏭ ${kept.entry.name}（本地那份是 ${kept.ageMinutes} 分钟前抓的，未过 1 小时 ⇒ 跳过下载，沿用本地）`,
         )
         continue
       }
@@ -544,18 +554,18 @@ export async function syncRecommendedSkills(options: SyncOptions): Promise<SyncR
             }
           : {}),
       })
-      if (payloads.has(resolved.slug)) {
+      if (payloads.has(resolved.name)) {
         failures.push({
           url: item.url,
-          reason: `slug 与清单里另一条撞了（${resolved.slug}）——技能库按 slug 唯一，装第二条会顶掉第一条`,
+          reason: `name 与清单里另一条撞了（${resolved.name}）——技能库按 name 唯一，装第二条会顶掉第一条`,
         })
         break
       }
       const files: Record<string, string> = { 'SKILL.md': resolved.body, ...resolved.files }
-      payloads.set(resolved.slug, files)
+      payloads.set(resolved.name, files)
       const entry: SyncIndexItem = {
         ...item,
-        slug: resolved.slug,
+        name: resolved.name,
         sourceRef: resolved.sourceRef,
         version: await latestCommitSha(
           item.url,
@@ -574,7 +584,7 @@ export async function syncRecommendedSkills(options: SyncOptions): Promise<SyncR
       // ★ 抓一条就落一条（`--dry-run` 除外：那是检查，不许写盘）
       if (options.dryRun !== true) await checkpointItem(checkpointDir, checkpointIndex, entry, files)
       log(
-        `✓ ${resolved.slug}（${Object.keys(files).length} 个文件，${resolved.resolvedFrom}）` +
+        `✓ ${resolved.name}（${Object.keys(files).length} 个文件，${resolved.resolvedFrom}）` +
           (resolved.excluded.length > 0
             ? `\n    清单里排除了 ${resolved.excluded.length} 个：` +
               `${resolved.excluded.map((e) => e.path).slice(0, 6).join('、')}` +
@@ -664,9 +674,9 @@ export async function syncRecommendedSkills(options: SyncOptions): Promise<SyncR
   await rm(staging, { recursive: true, force: true })
   await rm(previous, { recursive: true, force: true })
   await mkdir(staging, { recursive: true })
-  for (const [slug, files] of payloads) {
+  for (const [name, files] of payloads) {
     for (const [rel, text] of Object.entries(files)) {
-      const target = join(staging, slug, rel)
+      const target = join(staging, name, rel)
       await mkdir(dirname(target), { recursive: true })
       await writeFile(target, text, 'utf8')
     }

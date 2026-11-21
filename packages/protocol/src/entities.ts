@@ -290,9 +290,20 @@ export type Device = z.infer<typeof Device>
 export const Skill = z.object({
   id: SkillId,
   workspaceId: WorkspaceId,
-  /** slug 是权威名（FR-CLI-20）。 */
-  slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/, 'slug must be kebab-case'),
-  name: z.string().min(1).max(200),
+  /**
+   * **技能的名字**——只有这一个（D236）。
+   *
+   * 它就是业界规范里 `SKILL.md` frontmatter 的 `name`：小写字母/数字/连字符、
+   * 最长 64 字符，并且**必须与磁盘目录名一致**（`<skillsRoot>/<name>/`）。
+   * 以前这里有两个字段（`slug` 是权威名、`name` 是显示标签），两者实测几乎恒等
+   * ——合并成一个，用规范的名字叫它。
+   *
+   * ⚠️ 于是"中文显示名"没有地方放了：标题要写进 `description`（规范里 ≤1024，
+   *   是模型挑技能的信号）。
+   */
+  name: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9-]{0,63}$/, '技能名必须是 kebab-case（与目录名一致）'),
   description: z.string().max(2000).nullable(),
   /** SKILL.md 的正文（人可读的审核标准）。 */
   body: z.string(),
@@ -303,9 +314,9 @@ export const Skill = z.object({
    * 它住在哪：正文与支持文件在**磁盘上**（2026-10 起）
    * ══════════════════════════════════════════════════════════════════
    *
-   * `body` 与 `files` 的权威位置是 `<skillsRoot>/<slug>/` 下的真文件
+   * `body` 与 `files` 的权威位置是 `<skillsRoot>/<名字>/` 下的真文件
    * （默认 `~/.agentdeck/skills`）：`SKILL.md` 是正文，其余是支持文件。
-   * `skill.jsonl` 里那条记录**只留索引**（id / slug / 来源 / 版本 / 时间），
+   * `skill.jsonl` 里那条记录**只留索引**（id / 名字 / 来源 / 版本 / 时间），
    * 读回时由 `store-file` 从磁盘补齐——**磁盘为准**，改文件就生效。
    *
    * 所以这两个字段在**索引记录里通常是缺的**（`undefined`），读路径上没有
@@ -1124,12 +1135,13 @@ export const SkillRef = z.object({
   /**
    * 技能库里的 id。
    *
-   * ★ 2026-11（D111）**允许为空**：智能体的**独有技能**（`agents/<id>/skills/`
-   *   里的文件）不在技能库里，没有库 id——ref 只留 slug + `source: 'agent'`。
+   * ★ 2026-11（D111）**允许为空**：智能体的**独有技能**（`agents/<名字>/skills/`
+   *   里的文件）不在技能库里，没有库 id——ref 只留名字 + `source: 'agent'`。
    *   老数据全是库技能（id 非空），所以可空不会破坏任何既有读路径。
    */
   id: SkillId.nullable(),
-  slug: z.string(),
+  /** 技能的名字（= 目录名 = `SKILL.md` 的 `name`，见 `Skill.name`）。 */
+  name: z.string(),
   /**
    * 含 `'mine'`（D80）：提炼的 skill 同样可以被注入，来源要如实带过去。
    * `'agent'`（D111）：智能体目录里那份独有技能（不是共享资产）。

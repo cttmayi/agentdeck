@@ -13,7 +13,7 @@
    *     素材统计（N 轮 · M 次工具调用）**起草前就可见**，空素材直接禁用开始；
    *   ② drafting：复用 RunLog 显示起草 run 的实时日志（现成能力），可停止；
    *   ③ review（四轮重做）：产出是**文件集合**——文件树 + 选中文件编辑/预览。
-   *     name/description/slug **从 SKILL.md 的 frontmatter 解析**（不再手填：
+   *     name/description/name **从 SKILL.md 的 frontmatter 解析**（不再手填：
    *     同一份内容两个出处必然漂）；入库只传 files，服务端复算。
    *     顶部给校验结论与变更集（新增/修改/删除）；多文件产物不再是"一段大文本"。
    *
@@ -52,7 +52,7 @@
   //   把"键必须是真词条"交给类型检查（写错一个键 svelte-check 当场报）。
   import type { WebTextId } from '@agentdeck/i18n'
   import MainArea from './MainArea.svelte'
-  // ★ 分批第 196 批：slug 从审阅屏挪进「确认入库」的确认框（见该组件头注释）
+  // ★ 分批第 196 批：name 从审阅屏挪进「确认入库」的确认框（见该组件头注释）
   import CrystallizeCommitDialog from './CrystallizeCommitDialog.svelte'
   import RunLog from './RunLog.svelte'
   import CrystallizeIntake from './CrystallizeIntake.svelte'
@@ -66,7 +66,6 @@
   interface CrystallizeTargets {
     loadedSkills: Array<{
       id: string
-      slug: string
       name: string
       description: string | null
       source: Skill['source']
@@ -230,7 +229,7 @@
    * 这里保留的是**一份镜像**：`CrystallizeDraftEditor` 用 `$effect` 把编辑现场推上来
    * （`syncFromEditor`），结论条据此说"能不能入库 / 改了哪些 / 目标是谁"。
    * ⚠️ 不能用 `$: artifacts = editor.artifacts` 这种"直接读模块信号"的写法：legacy 的 `$:`
-   *    跟踪不到跨模块信号，实测结论条会一直画 "○ …"、树与 slug 全不出现（20 条判据连锁红）。
+   *    跟踪不到跨模块信号，实测结论条会一直画 "○ …"、树与 name 全不出现（20 条判据连锁红）。
    */
   let artifacts: Artifacts | null = null
   let fileRows: Array<{ rel: string; change: '' | 'A' | 'M' | 'D'; bytes: number }> = []
@@ -286,11 +285,11 @@
   $: editor.attachedRunId = draftRunId
 
   /**
-   * 改 SKILL.md 时 slug 跟着 frontmatter 的 name 走。
-   * 归属仍在这边（slug 是"入库"的字段），编辑器只负责报告"名字变了"。
+   * 改 SKILL.md 时 name 跟着 frontmatter 的 name 走。
+   * 归属仍在这边（name 是"入库"的字段），编辑器只负责报告"名字变了"。
    */
-  editor.onSlugName = (name: string) => {
-    if (name !== '' && slug !== '') slug = name
+  editor.onNameName = (name: string) => {
+    if (name !== '' && name !== '') name = name
   }
   /** 素材分节（文件清单 + 预览）。 */
   let material: {
@@ -338,17 +337,17 @@
   /** 编辑 → diff 的防抖计时器。 */
   let diffTimer: ReturnType<typeof setTimeout> | null = null
   let saving = false
-  /** 入库用的 slug：默认取 SKILL.md 的 name，新建时可改（更新不允许改，服务端会拦）。 */
-  let slug = ''
+  /** 入库用的 name：默认取 SKILL.md 的 name，新建时可改（更新不允许改，服务端会拦）。 */
+  let name = ''
   /**
    * ★ 分批第 196 批：「确认入库」的确认框开着吗。
    *
-   * 它只做一件事——**把要存的东西摊开看一眼**（slug 可改、name/description 只读、
+   * 它只做一件事——**把要存的东西摊开看一眼**（name 可改、name/description 只读、
    * 几个文件多大）。入库请求仍走原来那条 `save()`，不产生第二条路径。
    */
   let commitOpen = false
-  /** 审阅里的冲突提示（新建撞提炼根同 slug）。 */
-  let clash: { slug: string; name: string; id: string } | null = null
+  /** 审阅里的冲突提示（新建撞提炼根同 name）。 */
+  let clash: { name: string; id: string } | null = null
 
   /** 草稿产出的接口形状（与 `apps/daemon/src/crystallize-artifacts.ts` 对齐）。 */
   interface Artifacts {
@@ -359,7 +358,7 @@
     skillMd: { name: string; description: string; body: string; raw: string }
     validation: { ok: boolean; problems: Array<{ file: string; message: string }> }
     target: { kind: 'new' } | { kind: 'update'; skillId: string } | null
-    baseline: { slug: string; files: Record<string, string> } | null
+    baseline: { name: string; files: Record<string, string> } | null
     materialDir: string
     /** 「按意见改一版」来的草稿：上一版 run id（有它才给"对比上一版"）。 */
     revisedFrom: string | null
@@ -492,11 +491,11 @@
   /**
    * 审阅是否可入库：**校验通过**才行。
    *
-   * ★ 改之前这里是 `slug/name/body 都非空`——那是"四个输入框"时代的口径。
+   * ★ 改之前这里是 `name/name/body 都非空`——那是"四个输入框"时代的口径。
    *   现在前端不再自己拼正文：文件集合与问题清单都来自服务端，前端只负责显示与
-   *   "编辑哪个文件"。所以可入库的条件换成"服务端说没问题"，并且 slug 有值。
+   *   "编辑哪个文件"。所以可入库的条件换成"服务端说没问题"，并且 name 有值。
    */
-  $: reviewValid = artifacts !== null && artifacts.validation.ok && slug.trim() !== ''
+  $: reviewValid = artifacts !== null && artifacts.validation.ok && name.trim() !== ''
 
   /**
    * 开始沉淀按钮的悬停解释。
@@ -510,7 +509,7 @@
 
   $: runShort = draftRunId !== '' ? draftRunId.slice(0, 4) : ''
 
-  /** 「你那一轮」的抬头（新建一份技能 / 优化「slug」）——它只是一句标签，正文是任务原文。 */
+  /** 「你那一轮」的抬头（新建一份技能 / 优化「name」）——它只是一句标签，正文是任务原文。 */
   $: requestLabel =
     targetKind === 'new'
       ? $t('crystallize.requestNew')
@@ -521,7 +520,7 @@
    *
    * ★ 分批第 212 批（使用者："第一句话显示「新建一份技能」，是否可以把它完整的『任务』输入
    *   写出来"）：第一条消息 = **这一轮真的投递出去的那段 ③ 任务块**（`draftTaskText`，
-   *   从 run 日志取，不是现拼），抬头挂一句标签（新建 / 优化「slug」）。
+   *   从 run 日志取，不是现拼），抬头挂一句标签（新建 / 优化「name」）。
    *
    * 下面这个 `requestDetail` 只剩**兜底**：老草稿（那时还没有把三块分开记进日志）或接口还
    * 没读到时用它。⚠️ 它**不带那句标签**——标签已经在 `who` 行上（`你 · 新建一份技能`），
@@ -635,7 +634,7 @@
     reviseFeedback = ''
     revising = false
     previousDraftId = ''
-    slug = ''
+    name = ''
     saving = false
     clash = null
     committedSkill = ''
@@ -1021,7 +1020,7 @@
    *   塞进正文丢掉）。现在服务端读 `skill/` 目录、解析 frontmatter、跑校验，前端只画。
    *
    * ★ 分批第 153 批：产出与编辑现场在 `lib/crystallize-editor.svelte.ts`（右栏读同一份）。
-   *   这里只做"读完之后界面怎么摆"：目标、slug、步骤、素材、最后结果。
+   *   这里只做"读完之后界面怎么摆"：目标、name、步骤、素材、最后结果。
    */
   async function loadDraftOutput(): Promise<void> {
     void loadDraftTask()
@@ -1034,7 +1033,7 @@
           selectedSkillId = res.target.skillId
         }
       }
-      slug = res.skillMd.name
+      name = res.skillMd.name
       void loadMaterial()
       clash = null
       error = ''
@@ -1363,7 +1362,7 @@
   /** 更新目标摘要里的技能名（可能已不在 loadedSkills 里，回退 id）。 */
   function skillNameFor(id: string): string {
     const s = targets?.loadedSkills.find((x) => x.id === id)
-    return s ? `${s.name}（${s.slug}）` : id
+    return s ? `${s.name}（${s.name}）` : id
   }
 
   async function save(): Promise<void> {
@@ -1373,7 +1372,7 @@
     try {
       if (artifacts === null) return
       const target = targetKind === 'new' ? { kind: 'new' as const } : { kind: 'update' as const, skillId: selectedSkillId }
-      // 四轮：只传整份文件 + 确认过的 slug。name / description 由服务端从 SKILL.md
+      // 四轮：只传整份文件 + 确认过的 name。name / description 由服务端从 SKILL.md
       // 的 frontmatter 现解析——前端不再"拆出来再传回去"（那是两个出处的根源）。
       const res = await api<{ skill: Skill; versioning: { enabled: boolean; note?: string } }>(
         '/api/crystallize/commit',
@@ -1383,7 +1382,7 @@
           body: JSON.stringify({
             draftRunId,
             target,
-            ...(slug.trim() !== '' ? { slug: slug.trim() } : {}),
+            ...(name.trim() !== '' ? { name: name.trim() } : {}),
             files: artifacts.files,
           }),
         },
@@ -1399,7 +1398,7 @@
        *   · 不切目标的话第二次会撞 409 `clash_mine`（"已有你提炼的同名 skill"）——
        *     那正是"持续入库"这条路上最容易踩的一脚。
        *
-       * slug 一起钉成落库后的那个：update 不允许改 slug（服务端 `slug_mismatch`）。
+       * name 一起钉成落库后的那个：update 不允许改 name（服务端 `name_mismatch`）。
        */
       committedSkill = res.skill.name
       committedVersioning = res.versioning?.enabled
@@ -1407,22 +1406,22 @@
         : (res.versioning?.note ?? '')
       targetKind = 'update'
       selectedSkillId = res.skill.id
-      slug = res.skill.slug
+      name = res.skill.name
       commitOpen = false
       ondone()
     } catch (err) {
-      // 409 撞提炼根同 slug：服务端把"已存在的那条"放在 body.existing 里，
+      // 409 撞提炼根同 name：服务端把"已存在的那条"放在 body.existing 里，
       // 前端据此切到「更新它」（进化）——那条不一定是本次加载的，不能从
       // loadedSkills 里找。
       const msg = err instanceof Error ? err.message : String(err)
       const body =
         err instanceof ApiError && typeof err.body === 'object' && err.body !== null
-          ? (err.body as { existing?: { slug: string; name: string; id: string } })
+          ? (err.body as { existing?: { name: string; id: string } })
           : null
       const existing = body?.existing
       if (err instanceof ApiError && err.status === 409 && existing) {
-        clash = { slug: existing.slug, name: existing.name, id: existing.id }
-        error = $t('crystallize.clashMine', { slug: existing.slug })
+        clash = { name: existing.name, id: existing.id }
+        error = $t('crystallize.clashMine', { name: existing.name })
       } else {
         error = $t('crystallize.errSave', { error: msg })
       }
@@ -1431,7 +1430,7 @@
     }
   }
 
-  /** 撞 slug 时切到"更新它"：重新起草（素材会带上旧版 SKILL.md 作进化基线）。 */
+  /** 撞 name 时切到"更新它"：重新起草（素材会带上旧版 SKILL.md 作进化基线）。 */
   async function switchToUpdate(): Promise<void> {
     if (!clash || clash.id === '') return
     targetKind = 'update'
@@ -1885,7 +1884,7 @@
           ① 结论条「✓ 体检通过（机械体检） · 4 个文件 · 对比当前版本 +604 −0 · 新建 skill」
              ⇒ 删。体检结果本来就在**右栏**的「体检」一节（同一份数据、同一个数字），
              而"对比 +604 −0"是整条链的合计，真正要看差异时右栏「差异」里有逐文件的行；
-          ② slug 输入 + name/description 只读行 ⇒ 删。**slug 挪进「确认入库」的确认框**：
+          ② name 输入 + name/description 只读行 ⇒ 删。**name 挪进「确认入库」的确认框**：
              它是"入库时唯一要人确认的字段"，那就在入库那一步问，而不是平时挂在页面上；
           ③ 「按意见改一版」的意见框 ⇒ 删。那句话改成在**栏脚输入条**里说
              （`这里不对：…`，路由已接），对话框里再挂一个输入框就是第二套入口。
@@ -1971,7 +1970,6 @@
 <CrystallizeCommitDialog
   bind:open={commitOpen}
   kind={targetKind}
-  bind:slug
   name={artifacts?.skillMd.name ?? ''}
   description={artifacts?.skillMd.description ?? ''}
   fileCount={fileCount}
@@ -2090,7 +2088,7 @@
   }
 
   /* ★ 分批第 196 批：`.crystal-msg[data-msg-role='artifact']` 那条删了——中栏不再有
-     "产物消息"（结论条、slug、编辑器全搬走了：动作去栏头，体检在右栏，编辑器只在右栏）。 */
+     "产物消息"（结论条、name、编辑器全搬走了：动作去栏头，体检在右栏，编辑器只在右栏）。 */
 
   .crystal-composer {
     flex-shrink: 0;
@@ -2542,7 +2540,7 @@
     padding-left: var(--sp-3);
   }
 
-  /* slug + frontmatter 摘要：都只占一行（描述超长就省略，要看全文点文件名看文件） */
+  /* name + frontmatter 摘要：都只占一行（描述超长就省略，要看全文点文件名看文件） */
   .review-meta {
     display: flex;
     align-items: center;
@@ -2551,7 +2549,7 @@
     min-width: 0;
   }
 
-  .slug-inline {
+  .name-inline {
     display: flex;
     align-items: center;
     gap: var(--sp-1);

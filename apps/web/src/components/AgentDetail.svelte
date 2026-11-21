@@ -80,13 +80,13 @@
   let installingSkill = false
 
   // ── 独有技能（2026-11，D111）──
-  // 只属于这个智能体的技能文件（agents/<id>/skills/<slug>/SKILL.md）。与上面那格
+  // 只属于这个智能体的技能文件（agents/<id>/skills/<name>/SKILL.md）。与上面那格
   // 「挂载的技能」（技能库引用）两码事：不进技能库、不进技能页、不可卸载。
   let exclusiveSkills: AgentExclusiveSkill[] = []
   let exclusiveLoading = false
-  /** 编辑器状态：false = 关；true = 正在编辑已有的一条（slug 锁定不可改名）。 */
+  /** 编辑器状态：false = 关；true = 正在编辑已有的一条（name 锁定不可改名）。 */
   let editorOpen = false
-  let editingSlug = ''
+  let editingName = ''
   let editingBody = ''
   let exclusiveBusy = false
 
@@ -112,7 +112,7 @@
   }
 
   function openEditExclusive(s: AgentExclusiveSkill): void {
-    editingSlug = s.slug
+    editingName = s.name
     editingBody = s.body
     editorOpen = true
   }
@@ -120,16 +120,16 @@
   async function saveExclusive(): Promise<void> {
     if (exclusiveBusy) return
     // ★ 2026-11（使用者："也不需要新增按钮"）：界面只留**编辑已有**的入口，
-    //   slug 恒为锁定值（编辑态），新增态/空校验随之删掉。
-    const slug = editingSlug
+    //   name 恒为锁定值（编辑态），新增态/空校验随之删掉。
+    const name = editingName
     if (editingBody.trim() === '') {
       showToast($t('agents.exclusiveSkillsBodyRequired'))
       return
     }
     exclusiveBusy = true
     try {
-      await saveExclusiveSkill(agent.id, slug, editingBody)
-      showToast($t('agents.exclusiveSkillsSaved', { slug }))
+      await saveExclusiveSkill(agent.id, name, editingBody)
+      showToast($t('agents.exclusiveSkillsSaved', { name }))
       editorOpen = false
       await loadExclusive()
     } catch (err) {
@@ -142,14 +142,14 @@
   async function removeExclusive(s: AgentExclusiveSkill): Promise<void> {
     const ok = await askConfirm({
       title: tx('agents.exclusiveSkillsDeleteTitle'),
-      message: tx('agents.exclusiveSkillsDeleteConfirm', { name: s.name, slug: s.slug }),
+      message: tx('agents.exclusiveSkillsDeleteConfirm', { name: s.name }),
       confirmLabel: tx('agents.exclusiveSkillsDelete'),
       danger: true,
     })
     if (!ok) return
     try {
-      await deleteExclusiveSkill(agent.id, s.slug)
-      showToast($t('agents.exclusiveSkillsDeleted', { slug: s.slug }))
+      await deleteExclusiveSkill(agent.id, s.name)
+      showToast($t('agents.exclusiveSkillsDeleted', { name: s.name }))
       await loadExclusive()
     } catch (err) {
       showToast($t('agents.exclusiveSkillsDeleteFailed', { error: String(err instanceof Error ? err.message : err) }))
@@ -181,8 +181,8 @@
   }
 
   /**
-   * ★ 分批第 207 批：起草者**应该挂**的那条技能的 slug（`distilly`）。
-   * 从 `/api/identity` 拿，不在前端硬编码——两处写同一个 slug，迟早漂。
+   * ★ 分批第 207 批：起草者**应该挂**的那条技能的 name（`distilly`）。
+   * 从 `/api/identity` 拿，不在前端硬编码——两处写同一个 name，迟早漂。
    * 老 daemon 不带这个字段 ⇒ 退化成"未安装"的通用说法（不编名字）。
    */
 
@@ -488,7 +488,7 @@
      *   · `renaming` / `renameValue`——改名态（报的那个）；
      *   · `consolidateOpen`——「合并同类」对话框里装的是**上一个人的全部记忆**，
      *     留着它再点确认会把那一份合并结果用到新的人身上；
-     *   · `editorOpen` / `editingSlug` / `editingBody`——独有技能的编辑器同理
+     *   · `editorOpen` / `editingName` / `editingBody`——独有技能的编辑器同理
      *     （里面是上一个人的技能正文，保存会写进**新的人**的目录）；
      *   · `memNewText` / `memPreview*` / `memError`——新的一条记忆的草稿与预览。
      *
@@ -499,7 +499,7 @@
     renameValue = ''
     consolidateOpen = false
     editorOpen = false
-    editingSlug = ''
+    editingName = ''
     editingBody = ''
     memNewText = ''
     memPreview = null
@@ -1244,8 +1244,8 @@
                       checked={agent.skillIds.includes(s.id)}
                       disabled
                     />
-                    <span title={s.localDir ?? s.slug}
-                      >{s.name}{#if s.name !== s.slug}<code class="skill-slug">{s.slug}</code>{/if}</span
+                    <span title={s.localDir ?? s.name}
+                      >{s.name}</span
                     >
                   </label>
                 {/each}
@@ -1277,12 +1277,12 @@
                     ⚠️ 信息来源没有丢：仍挂在 `title` 里（悬停能看到），因为"同名两条、各自
                     来自不同目录"这件事真的存在——真到需要分辨的那一次，鼠标一停就够。
                   -->
-                  <span title={s.localDir ?? s.slug}>
+                  <span title={s.localDir ?? s.name}>
                     <!-- ★ 2026-10：技能以**名字**为主显示（与组里「新建私有」同款）。
-                         已安装技能的名字常常就是 slug（如 `fireworks-tech-graph`），
-                         之前同时印 slug + name 会重复成两个一模一样的东西。slug 只在
+                         已安装技能的名字常常就是 name（如 `fireworks-tech-graph`），
+                         之前同时印 name + name 会重复成两个一模一样的东西。name 只在
                          和名字不同时才作为机器名补充——名字相同的场合它纯属噪音。 -->
-                    {s.name}{#if s.name !== s.slug}<code class="skill-slug">{s.slug}</code>{/if}
+                    {s.name}
                   </span>
                 </label>
               {/each}
@@ -1309,30 +1309,30 @@
                  与共享技能**同款勾选列表**（checkbox 锁着——独有技能是文件资产，
                  没有"卸载"概念，随智能体删除）；编辑/删除悬停才出现，不抢勾选的样子。 -->
             <div class="exclusive-picker locked" data-exclusive-list>
-              {#each exclusiveSkills as s (s.slug)}
+              {#each exclusiveSkills as s (s.name)}
                 <label class="skill-option" data-exclusive-row>
                   <input type="checkbox" checked disabled />
                   <!-- ★ 2026-11（使用者："我要的是和上面的一致，不要不同行为"）：
-                       独有技能与共享技能**同一套显示**——名字为主，slug 只在和名字
-                       不同时才作为机器名补充（内置平台技能 name 是中文标题、slug 是
+                       独有技能与共享技能**同一套显示**——名字为主，name 只在和名字
+                       不同时才作为机器名补充（内置平台技能 name 是中文标题、name 是
                        英文 kebab，所以会看到"智能体设计规范 agent-design-norms"：
                        这正是共享技能的老规矩，第 209 批）。 -->
                   <span class="exclusive-name">
                     {s.name}
-                    {#if s.name !== s.slug}<code class="skill-slug">{s.slug}</code>{/if}
+
                   </span>
                   {#if !readOnly}
                     <span class="exclusive-actions">
                       <button
                         type="button"
                         class="btn btn--mini"
-                        data-exclusive-edit={s.slug}
+                        data-exclusive-edit={s.name}
                         onclick={() => openEditExclusive(s)}
                       >{$t('agents.exclusiveSkillsEdit')}</button>
                       <button
                         type="button"
                         class="btn btn--mini"
-                        data-exclusive-delete={s.slug}
+                        data-exclusive-delete={s.name}
                         onclick={() => void removeExclusive(s)}
                       >{$t('agents.exclusiveSkillsDelete')}</button>
                     </span>
@@ -1343,10 +1343,10 @@
           {/if}
           {#if editorOpen}
             <div class="exclusive-editor" data-exclusive-editor>
-              <label class="exclusive-slug-row">
-                <span class="cell-label-inner">{$t('agents.exclusiveSkillsSlug')}</span>
-                <code class="skill-slug">{editingSlug}</code>
-                <p class="row-hint">{$t('agents.exclusiveSkillsSlugLockedHint')}</p>
+              <label class="exclusive-name-row">
+                <span class="cell-label-inner">{$t('agents.exclusiveSkillsName')}</span>
+                <code class="skill-name">{editingName}</code>
+                <p class="row-hint">{$t('agents.exclusiveSkillsNameLockedHint')}</p>
               </label>
               <label class="exclusive-body-row">
                 <span class="cell-label-inner">{$t('agents.exclusiveSkillsBody')}</span>
@@ -2068,7 +2068,7 @@
 
 
   /* 补充显示的名字之外的机器名：弱化，不抢主显示的存在感 */
-  .skill-slug {
+  .skill-name {
     margin-left: var(--sp-1);
     font-size: var(--fs-sm);
     color: var(--text-faint);

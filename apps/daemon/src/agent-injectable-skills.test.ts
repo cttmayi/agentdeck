@@ -59,8 +59,7 @@ async function seed(dir: string): Promise<FileStore> {
   await store.insertSkill({
     id: 'lib-1' as never,
     workspaceId: WS as never,
-    slug: 'house-style',
-    name: '写作规范',
+    name: 'house-style',
     description: '',
     body: '# 写作规范\n\n## When to Use\n\n库里的共享技能。\n',
     source: 'local',
@@ -70,7 +69,7 @@ async function seed(dir: string): Promise<FileStore> {
     updatedAt: 1,
   } as never)
   /*
-   * ★ D231：写独有技能要**智能体存在**（目录名 = 名字的 slug，索引里没有它就写不了，
+   * ★ D231：写独有技能要**智能体存在**（目录名 = 名字的 name，索引里没有它就写不了，
    *   否则会造出一个没有 agent.json 的孤儿目录）。所以夹具里先把人建出来。
    */
   for (const [id, name] of [
@@ -118,7 +117,7 @@ describe('★ D228：独有技能按"来源"定位，两种来源同一份实现
     try {
       const store = await seed(dir)
 
-      // ① 账号智能体那条：agents/<id>/skills/<slug>/SKILL.md
+      // ① 账号智能体那条：agents/<id>/skills/<name>/SKILL.md
       await store.writeExclusiveSkill({ kind: 'agent', agentId: 'a-1' as never }, 'private-notes', BODY)
       const agentSources: SkillSources = {
         workspaceId: WS as never,
@@ -127,7 +126,7 @@ describe('★ D228：独有技能按"来源"定位，两种来源同一份实现
       }
       const fromAgent = await loadInjectableSkills(store, agentSources)
 
-      // ② 编排内建智能体那条：workflows/<wid>/agents/<名字>/skills/<slug>/SKILL.md
+      // ② 编排内建智能体那条：workflows/<wid>/agents/<名字>/skills/<name>/SKILL.md
       await store.writeExclusiveSkill(
         { kind: 'workflow-agent', workflowId: 'wf-1', agentId: 'wa-1' },
         'private-notes',
@@ -147,20 +146,20 @@ describe('★ D228：独有技能按"来源"定位，两种来源同一份实现
        */
       assert.deepEqual(fromWorkflow, fromAgent)
       assert.equal(fromAgent.length, 2, '一个库技能 + 一个独有技能')
-      const exclusive = fromAgent.find((p: SkillPayload) => p.slug === 'private-notes')
+      const exclusive = fromAgent.find((p: SkillPayload) => p.ref.name === 'private-notes')
       assert.ok(exclusive, '独有技能要在里面')
       assert.equal(exclusive.body, BODY)
       // 独有技能**没有库 id**（D111 的口径不变）
-      assert.deepEqual(exclusive.ref, { id: null, slug: 'private-notes', source: 'agent' })
+      assert.deepEqual(exclusive.ref, { id: null, name: 'private-notes', source: 'agent' })
       // 库技能照旧
-      const lib = fromAgent.find((p: SkillPayload) => p.slug === 'house-style')
+      const lib = fromAgent.find((p: SkillPayload) => p.ref.name === 'house-style')
       assert.equal(lib?.ref.id, 'lib-1')
 
       // ③ 两边落在**不同目录**（真实落盘位置不能撞）
       assert.match(
         agentExclusiveSkillsDir(dir, '甲'),
         /agents[/\\]甲[/\\]skills$/,
-        '账号智能体：目录名是名字的 slug（D231）',
+        '账号智能体：目录名是名字的 name（D231）',
       )
       /*
        * ★ D235：内建智能体的技能目录**就在它自己的实体目录里面**
@@ -200,7 +199,7 @@ describe('★ D228：独有技能按"来源"定位，两种来源同一份实现
         exclusive: { kind: 'workflow-agent', workflowId: 'wf-2', agentId: 'wa-2' },
       })
       assert.equal(asWorkflow.length, 1)
-      assert.equal(asWorkflow[0]!.slug, 'only-in-workflow')
+      assert.equal(asWorkflow[0]!.ref.name, 'only-in-workflow')
       await store.close()
     } finally {
       await cleanup(dir)

@@ -166,12 +166,12 @@ export interface Identity {
   dataDir?: string
   skillsDir?: string
   /**
-   * ★ 分批第 207 批：**起草者应挂的那条技能的 slug**（`distilly`）。
+   * ★ 分批第 207 批：**起草者应挂的那条技能的 name**（`distilly`）。
    *
-   * 智能体页要能说出「distilly（未安装）」——前端不去硬编码 slug（两处迟早漂），
+   * 智能体页要能说出「distilly（未安装）」——前端不去硬编码 name（两处迟早漂），
    * 由 daemon 给。挂载本身只在 `Agent.skillIds` 上，这个字段只回答"应该挂哪条"。
    */
-  drafterSkillSlug?: string
+  drafterSkillName?: string
 }
 
 export interface Issue {
@@ -210,7 +210,7 @@ export interface Workflow {
 /**
  * 编排内嵌智能体（只在编排里有效，不占智能体页——D234 落成 `workflows/<id>/agents/<名字>/`）。
  *
- * 与账号智能体同一副形状：`id` 是身份（run 引用它）、目录名是名字的 slug（改名跟着搬）、
+ * 与账号智能体同一副形状：`id` 是身份（run 引用它）、目录名是名字的 name（改名跟着搬）、
  * 指令在 `instructions.md` 里、技能用 `skillIds` 引用技能库。
  */
 export interface WorkflowInlineAgent {
@@ -519,12 +519,12 @@ export interface AgentsPayload {
 }
 
 /**
- * ★ 2026-11（D111）：智能体的**独有技能**——`agents/<id>/skills/<slug>/SKILL.md`
+ * ★ 2026-11（D111）：智能体的**独有技能**——`agents/<id>/skills/<name>/SKILL.md`
  * 文件资产。与共享技能（`skillIds` 挂载的技能库条目）两码事：不进技能库、不进
  * 技能页、不可卸载；删智能体连目录一起删。
  */
 export interface AgentExclusiveSkill {
-  slug: string
+  /** 技能名（= 目录名，D236：只有一个名字）。 */
   name: string
   description?: string
   body: string
@@ -572,7 +572,7 @@ export interface TemplateAdjustment {
 
 export interface Skill {
   id: string
-  slug: string
+  /** 技能名（= 目录名 = `SKILL.md` 的 `name`，D236）。 */
   name: string
   description: string | null
   /** SKILL.md 的正文。 */
@@ -595,7 +595,7 @@ export interface Skill {
    * `null` = 手装的、给路径装的、或远端装的。
    *
    * ⚠️ 它只是一个**来源标记**，没有任何"跟随磁盘"的语义：装完就是一条普通技能，
-   *    正文在我们自己的 `~/.agentdeck/skills/<slug>/` 里。
+   *    正文在我们自己的 `~/.agentdeck/skills/<name>/` 里。
    *
    * ⚠️ 老 daemon 不返回这个字段 ⇒ `undefined`，按"不是从本地目录来的"处理。
    */
@@ -604,17 +604,15 @@ export interface Skill {
 
 /** 「从本地安装」页签里，某个目录中**发现的一个技能**。 */
 export interface LocalSkillCandidate {
-  /** 装到库里时的 slug（走与安装同一条解析规则得出）。 */
-  slug: string
+  /** 装到库里时的 name（走与安装同一条解析规则得出）。 */
+  name: string
   /** 相对被扫的那个根目录的路径（`.system/skill-creator` 这种）。 */
   rel: string
   /** 技能目录的绝对路径——装的时候原样传回 `POST /api/skills/install`。 */
   dir: string
-  /** 目录名。 */
-  name: string
   /** SKILL.md frontmatter 里作者写的用途说明。 */
   description: string | null
-  /** 库里已经有同 slug 的了 ⇒ 显示「已安装」并禁用按钮。 */
+  /** 库里已经有同 name 的了 ⇒ 显示「已安装」并禁用按钮。 */
   installed: boolean
 }
 

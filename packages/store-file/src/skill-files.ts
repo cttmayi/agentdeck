@@ -4,7 +4,7 @@ import type { Skill } from '@agentdeck/protocol'
 import { ensureDir, removeQuietly, writeFile } from './fs-utils.ts'
 
 /**
- * 技能内容的**磁盘落点**：`<skillsRoot>/<slug>/`。
+ * 技能内容的**磁盘落点**：`<skillsRoot>/<name>/`。
  *
  * ══════════════════════════════════════════════════════════════════
  * 为什么内容不留在 `skill.jsonl` 里
@@ -13,8 +13,8 @@ import { ensureDir, removeQuietly, writeFile } from './fs-utils.ts'
  * 原来是整条记录（正文 + 支持文件）都写进 `log/skill.jsonl`——装进来的技能
  * 在磁盘上没有单独的文件，使用者想看一眼 SKILL.md 只能去翻日志。2026-10 改成：
  *
- *   · **内容**（`SKILL.md` 正文 + 支持文件）落在 `<skillsRoot>/<slug>/`，是**权威**；
- *   · **索引 / 元数据**（id / slug / 来源 / 版本 / 时间）留在 `skill.jsonl`。
+ *   · **内容**（`SKILL.md` 正文 + 支持文件）落在 `<skillsRoot>/<name>/`，是**权威**；
+ *   · **索引 / 元数据**（id / name / 来源 / 版本 / 时间）留在 `skill.jsonl`。
  *
  * 「权威」是字面意思：**改这里的文件就生效**——读回时磁盘赢，记录里不再有正文。
  * 代价是正文改动不进 append-only 日志（改文件不会留历史），这是刻意的取舍。
@@ -32,9 +32,9 @@ export interface SkillContent {
   files: Record<string, string>
 }
 
-/** 一个技能的目录：`<root>/<slug>`。slug 已由取包规则收敛成安全的目录名。 */
-export function skillDir(root: string, slug: string): string {
-  return join(root, slug)
+/** 一个技能的目录：`<root>/<name>`。name 已由取包规则收敛成安全的目录名。 */
+export function skillDir(root: string, name: string): string {
+  return join(root, name)
 }
 
 /**
@@ -44,7 +44,7 @@ export function skillDir(root: string, slug: string): string {
  * 绝对路径除了 `/` 开头还有 `\` 开头与盘符（`C:`）开头——内容也可能来自
  * 导入的备份，那是任意的 JSON，不能只按 POSIX 判。
  */
-function assertSafeRelative(rel: string, slug: string): void {
+function assertSafeRelative(rel: string, name: string): void {
   const bad =
     rel === '' ||
     rel === 'SKILL.md' ||
@@ -52,7 +52,7 @@ function assertSafeRelative(rel: string, slug: string): void {
     rel.startsWith('/') ||
     rel.startsWith('\\') ||
     /^[A-Za-z]:/.test(rel)
-  if (bad) throw new Error(`技能 ${slug} 的支持文件路径不合法：${rel}`)
+  if (bad) throw new Error(`技能 ${name} 的支持文件路径不合法：${rel}`)
 }
 
 /**
@@ -63,12 +63,12 @@ function assertSafeRelative(rel: string, slug: string): void {
  * （下一次注入时又被写进工作目录）。
  */
 export async function writeSkillFiles(root: string, skill: Skill): Promise<void> {
-  const dir = skillDir(root, skill.slug)
+  const dir = skillDir(root, skill.name)
   await removeQuietly(dir)
   await ensureDir(dir)
   await writeFile(join(dir, 'SKILL.md'), skill.body, 'utf8')
   for (const [rel, content] of Object.entries(skill.files ?? {})) {
-    assertSafeRelative(rel, skill.slug)
+    assertSafeRelative(rel, skill.name)
     const target = join(dir, rel)
     await ensureDir(dirname(target))
     await writeFile(target, content, 'utf8')
@@ -81,8 +81,8 @@ export async function writeSkillFiles(root: string, skill: Skill): Promise<void>
  * 支持文件是**递归读**的：磁盘为准意味着使用者可能往里加文件，读的时候
  * 要按磁盘上实际有什么来。`SKILL.md` 单独作为正文，不进 `files`。
  */
-export async function readSkillContent(root: string, slug: string): Promise<SkillContent | null> {
-  const dir = skillDir(root, slug)
+export async function readSkillContent(root: string, name: string): Promise<SkillContent | null> {
+  const dir = skillDir(root, name)
   let body: string
   try {
     body = await readFile(join(dir, 'SKILL.md'), 'utf8')
@@ -119,6 +119,6 @@ async function collectFiles(
 }
 
 /** 删掉一个技能的磁盘目录（`rm -rf`；不存在是空转，不报错）。 */
-export async function removeSkillFiles(root: string, slug: string): Promise<void> {
-  await removeQuietly(skillDir(root, slug))
+export async function removeSkillFiles(root: string, name: string): Promise<void> {
+  await removeQuietly(skillDir(root, name))
 }

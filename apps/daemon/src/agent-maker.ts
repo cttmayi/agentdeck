@@ -19,7 +19,7 @@
  *                             `## 边界（不能碰）` / `## 输出格式` / `## 验收标准`
  *                             （见 `AGENT_MAKER_INSTRUCTIONS` 与平台技能
  *                             agent-design-norms）
- *     skill/<slug>/SKILL.md ← 配套技能草稿（生成者按 skill-eligibility 判定后
+ *     skill/<name>/SKILL.md ← 配套技能草稿（生成者按 skill-eligibility 判定后
  *                             逐条起草；没有就 0 条）
  *
  * 一个"生成产物"是一个包，不散在工作目录里，也不和 agent 写的其他文件混在一起。
@@ -40,7 +40,7 @@ export const AGENT_DRAFT_DIR = 'agent-draft'
 /** 岗位卡文件名（在 `agent-draft/` 目录内）。 */
 export const AGENT_DRAFT_FILE = 'agent-draft.md'
 
-/** 配套技能草稿的目录名（生成者写 `agent-draft/skill/<slug>/SKILL.md`）。 */
+/** 配套技能草稿的目录名（生成者写 `agent-draft/skill/<name>/SKILL.md`）。 */
 export const AGENT_DRAFT_SKILL_DIR = 'skill'
 
 /** 岗位卡解析结果：失败给 `error`（界面/路由据此说清哪里不对，不猜）。 */
@@ -84,9 +84,9 @@ export function parseAgentDraft(text: string): AgentDraftParsed {
   return { ok: true, name, instructions }
 }
 
-/** 一条配套技能草稿（`skill/<slug>/SKILL.md` 解析出来的样子）。 */
+/** 一条配套技能草稿（`skill/<名字>/SKILL.md` 解析出来的样子）。 */
 export interface AgentDraftSkill {
-  slug: string
+  /** 技能名（= 目录名，D236：只有一个名字）。 */
   name: string
   description: string
   body: string
@@ -96,7 +96,7 @@ export interface AgentDraftSkill {
 export interface AgentDraftArtifacts {
   /** `agent-draft.md` 的原文；目录里没有 = null（按钮出现条件就是它）。 */
   agentDraft: string | null
-  /** `skill/<slug>/SKILL.md` 逐条解析；目录没有 = 空数组（配套技能 0 条）。 */
+  /** `skill/<name>/SKILL.md` 逐条解析；目录没有 = 空数组（配套技能 0 条）。 */
   skills: AgentDraftSkill[]
 }
 
@@ -120,14 +120,13 @@ export async function readAgentDraftArtifacts(dir: string): Promise<AgentDraftAr
     const entries = await readdir(join(dir, AGENT_DRAFT_DIR, AGENT_DRAFT_SKILL_DIR), { withFileTypes: true })
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name.startsWith('.')) continue
-      const slug = entry.name
+      const name = entry.name
       try {
-        const raw = await readFile(join(dir, AGENT_DRAFT_DIR, AGENT_DRAFT_SKILL_DIR, slug, 'SKILL.md'), 'utf8')
+        const raw = await readFile(join(dir, AGENT_DRAFT_DIR, AGENT_DRAFT_SKILL_DIR, name, 'SKILL.md'), 'utf8')
         const parsed = parseSkillMd(raw)
         if (parsed.body.trim() === '') continue
         skills.push({
-          slug,
-          name: parsed.name !== '' ? parsed.name : slug,
+          name,
           description: parsed.description,
           body: raw,
         })

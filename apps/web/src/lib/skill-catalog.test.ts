@@ -52,7 +52,7 @@ describe('compareVersions', () => {
 })
 
 describe('catalogEntryState', () => {
-  const entry = { slug: 'general-review', version: '1.0.0' }
+  const entry = { name: 'general-review', version: '1.0.0' }
 
   test('本地没有 ⇒ 安装（不带 overwrite）', () => {
     const s = catalogEntryState(undefined, entry)
@@ -62,7 +62,7 @@ describe('catalogEntryState', () => {
   })
 
   test('★ 版本一致 ⇒ 已安装，按钮禁用（这就是"版本一致提示已安装"）', () => {
-    const s = catalogEntryState({ slug: 'general-review', version: '1.0.0' }, entry)
+    const s = catalogEntryState({ name: 'general-review', version: '1.0.0' }, entry)
     assert.equal(s.action, 'installed')
     // 断言的是**渲染出来的那句话**，不是键名：键可以改，话不能变。
     assert.equal(s.labelId, 'install.actionInstalled')
@@ -73,8 +73,8 @@ describe('catalogEntryState', () => {
   })
 
   test('★ 目录里是新版本 ⇒ 更新（并显示版本变化）', () => {
-    const s = catalogEntryState({ slug: 'general-review', version: '1.0.0' }, {
-      slug: 'general-review',
+    const s = catalogEntryState({ name: 'general-review', version: '1.0.0' }, {
+      name: 'general-review',
       version: '1.1.0',
     })
     assert.equal(s.action, 'update')
@@ -87,7 +87,7 @@ describe('catalogEntryState', () => {
   })
 
   test('★ 本地更新 ⇒ 说清是"往回退"，不许叫更新', () => {
-    const s = catalogEntryState({ slug: 'general-review', version: '2.0.0' }, entry)
+    const s = catalogEntryState({ name: 'general-review', version: '2.0.0' }, entry)
     assert.equal(s.action, 'downgrade')
     assert.equal(labelOf(s), '退回 1.0.0')
     assert.match(labelOf(s), /退回/)
@@ -97,7 +97,7 @@ describe('catalogEntryState', () => {
   })
 
   test('★ 本地有版本但认不出来 ⇒ 当作可更新，但把两个版本号都摆出来', () => {
-    const s = catalogEntryState({ slug: 'general-review', version: '2024-05' }, entry)
+    const s = catalogEntryState({ name: 'general-review', version: '2024-05' }, entry)
     assert.equal(s.action, 'update')
     // 认不出新旧时按钮上只写「更新」——**不带版本号**，因为"更新到 1.0.0"
     // 会让这句变成一句我们其实判断不出来的话。
@@ -110,7 +110,7 @@ describe('catalogEntryState', () => {
   test('★ 目录这条**没有版本号**（取不到上游提交）⇒ 两种情形都不许瞎比大小', () => {
     // 2026-10 起推荐清单的版本取自"上游那个目录最近一次提交"，取不到时是 null。
     // null 的含义是**我们不知道**——不是"没有版本"，也不是"版本为空"。
-    const noVer = { slug: 'pptx', version: null }
+    const noVer = { name: 'pptx', version: null }
 
     // ① 本地没有 ⇒ 装，但不能说"目录里有 pptx vxxx"（那会渲染成一个空位）
     const fresh = catalogEntryState(undefined, noVer)
@@ -120,7 +120,7 @@ describe('catalogEntryState', () => {
     assert.match(hintOf(fresh), /取不到上游提交/)
 
     // ② 本地有版本 ⇒ **不能**说"已安装"（不知道是不是同一份内容），要么替换要么更新
-    const local = { slug: 'pptx', version: 'abc1234' }
+    const local = { name: 'pptx', version: 'abc1234' }
     const s = catalogEntryState(local, noVer)
     assert.equal(s.action, 'replace')
     assert.equal(s.needsOverwrite, true)
@@ -132,9 +132,9 @@ describe('catalogEntryState', () => {
     // 从路径/GitHub 装进来的、或者本机自建的，都没有版本。
     // 我们不知道手上这份是不是同一份内容，所以不能替它背书。
     for (const local of [
-      { slug: 'general-review' },
-      { slug: 'general-review', version: null },
-      { slug: 'general-review', source: 'local' },
+      { name: 'general-review' },
+      { name: 'general-review', version: null },
+      { name: 'general-review', source: 'local' },
     ]) {
       const s = catalogEntryState(local, entry)
       assert.equal(s.action, 'replace', JSON.stringify(local))
@@ -145,7 +145,7 @@ describe('catalogEntryState', () => {
     }
   })
 
-  test('本地没有：说清"目录里有这一条、本地还没有"，并带上 slug 与版本', () => {
+  test('本地没有：说清"目录里有这一条、本地还没有"，并带上 name 与版本', () => {
     const s = catalogEntryState(undefined, entry)
     assert.equal(labelOf(s), '安装')
     assert.equal(hintOf(s), '目录里有 general-review 1.0.0，本地还没有。')
@@ -158,16 +158,16 @@ describe('catalogEntryState', () => {
    *    文档）引用的依据，所以逐字钉住——只是钉的那一份现在不再带记号。
    */
   test('★ 中文那句"往回退"逐字保留（词表里的 zh 是默认语言，也是探针断言的依据）', () => {
-    const s = catalogEntryState({ slug: 'general-review', version: '2.0.0' }, entry)
+    const s = catalogEntryState({ name: 'general-review', version: '2.0.0' }, entry)
     assert.equal(
       hintOf(s),
       '本地 2.0.0 比目录里的 1.0.0 更新。点下去是往回退，不是更新——确认这是你要的。',
     )
   })
 
-  test('slug 不同不会互相影响（同名才比较）', () => {
-    // 调用方负责按 slug 找 local；这里确认"本地没有这个 slug"就是安装
-    const s = catalogEntryState({ slug: 'something-else', version: '9.9.9' }, entry)
+  test('name 不同不会互相影响（同名才比较）', () => {
+    // 调用方负责按 name 找 local；这里确认"本地没有这个 name"就是安装
+    const s = catalogEntryState({ name: 'something-else', version: '9.9.9' }, entry)
     assert.equal(s.action, 'install')
   })
 })

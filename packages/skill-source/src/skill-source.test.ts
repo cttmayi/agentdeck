@@ -6,6 +6,7 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
 import {
   DEFAULT_GITHUB_PROXY,
   assertValidPathPatterns,
+  assertValidSkillName,
   globToRegExp,
   matchingExclude,
   MAX_FILES,
@@ -21,7 +22,7 @@ import {
   resolveGithubProxy,
   resolvePayloadEntry,
   resolveSkillSource,
-  toSlug,
+  toSkillName,
 } from './skill-source.ts'
 
 /**
@@ -145,25 +146,39 @@ async function expectSourceError(
 }
 
 // ─────────────────────────────────────────────────────────────
-// slug
+// name
 // ─────────────────────────────────────────────────────────────
 
-describe('slug 收敛', () => {
+test('★★ D236：技能名就是规范里那个 name（kebab、≤64），来源名的收敛不给"第二个名字"', () => {
+  // 规范：小写字母/数字/连字符、≤64、必须与目录名一致
+  assert.equal(toSkillName('My_Skill'), 'my-skill')
+  assert.equal(toSkillName('技能'), '', '全是非法字符 ⇒ 收敛成空，由调用方要求人显式指定')
+  assert.equal(toSkillName('a'.repeat(80)).length, 63, '超长截断（与 63 字符的目录名上限同一处）')
+  // 带中文的来源名必须显式给名字，否则当场报错（不瞎猜、也不偷偷用一个中文目录名）
+  assert.throws(() => assertValidSkillName('技能'), (err: unknown) => {
+    assert.ok(err instanceof SkillSourceError)
+    assert.equal((err as SkillSourceError).code, 'bad_name')
+    return true
+  })
+  assert.doesNotThrow(() => assertValidSkillName('research-and-write'))
+})
+
+describe('name 收敛', () => {
   test('常见写法都能收敛成 kebab-case', () => {
-    assert.equal(toSlug('My_Skill'), 'my-skill')
-    assert.equal(toSlug('Foo.Bar'), 'foo-bar')
-    assert.equal(toSlug('--a--b--'), 'a-b')
-    assert.equal(toSlug('Bubble Sort'), 'bubble-sort')
+    assert.equal(toSkillName('My_Skill'), 'my-skill')
+    assert.equal(toSkillName('Foo.Bar'), 'foo-bar')
+    assert.equal(toSkillName('--a--b--'), 'a-b')
+    assert.equal(toSkillName('Bubble Sort'), 'bubble-sort')
   })
 
   test('★ 全非 ASCII 收敛成空串 —— 由调用方报错，而不是猜一个名字', () => {
-    // 「技能」这种目录名收敛后是空串。此时**必须报错要求显式指定 slug**：
+    // 「技能」这种目录名收敛后是空串。此时**必须报错要求显式指定 name**：
     // 猜一个拼音/序号当目录名，使用者会得到一个自己没起过名字的技能。
-    assert.equal(toSlug('技能'), '')
+    assert.equal(toSkillName('技能'), '')
   })
 
   test('★ 超过 63 字符会被截断（目录名有长度限制）', () => {
-    assert.equal(toSlug('a'.repeat(200)).length, 63)
+    assert.equal(toSkillName('a'.repeat(200)).length, 63)
   })
 })
 
@@ -187,7 +202,7 @@ describe('来源：本地目录', () => {
         'echo ok',
         '★ 子目录里的支持文件也要带——少了它技能就是坏的',
       )
-      assert.equal(r.slug.startsWith('skill-src-'), true, 'slug 由目录名派生')
+      assert.equal(r.name.startsWith('skill-src-'), true, 'name 由目录名派生')
       assert.equal(r.included.length, 3)
     } finally {
       await cleanup(dir)
@@ -335,11 +350,11 @@ describe('来源：本地目录', () => {
     assert.match(err.message, /不存在/)
   })
 
-  test('显式 slug 覆盖派生结果', async () => {
+  test('显式 name 覆盖派生结果', async () => {
     const dir = await makeSkillDir({ 'SKILL.md': '# 正文' })
     try {
-      const r = await resolveLocalPath(dir, { slug: 'my-custom-slug' })
-      assert.equal(r.slug, 'my-custom-slug')
+      const r = await resolveLocalPath(dir, { name: 'my-custom-name' })
+      assert.equal(r.name, 'my-custom-name')
     } finally {
       await cleanup(dir)
     }
@@ -488,7 +503,7 @@ describe('来源：GitHub（注入假 fetch，不联网）', () => {
         { fetchImpl: gh.impl },
       )
       assert.equal(r.body, '# foo 技能')
-      assert.equal(r.slug, 'foo')
+      assert.equal(r.name, 'foo')
       assert.equal(r.files['reference.md'], '参考')
       assert.equal(r.files['scripts/run.sh'], 'echo hi')
       // ★ 别的技能不能被顺手装进来
@@ -646,18 +661,18 @@ describe('来源：GitHub（注入假 fetch，不联网）', () => {
 describe('来源：远端目录条目', () => {
   test('★ body 就是 SKILL.md 的内容', () => {
     const r = resolvePayloadEntry({
-      slug: 'remote-review',
+      name: 'remote-review',
       body: '# 远端标准',
       sourceRef: 'remote:remote-review@1.0.0',
     })
     assert.equal(r.body, '# 远端标准')
-    assert.equal(r.slug, 'remote-review')
+    assert.equal(r.name, 'remote-review')
     assert.equal(r.sourceRef, 'remote:remote-review@1.0.0')
   })
 
   test('★ files 里有 SKILL.md 时以它为准（而不是和 body 打架）', () => {
     const r = resolvePayloadEntry({
-      slug: 'x',
+      name: 'x',
       body: '旧的正文',
       files: { 'SKILL.md': '# 文件里的正文', 'a.md': 'A' },
       sourceRef: 'remote:x@1',
@@ -669,7 +684,7 @@ describe('来源：远端目录条目', () => {
 
   test('★ body 与 files 都没有 SKILL.md ⇒ 拒绝', () => {
     assert.throws(
-      () => resolvePayloadEntry({ slug: 'x', body: '   ', sourceRef: 'remote:x@1' }),
+      () => resolvePayloadEntry({ name: 'x', body: '   ', sourceRef: 'remote:x@1' }),
       (e: SkillSourceError) => e.code === 'missing_skill_md',
     )
   })
@@ -678,7 +693,7 @@ describe('来源：远端目录条目', () => {
     assert.throws(
       () =>
         resolvePayloadEntry({
-          slug: 'x',
+          name: 'x',
           body: '# 正文',
           files: { '../../etc/passwd': '坏东西' },
           sourceRef: 'remote:x@1',
@@ -687,10 +702,10 @@ describe('来源：远端目录条目', () => {
     )
   })
 
-  test('★ 远端给的 slug 不合法 ⇒ 拒绝（它是磁盘目录名）', () => {
+  test('★ 远端给的 name 不合法 ⇒ 拒绝（它是磁盘目录名）', () => {
     assert.throws(
-      () => resolvePayloadEntry({ slug: '技能 名称', body: '# 正文', sourceRef: 'remote:x@1' }),
-      (e: SkillSourceError) => e.code === 'bad_slug',
+      () => resolvePayloadEntry({ name: '技能 名称', body: '# 正文', sourceRef: 'remote:x@1' }),
+      (e: SkillSourceError) => e.code === 'bad_name',
     )
   })
 })
@@ -716,7 +731,7 @@ describe('统一入口', () => {
 
       const fromPayload = await resolveSkillSource({
         kind: 'payload',
-        slug: 'p',
+        name: 'p',
         body: '# 远端目录',
         sourceRef: 'remote:p@1',
       })
@@ -1089,7 +1104,7 @@ describe('★ 支持文件超上限：跳过而不是整单失败（分批第 18
     }) as unknown as typeof fetch
 
     const res = await resolveSkillSource({ kind: 'url', url: 'https://github.com/o/r' }, {}, { fetchImpl: impl })
-    // 统一入口回的是 `{body, files, slug…}`（不是 `skillMd`）
+    // 统一入口回的是 `{body, files, name…}`（不是 `skillMd`）
     assert.equal(res.body.includes('with-assets'), true, '技能本体要装上')
     // 现在**没有体积规则**：这张图不会被"太大"拒掉；它进不了 `files` 是因为
     // `isProbablyText` 判定它是二进制（技能库里存的是字符串，二进制存不下）。

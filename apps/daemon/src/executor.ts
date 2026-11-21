@@ -595,7 +595,7 @@ export class RunExecutor {
    *   很自然会以为"用的还是 Claude 默认的那套"——因为日志里**没有任何
    *   地方说我们注入了什么**。
    *
-   * 我们确实注入了（`.claude/skills/<slug>/SKILL.md` 与 `CLAUDE.md` 都在
+   * 我们确实注入了（`.claude/skills/<name>/SKILL.md` 与 `CLAUDE.md` 都在
    * 工作目录里），但"确实做了"和"看得出来做了"是两件事。
    */
   async #note(runId: RunId, text: string): Promise<void> {
@@ -895,7 +895,7 @@ export class RunExecutor {
           runId,
           (mountedSkills.length > 0
             ? `⚠️ 本次没有注入技能：这个 agent 挂了 ${mountedSkills.length} 个 skill` +
-              `（${mountedSkills.map((s) => s.slug).join('、')}），`
+              `（${mountedSkills.map((s) => s.ref.name).join('、')}），`
             : '本次没有注入技能：') +
             `但 runtime \`${runtime.descriptor.key}\` 没有技能发现机制。` +
             `原因：${skillDelivery.reason}`,
@@ -922,10 +922,10 @@ export class RunExecutor {
           skillTarget.base,
           skillTarget.sub,
           mountedSkills.map((skill) => ({
-            slug: skill.slug,
+            name: skill.ref.name,
             content: skill.body,
             // ★ 描述必须一起写进 frontmatter：CLI 自己的技能清单是描述驱动的，
-            //   而我们的第一句话只列 slug——描述是唯一的用途信号。
+            //   而我们的第一句话只列 name——描述是唯一的用途信号。
             ...(skill.description ? { description: skill.description } : {}),
             // 支持文件也要一起写下去。只写 SKILL.md 的话，技能里引用的脚本/
             // 参考文档在运行时根本不存在——技能"装上了"却干不了活，而且
@@ -942,8 +942,8 @@ export class RunExecutor {
             `已从工作目录移除不再挂载的 skill：${skillSync.pruned.join('、')}`,
           )
         }
-        for (const { slug, note } of skillSync.notes) {
-          await this.#note(runId, `skill ${slug}：${note}`)
+        for (const { name, note } of skillSync.notes) {
+          await this.#note(runId, `skill ${name}：${note}`)
         }
       }
 
@@ -971,7 +971,7 @@ export class RunExecutor {
       // 技能清单（进上下文块/第一句话）与"写没写文件"无关：它是**平台能控制的
       // 那一份**清单，即使这个 runtime 不扫目录也要告诉模型"有哪些标准可用"。
       for (const skill of mountedSkills) {
-        skillsBrief.push({ slug: skill.slug, name: skill.name, body: skill.body })
+        skillsBrief.push({ name: skill.ref.name, body: skill.body })
       }
 
       // ⚠️⚠️ 这里原来是「注入工具包」（D42：执行者挂载的工具 → 工作目录）：
@@ -1027,7 +1027,7 @@ export class RunExecutor {
         mountedSkills.length === 0
           ? `本次没有注入任何 skill（该 agent 没挂 skill）——agent 将按它自己的默认行为工作`
           : skillDelivery.kind === 'directory'
-            ? `已注入 ${mountedSkills.length} 个 skill：${mountedSkills.map((s) => s.slug).join('、')}` +
+            ? `已注入 ${mountedSkills.length} 个 skill：${mountedSkills.map((s) => s.ref.name).join('、')}` +
               // ★ 分批第 75 批：写进哪儿要说实话——隔离生效时它写的是**受管运行时目录**
               //   （codex 的 `<CODEX_HOME>/skills`），工作目录里一个字都不写；
               //   隔离没生效时才退回描述表声明的那个工作目录子目录。

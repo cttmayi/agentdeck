@@ -12,7 +12,7 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
  * 这里盯的是两件容易错、又不容易被发现的事
  * ══════════════════════════════════════════════════════════════════
  *
- *   1. **slug 算得和装的时候一模一样**。清单不声明 slug，界面拿 daemon 算出来的
+ *   1. **name 算得和装的时候一模一样**。清单不声明 name，界面拿 daemon 算出来的
  *      去比"装没装过"——算错一个，一条已装的技能会被显示成「安装」，而且**不报错**。
  *   2. **坏条目不拖垮整张表，但也不静默消失**。一条写错进 `skipped`（带原因），
  *      整份文件坏掉才抛。
@@ -33,9 +33,9 @@ function manifest(items: unknown[]): unknown {
   return { schema: SKILL_LIST_SCHEMA, items }
 }
 
-describe('★ 本地安装清单：slug 与取包规则逐字相同', () => {
+describe('★ 本地安装清单：name 与取包规则逐字相同', () => {
   test('url：tree 取目录名、仓库根取仓库名、blob 取所在目录名', async () => {
-    const dir = await makeTempDir('skill-list-slug-url')
+    const dir = await makeTempDir('skill-list-name-url')
     try {
       const result = await withManifest(
         dir,
@@ -50,7 +50,7 @@ describe('★ 本地安装清单：slug 与取包规则逐字相同', () => {
         (path) => loadSkillList(path),
       )
       assert.deepEqual(
-        result.entries.map((e) => e.slug),
+        result.entries.map((e) => e.name),
         ['pptx', 'html-ppt-skill', 'some-skill'],
       )
       assert.deepEqual(result.skipped, [])
@@ -65,7 +65,7 @@ describe('★ 本地安装清单：slug 与取包规则逐字相同', () => {
   })
 
   test('path：取目录名；直接指向 SKILL.md 时取它所在的目录名', async () => {
-    const dir = await makeTempDir('skill-list-slug-path')
+    const dir = await makeTempDir('skill-list-name-path')
     try {
       const result = await withManifest(
         dir,
@@ -76,7 +76,7 @@ describe('★ 本地安装清单：slug 与取包规则逐字相同', () => {
         (path) => loadSkillList(path),
       )
       assert.deepEqual(
-        result.entries.map((e) => e.slug),
+        result.entries.map((e) => e.name),
         ['my-skill', 'foo-bar'],
       )
       assert.deepEqual(result.entries[1]!.source, {
@@ -120,7 +120,7 @@ describe('★ 本地安装清单：坏条目进 skipped，整份文件坏掉才�
         ]),
         (path) => loadSkillList(path),
       )
-      assert.deepEqual(result.entries.map((e) => e.slug), ['r'])
+      assert.deepEqual(result.entries.map((e) => e.name), ['r'])
       assert.equal(result.skipped.length, 2)
       for (const s of result.skipped) {
         assert.match(s.reason, /恰好/)
@@ -142,7 +142,7 @@ describe('★ 本地安装清单：坏条目进 skipped，整份文件坏掉才�
         ]),
         (path) => loadSkillList(path),
       )
-      assert.deepEqual(result.entries.map((e) => e.slug), ['r'])
+      assert.deepEqual(result.entries.map((e) => e.name), ['r'])
       assert.equal(result.skipped.length, 2)
     } finally {
       await cleanup(dir)
@@ -215,7 +215,7 @@ describe('★ 仓库自带的那份清单本身必须是好的', () => {
     assert.ok(result.entries.length > 0, '自带清单不该是空的')
     assert.deepEqual(result.skipped, [], '自带清单里不该有坏条目')
     for (const e of result.entries) {
-      assert.match(e.slug, /^[a-z0-9][a-z0-9-]{0,62}$/, `${e.name} 的 slug 不合法`)
+      assert.match(e.name, /^[a-z0-9][a-z0-9-]{0,62}$/, `${e.name} 的 name 不合法`)
     }
   })
 })

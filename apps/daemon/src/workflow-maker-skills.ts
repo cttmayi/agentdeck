@@ -13,7 +13,7 @@
  * 的那些坑。它只能靠猜——猜出来的代码在采纳时语法能过、跑起来才发现不对。
  *
  * 所以照**智能体生成者**那条已经踩过坑的分工（D111）来：**流程与取舍写进指令，
- * API 细节写进平台技能**。这份技能是生成者的**独有技能**（`agents/<id>/skills/<slug>/`），
+ * API 细节写进平台技能**。这份技能是生成者的**独有技能**（`agents/<id>/skills/<name>/`），
  * 启动时从随仓库分发的 `catalog/platform-skills/` 播种（幂等、已在就一字不动），
  * 与共享技能走同一条注入通道，**不进技能库、不进技能页、不可卸载**。
  *
@@ -38,13 +38,13 @@ export const WORKFLOW_MAKER_SKILL_SLUGS = ['orchestration-authoring'] as const
 export const WORKFLOW_MAKER_SKILL_SOURCE_REF = 'platform:workflow-maker'
 
 /** 内置技能的内容路径（与 `agent-maker-skills.ts` 同一个惯例）。 */
-function skillMdPath(slug: string): string {
-  return fileURLToPath(new URL(`../catalog/platform-skills/${slug}/SKILL.md`, import.meta.url))
+function skillMdPath(name: string): string {
+  return fileURLToPath(new URL(`../catalog/platform-skills/${name}/SKILL.md`, import.meta.url))
 }
 
 /** 读一份内置技能的内容（读不到即抛——它随仓库分发，读不到是装坏了）。 */
-async function readBundledSkillMd(slug: string): Promise<string> {
-  return await readFile(skillMdPath(slug), 'utf8')
+async function readBundledSkillMd(name: string): Promise<string> {
+  return await readFile(skillMdPath(name), 'utf8')
 }
 
 /**
@@ -64,22 +64,22 @@ export async function ensureBuiltinWorkflowMakerSkills(
   const maker = await platformMemberOf(store, workspaceId, 'workflow-maker')
   if (!maker) return { agentId: null, seeded: [], skipped: [] }
 
-  const existing = new Set((await store.listExclusiveSkills(agentSkillOwner(maker.id))).map((s) => s.slug))
+  const existing = new Set((await store.listExclusiveSkills(agentSkillOwner(maker.id))).map((s) => s.name))
   const seeded: string[] = []
   const skipped: string[] = []
-  for (const slug of WORKFLOW_MAKER_SKILL_SLUGS) {
-    if (existing.has(slug)) continue
+  for (const name of WORKFLOW_MAKER_SKILL_SLUGS) {
+    if (existing.has(name)) continue
     try {
-      const body = await readBundledSkillMd(slug)
+      const body = await readBundledSkillMd(name)
       const validated = resolvePayloadEntry({
-        slug,
+        name,
         body,
         sourceRef: WORKFLOW_MAKER_SKILL_SOURCE_REF,
       })
-      await store.writeExclusiveSkill(agentSkillOwner(maker.id), slug, validated.body)
-      seeded.push(slug)
+      await store.writeExclusiveSkill(agentSkillOwner(maker.id), name, validated.body)
+      seeded.push(name)
     } catch (err) {
-      skipped.push(`${slug}（${err instanceof Error ? err.message : String(err)}）`)
+      skipped.push(`${name}（${err instanceof Error ? err.message : String(err)}）`)
     }
   }
   return { agentId: maker.id as string, seeded, skipped }

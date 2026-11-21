@@ -29,14 +29,14 @@ export const MAX_SKILL_BYTES = 256 * 1024
 
 export interface SkillFileInput {
   /** 目标目录名——**这是权威名**（FR-CLI-20）。 */
-  slug: string
+  name: string
   /** `SKILL.md` 原文（可含 frontmatter）。 */
   content: string
   /**
    * 一句话用途说明——**写进 frontmatter 的 `description`**。
    *
    * 见 `SkillPayload.description` 的说明：CLI 自己的技能清单是描述驱动的，
-   * 而我们的上下文只列 slug，所以这里是唯一的用途信号。作者已经在
+   * 而我们的上下文只列 name，所以这里是唯一的用途信号。作者已经在
    * frontmatter 里写了 `description` 时不覆盖（那是他的选择）。
    */
   description?: string
@@ -45,7 +45,7 @@ export interface SkillFileInput {
 }
 
 export interface NormalizedSkill {
-  slug: string
+  name: string
   content: string
   /**
    * 规范化做了什么。
@@ -57,8 +57,8 @@ export interface NormalizedSkill {
 }
 
 export class SkillTooLargeError extends Error {
-  constructor(slug: string, bytes: number) {
-    super(`技能 ${slug} 有 ${bytes} 字节，超过上限 ${MAX_SKILL_BYTES}`)
+  constructor(name: string, bytes: number) {
+    super(`技能 ${name} 有 ${bytes} 字节，超过上限 ${MAX_SKILL_BYTES}`)
     this.name = 'SkillTooLargeError'
   }
 }
@@ -98,7 +98,7 @@ export function splitFrontmatter(content: string): { frontmatter: string | null;
  * `description` 一并存进 `Skill.description`——否则界面列表里永远只有
  * "没有说明"，而作者明明在 frontmatter 里写了一句。
  *
- * `name` 只在这里**不权威**：列表显示名仍以 slug 为准（同名不同源的技能
+ * `name` 只在这里**不权威**：列表显示名仍以 name 为准（同名不同源的技能
  * 必须可区分，见 `normalizeSkillFrontmatter` 的注释），所以它只是顺手
  * 带出来，调用方要用才用。
  *
@@ -130,18 +130,18 @@ export function extractSkillMeta(
  * 规范化技能元数据。
  *
  * 处理三种残缺：
- *   - 缺 name      → 注入 slug 作为 name
- *   - name 与 slug 不一致 → **以 slug 为准**改写
+ *   - 缺 name      → 注入 name 作为 name
+ *   - name 与 name 不一致 → **以 name 为准**改写
  *   - YAML 损坏    → 重建（但保留能从原文抢救出的键难做到，故只保留正文）
  */
 export function normalizeSkillFrontmatter(
-  slug: string,
+  name: string,
   content: string,
   /** 平台知道的用途说明；作者已写 `description` 时不覆盖。 */
   description?: string,
 ): NormalizedSkill {
   const bytes = Buffer.byteLength(content, 'utf8')
-  if (bytes > MAX_SKILL_BYTES) throw new SkillTooLargeError(slug, bytes)
+  if (bytes > MAX_SKILL_BYTES) throw new SkillTooLargeError(name, bytes)
 
   const notes: string[] = []
   const { frontmatter, body } = splitFrontmatter(content)
@@ -149,12 +149,12 @@ export function normalizeSkillFrontmatter(
   if (frontmatter === null) {
     // 没有 frontmatter：注入一个最小的（带上描述——那是 CLI 清单里唯一的
     // 用途信号，缺了它技能基本不会被主动选用）
-    const rebuilt = buildFrontmatter(withDescription({ name: slug }, description), body)
+    const rebuilt = buildFrontmatter(withDescription({ name: name }, description), body)
     notes.push(
       '原文没有 frontmatter，已注入最小元数据' +
         (description ? '（含 description）' : '（**没有 description**：CLI 的清单里它没有用途说明）'),
     )
-    return { slug, content: rebuilt, notes }
+    return { name, content: rebuilt, notes }
   }
 
   let parsed: unknown
@@ -163,12 +163,12 @@ export function normalizeSkillFrontmatter(
   } catch {
     // YAML 损坏：重建。有的加载器会硬拒整个技能文件，重建至少让它能读到正文。
     notes.push('frontmatter 无法解析，已重建（仅保留正文）')
-    return { slug, content: buildFrontmatter({ name: slug }, body), notes }
+    return { name, content: buildFrontmatter({ name: name }, body), notes }
   }
 
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     notes.push('frontmatter 不是键值对象，已重建')
-    return { slug, content: buildFrontmatter({ name: slug }, body), notes }
+    return { name, content: buildFrontmatter({ name: name }, body), notes }
   }
 
   const meta = { ...(parsed as Record<string, unknown>) }
@@ -185,15 +185,15 @@ export function normalizeSkillFrontmatter(
   //    （缺描述的正确处置面是技能库/界面，见 `SkillPayload.description` 的说明。）
 
   if (authorName === undefined || authorName === null || String(authorName).trim() === '') {
-    meta['name'] = slug
-    notes.push(`缺少 name，已注入 slug（${slug}）`)
-  } else if (String(authorName) !== slug) {
-    // ★ 以 slug 为权威名：同名不同源的技能必须可区分，而只有 slug 有唯一性保证
-    meta['name'] = slug
-    notes.push(`作者填的名字（${String(authorName)}）与 slug 不一致，已按 slug 改写`)
+    meta['name'] = name
+    notes.push(`缺少 name，已注入 name（${name}）`)
+  } else if (String(authorName) !== name) {
+    // ★ 以 name 为权威名：同名不同源的技能必须可区分，而只有 name 有唯一性保证
+    meta['name'] = name
+    notes.push(`作者填的名字（${String(authorName)}）与 name 不一致，已按 name 改写`)
   }
 
-  return { slug, content: buildFrontmatter(meta, body), notes }
+  return { name, content: buildFrontmatter(meta, body), notes }
 }
 
 function withDescription(
@@ -224,18 +224,18 @@ export async function writeSkill(
   //
   //   库里本来不可能有空正文的技能（每个安装来源都拒空：`resolvePayloadEntry`
   //   与 `checkSkillMd`）。但 2026-10 之后技能正文存在磁盘上
-  //   （`<skillsRoot>/<slug>/SKILL.md`），使用者手删了那个目录时，store 回填
+  //   （`<skillsRoot>/<name>/SKILL.md`），使用者手删了那个目录时，store 回填
   //   出来的正文就是空的——此时若照样写一个空 `SKILL.md` 到工作目录，就是一个
   //   **静默的坏技能**：CLI 会发现它、它却什么都没说。这里把它变成一次响亮的失败。
   if (skill.content.trim() === '') {
     throw new Error(
-      `技能「${skill.slug}」的正文是空的，拒绝注入。` +
-        `正文存在技能目录的 SKILL.md 里（daemon 默认落在 ~/.agentdeck/skills/<slug>/）——` +
+      `技能「${skill.name}」的正文是空的，拒绝注入。` +
+        `正文存在技能目录的 SKILL.md 里（daemon 默认落在 ~/.agentdeck/skills/<name>/）——` +
         `如果那里被删了，请重新安装这个技能。`,
     )
   }
-  const normalized = normalizeSkillFrontmatter(skill.slug, skill.content, skill.description)
-  const targetDir = join(workDir, skillDir, normalized.slug)
+  const normalized = normalizeSkillFrontmatter(skill.name, skill.content, skill.description)
+  const targetDir = join(workDir, skillDir, normalized.name)
 
   await mkdir(targetDir, { recursive: true })
   await writeFile(join(targetDir, 'SKILL.md'), normalized.content, 'utf8')
@@ -243,7 +243,7 @@ export async function writeSkill(
   for (const [relative, content] of Object.entries(skill.files ?? {})) {
     // 防目录穿越：支持文件的相对路径不能跑出技能目录
     if (relative.includes('..') || relative.startsWith('/')) {
-      throw new Error(`技能 ${skill.slug} 的支持文件路径不合法：${relative}`)
+      throw new Error(`技能 ${skill.name} 的支持文件路径不合法：${relative}`)
     }
     const target = join(targetDir, relative)
     await mkdir(dirname(target), { recursive: true })
@@ -285,14 +285,23 @@ export async function writeSkill(
 export const MANAGED_MANIFEST = '.agentdeck-managed.json'
 
 interface ManagedManifest {
-  /** 我们在这个工作目录里放过的技能 slug。 */
-  slugs: string[]
+  /** 我们在这个工作目录里放过的技能名字（D236：只有一个名字）。 */
+  names: string[]
+  /** ★ D236 之前的键名（那时叫 slug）。**只读兼容**——不认它等于把老工作目录里我们放过的技能当成使用者的文件。 */
+  slugs?: string[]
 }
 
 async function readManifest(dir: string): Promise<string[]> {
   try {
     const raw = JSON.parse(await readFile(join(dir, MANAGED_MANIFEST), 'utf8')) as ManagedManifest
-    return Array.isArray(raw.slugs) ? raw.slugs.filter((s) => typeof s === 'string') : []
+    /*
+     * ★ D236：老清单写的是 `{ slugs: [...] }`。**必须两条都认**——不认老键的后果不是
+     *   "少删几个目录"，而是下一次 run 把我们自己上一轮放进去的技能当成**使用者的
+     *   文件**（`existing.has(name) && !owned.has(name)`）⇒ 当场 `SkillCollisionError`
+     *   让整条 run 失败。升级即炸，而且看起来像"用户改了我的技能目录"。
+     */
+    const list = Array.isArray(raw.names) ? raw.names : Array.isArray(raw.slugs) ? raw.slugs : []
+    return list.filter((s) => typeof s === 'string')
   } catch {
     // 没有清单（第一次跑）或清单坏了 ⇒ 当作"我们什么都没放过"。
     // 保守方向很重要：**宁可少删**，也不能因为读不懂清单就去删使用者的东西。
@@ -300,24 +309,28 @@ async function readManifest(dir: string): Promise<string[]> {
   }
 }
 
-async function writeManifest(dir: string, slugs: readonly string[]): Promise<void> {
+async function writeManifest(dir: string, names: readonly string[]): Promise<void> {
   await mkdir(dir, { recursive: true })
-  await writeFile(join(dir, MANAGED_MANIFEST), JSON.stringify({ slugs }, null, 2), 'utf8')
+  await writeFile(join(dir, MANAGED_MANIFEST), JSON.stringify({ names }, null, 2), 'utf8')
 }
 
 export class SkillCollisionError extends Error {
-  // ⚠️ 不用参数属性（`constructor(readonly slug: string)`）：本仓库开了
-  //    `erasableSyntaxOnly`，那种写法需要 tsc 生成代码，被明确禁掉了。
-  readonly slug: string
+  /*
+   * ⚠️ 故意叫 `skillName` 而**不是** `name`（D236）：`Error` 自己有一个 `name`
+   *    （错误类型名），撞上去就只能二选一，而且 `this.name =` 会写两遍。
+   *   不用参数属性（`constructor(readonly x: string)`）是因为本仓库开了
+   *   `erasableSyntaxOnly`，那种写法需要 tsc 生成代码，被明确禁掉了。
+   */
+  readonly skillName: string
 
-  constructor(slug: string) {
+  constructor(name: string) {
     super(
-      `工作目录里已经有一个同名技能「${slug}」，而且它不是这个平台建的` +
+      `工作目录里已经有一个同名技能「${name}」，而且它不是这个平台建的` +
         `（不在我们的归属清单里）。覆盖它等于改写你自己的文件，所以停下。` +
         `请把它改名或移走，再重跑这条任务。`,
     )
     this.name = 'SkillCollisionError'
-    this.slug = slug
+    this.skillName = name
   }
 }
 
@@ -327,7 +340,7 @@ export interface SyncSkillsResult {
   /** 这次被删掉的（我们以前放的、现在不需要了）。 */
   pruned: string[]
   /** 规范化过程中的说明——**要进日志**，否则"文件写下去了但没人读"就查不出来。 */
-  notes: Array<{ slug: string; note: string }>
+  notes: Array<{ name: string; note: string }>
 }
 
 /**
@@ -372,18 +385,18 @@ export async function syncInjectedSkills(
 ): Promise<SyncSkillsResult> {
   const dir = join(workDir, skillDir)
   const owned = new Set(await readManifest(dir))
-  const wanted = skills.map((s) => s.slug)
+  const wanted = skills.map((s) => s.name)
 
   const written: string[] = []
   const pruned: string[] = []
-  const notes: Array<{ slug: string; note: string }> = []
+  const notes: Array<{ name: string; note: string }> = []
 
   // ① 先对账：我们以前放的、这次不需要的，删掉
-  for (const slug of owned) {
-    if (wanted.includes(slug)) continue
-    if (slug.includes('/') || slug.includes('..')) continue
-    await rm(join(dir, slug), { recursive: true, force: true })
-    pruned.push(slug)
+  for (const name of owned) {
+    if (wanted.includes(name)) continue
+    if (name.includes('/') || name.includes('..')) continue
+    await rm(join(dir, name), { recursive: true, force: true })
+    pruned.push(name)
   }
 
   // ② 冲突检查：目标目录存在、但不是我们建的 ⇒ 那是使用者的东西
@@ -392,8 +405,8 @@ export async function syncInjectedSkills(
       .then((entries) => entries.filter((e) => e.isDirectory()).map((e) => e.name))
       .catch(() => [] as string[]),
   )
-  for (const slug of wanted) {
-    if (existing.has(slug) && !owned.has(slug)) throw new SkillCollisionError(slug)
+  for (const name of wanted) {
+    if (existing.has(name) && !owned.has(name)) throw new SkillCollisionError(name)
   }
 
   // ③ 先记归属，再写文件。
@@ -409,8 +422,8 @@ export async function syncInjectedSkills(
   // ④ 写下去
   for (const skill of skills) {
     const normalized = await writeSkill(workDir, skillDir, skill)
-    written.push(normalized.slug)
-    for (const note of normalized.notes) notes.push({ slug: normalized.slug, note })
+    written.push(normalized.name)
+    for (const note of normalized.notes) notes.push({ name: normalized.name, note })
   }
 
   return { written, pruned, notes }
@@ -430,7 +443,7 @@ export interface RemoveSkillsResult {
  * ★ 只删清单里记着的
  * ══════════════════════════════════════════════════════════════════
  *
- * 传进来的 `slugs` 只用来**收窄**范围，真正决定"能不能删"的是那份落盘的
+ * 传进来的 `names` 只用来**收窄**范围，真正决定"能不能删"的是那份落盘的
  * 归属清单：不在清单里的目录一律不碰。所以即使调用方给错了名字（内存里的
  * 数组错了、run 记录串了），**也删不到使用者的东西**——这是这条路径上最重要
  * 的一条性质，比"删得干净"重要得多。
@@ -441,21 +454,21 @@ export interface RemoveSkillsResult {
 export async function removeInjectedSkills(
   workDir: string,
   skillDir: string,
-  slugs: readonly string[],
+  names: readonly string[],
 ): Promise<RemoveSkillsResult> {
   const dir = join(workDir, skillDir)
   const owned = await readManifest(dir)
-  const target = new Set(slugs.filter((slug) => owned.includes(slug)))
+  const target = new Set(names.filter((name) => owned.includes(name)))
 
   const removed: string[] = []
-  for (const slug of target) {
+  for (const name of target) {
     // 与同步那边同一道防线：这是要拼进文件系统的字符串
-    if (slug.includes('/') || slug.includes('..')) continue
-    await rm(join(dir, slug), { recursive: true, force: true })
-    removed.push(slug)
+    if (name.includes('/') || name.includes('..')) continue
+    await rm(join(dir, name), { recursive: true, force: true })
+    removed.push(name)
   }
 
-  const kept = owned.filter((slug) => !target.has(slug))
+  const kept = owned.filter((name) => !target.has(name))
   if (kept.length === 0) {
     await rm(join(dir, MANAGED_MANIFEST), { force: true })
     await rmdir(dir).catch(() => {})
@@ -466,14 +479,14 @@ export async function removeInjectedSkills(
   return { removed, kept }
 }
 
-/** 读到我们在某个工作目录里放过的技能 slug（诊断与测试用）。 */
+/** 读到我们在某个工作目录里放过的技能 name（诊断与测试用）。 */
 export async function listManagedSkills(workDir: string, skillDir: string): Promise<string[]> {
   return readManifest(join(workDir, skillDir))
 }
 
 /** 技能在 CLI 原生目录下的相对路径——用于诊断与日志。 */
-export function skillPath(skillDir: string, slug: string): string {
-  return join(skillDir, slug, 'SKILL.md')
+export function skillPath(skillDir: string, name: string): string {
+  return join(skillDir, name, 'SKILL.md')
 }
 
 // ══════════════════════════════════════════════════════════════════

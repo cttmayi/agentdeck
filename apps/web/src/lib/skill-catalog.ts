@@ -32,14 +32,14 @@ import type { TextParams, WebTextId } from '@agentdeck/i18n'
 
 /** 本地那一条需要的最小信息（只需要这几个字段，便于测试）。 */
 export interface LocalSkillLike {
-  slug: string
+  name: string
   version?: string | null
   source?: string
 }
 
 /** 远端目录里那一条。 */
 export interface CatalogEntryLike {
-  slug: string
+  name: string
   /**
    * 目录里这条的版本。
    *
@@ -162,18 +162,18 @@ export function catalogEntryState(
   local: LocalSkillLike | undefined,
   entry: CatalogEntryLike,
 ): CatalogEntryState {
-  // slug 不一致就当作"本地没有"。
+  // name 不一致就当作"本地没有"。
   //
-  // 调用方是按 slug 找到 local 再传进来的；万一哪天找错了（拿到别的 slug 的那条），
+  // 调用方是按 name 找到 local 再传进来的；万一哪天找错了（拿到别的 name 的那条），
   // 不做这个检查就会拿两个**毫不相干**的版本号去比，然后在界面上写一句
   // "更新到 x.y.z"——错得毫无痕迹。防御成本近乎为零。
-  if (!local || local.slug !== entry.slug) {
+  if (!local || local.name !== entry.name) {
     return makeState({
       action: 'install',
       labelId: 'install.actionInstall',
-      // 目录这条没版本号时不能说"目录里有 {slug} {version}"（会渲染成一个空位）
+      // 目录这条没版本号时不能说"目录里有 {name} {version}"（会渲染成一个空位）
       hintId: entry.version === null ? 'install.foundInDirNoVersion' : 'install.foundInDir',
-      hintParams: { slug: entry.slug, version: entry.version ?? '' },
+      hintParams: { name: entry.name, version: entry.version ?? '' },
       disabled: false,
       needsOverwrite: false,
     })
@@ -187,7 +187,7 @@ export function catalogEntryState(
       action: 'replace',
       labelId: 'install.actionReplace',
       hintId: 'install.replaceNoRemoteVersion',
-      hintParams: { slug: entry.slug },
+      hintParams: { name: entry.name },
       disabled: false,
       needsOverwrite: true,
     })
@@ -200,7 +200,7 @@ export function catalogEntryState(
       action: 'replace',
       labelId: 'install.actionReplace',
       hintId: 'install.replaceLocalHint',
-      hintParams: { slug: entry.slug, version: entry.version },
+      hintParams: { name: entry.name, version: entry.version },
       disabled: false,
       needsOverwrite: true,
     })

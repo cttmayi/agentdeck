@@ -248,13 +248,13 @@ describe('说一轮：一轮 = 一条 run', () => {
     // 「新对话」里选了一条没人挂的 skill ⇒ 它记在这个对话上，而执行者身上那些
     // 仍然是它的一部分——凭空丢掉等于使用者只挑了一条 skill 就把执行者削了。
     const f = makeFakes({
-      skills: [makeSkill({ id: 's1', slug: 'one' }), makeSkill({ id: 's2', slug: 'two' })],
+      skills: [makeSkill({ id: 's1', name: 'one' }), makeSkill({ id: 's2', name: 'two' })],
       agentSkillIds: ['s1'],
       conversationSkillIds: ['s2'],
     })
     await submitChatTurn(f.store, f.executor, f.conversation, f.agent, '你好', 1, WORK_ROOT)
     assert.deepEqual(
-      (f.submitted!.skills ?? []).map((s) => s.slug),
+      (f.submitted!.skills ?? []).map((s) => s.ref.name),
       ['one', 'two'],
     )
   })
@@ -263,41 +263,41 @@ describe('说一轮：一轮 = 一条 run', () => {
     // 选的是"挂着它的那个执行者"那种情况：两边会出现同一条，注入两遍等于那份
     // SKILL.md 在上下文里出现两次。
     const f = makeFakes({
-      skills: [makeSkill({ id: 's1', slug: 'one' })],
+      skills: [makeSkill({ id: 's1', name: 'one' })],
       agentSkillIds: ['s1'],
       conversationSkillIds: ['s1'],
     })
     await submitChatTurn(f.store, f.executor, f.conversation, f.agent, '你好', 1, WORK_ROOT)
     assert.deepEqual(
-      (f.submitted!.skills ?? []).map((s) => s.slug),
+      (f.submitted!.skills ?? []).map((s) => s.ref.name),
       ['one'],
     )
   })
 
   test('★ 记录里留着一条早就卸掉的 skill ⇒ 跳过它，不报错（那条对话该照常能说话）', async () => {
     const f = makeFakes({
-      skills: [makeSkill({ id: 's1', slug: 'one' })],
+      skills: [makeSkill({ id: 's1', name: 'one' })],
       agentSkillIds: ['s1'],
       conversationSkillIds: ['已经卸载了'],
     })
     const out = await submitChatTurn(f.store, f.executor, f.conversation, f.agent, '你好', 1, WORK_ROOT)
     assert.equal(out.failure, null)
     assert.deepEqual(
-      (f.submitted!.skills ?? []).map((s) => s.slug),
+      (f.submitted!.skills ?? []).map((s) => s.ref.name),
       ['one'],
     )
   })
 
   test('★ 老记录没有 skillIds 这个键（后加的字段）⇒ 按"没有"处理，照常跑', async () => {
     const f = makeFakes({
-      skills: [makeSkill({ id: 's1', slug: 'one' })],
+      skills: [makeSkill({ id: 's1', name: 'one' })],
       agentSkillIds: ['s1'],
       conversationSkillIds: null,
     })
     const out = await submitChatTurn(f.store, f.executor, f.conversation, f.agent, '你好', 1, WORK_ROOT)
     assert.equal(out.failure, null)
     assert.deepEqual(
-      (f.submitted!.skills ?? []).map((s) => s.slug),
+      (f.submitted!.skills ?? []).map((s) => s.ref.name),
       ['one'],
     )
   })

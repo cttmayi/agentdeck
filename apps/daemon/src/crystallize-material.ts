@@ -48,7 +48,6 @@ export interface MaterialStats {
 
 /** 现有技能（更新场景要把它整份摆进素材，agent 才能"修订"而不是重写）。 */
 export interface ExistingSkillSnapshot {
-  slug: string
   name: string
   description: string | null
   body: string
@@ -74,7 +73,7 @@ export interface MaterialContext {
    */
   target: { kind: 'new'; purpose: string } | { kind: 'update'; skill: ExistingSkillSnapshot }
   /** 现有技能清单（判重与 FOLD_INTO）。 */
-  existingSkills: Array<{ slug: string; name: string; description: string | null }>
+  existingSkills: Array<{ name: string; description: string | null }>
 }
 
 /**
@@ -273,7 +272,7 @@ function buildIndex(ctx: MaterialContext, stats: MaterialStats, pieces: Material
       ? ctx.target.purpose.trim() === ''
         ? '新建一个 skill（使用者没有给作用描述——由你从素材推断定位）'
         : `新建一个 skill。使用者的作用描述（description 以它为基底）：${ctx.target.purpose.trim()}`
-      : `更新现有 skill「${ctx.target.skill.slug}」（${ctx.target.skill.name}）——它的当前全文在 ` +
+      : `更新现有 skill「${ctx.target.skill.name}」（${ctx.target.skill.name}）——它的当前全文在 ` +
           '`existing-skill/`，请**修订**而不是重写：保留仍然正确的部分，只改与素材冲突或缺失的部分。'
 
   const turnList =
@@ -379,7 +378,7 @@ export async function writeMaterial(
       ctx.existingSkills.length === 0
         ? '（当前没有已加载的技能）'
         : ctx.existingSkills
-            .map((s) => `- \`${s.slug}\`（${s.name}）${s.description ? `：${s.description}` : ''}`)
+            .map((s) => `- \`${s.name}\`（${s.name}）${s.description ? `：${s.description}` : ''}`)
             .join('\n')
     }\n`,
   )
@@ -402,8 +401,8 @@ export async function writeMaterial(
         target:
           ctx.target.kind === 'new'
             ? { kind: 'new', purpose: ctx.target.purpose }
-            : { kind: 'update', slug: ctx.target.skill.slug, name: ctx.target.skill.name },
-        existingSkills: ctx.existingSkills.map((s) => s.slug),
+            : { kind: 'update', name: ctx.target.skill.name },
+        existingSkills: ctx.existingSkills.map((s) => s.name),
       },
       null,
       2,

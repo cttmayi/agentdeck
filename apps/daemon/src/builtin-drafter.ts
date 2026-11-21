@@ -377,7 +377,7 @@ export const WORKFLOW_MAKER_INSTRUCTIONS_HISTORY: readonly string[] = [
  * 不干活**：把"一个岗位"问清楚、**自己把规则描述出来**（用户只回答、只确认），
  * 产出岗位卡 + 配套技能草稿，**整个生成产物收进 `agent-draft/` 目录**
  * （2026-11 使用者拍板：避免散在工作目录与别的文件互相干扰）：
- * `agent-draft/agent-draft.md` + `agent-draft/skill/<slug>/SKILL.md`。
+ * `agent-draft/agent-draft.md` + `agent-draft/skill/<name>/SKILL.md`。
  *
  * ══════════════════════════════════════════════════════════════════
  * 为什么这些规矩住在身份里而不是代码里（与记忆整理者同一条）
@@ -442,7 +442,7 @@ export const AGENT_MAKER_INSTRUCTIONS_BODY = [
   '   正文从"你是<name>。"开始，然后依次是 `## 目标` / `## 职责` / `## 边界（不能碰）` /',
   '   `## 输出格式` / `## 验收标准` 各节；',
   '2. 判定**配套技能**（哪些做法值得抽成技能：高频 / 同格式 / 跨任务可复用）：',
-  '   每条写一份 `agent-draft/skill/<slug>/SKILL.md`（frontmatter `name` + `description`，',
+  '   每条写一份 `agent-draft/skill/<name>/SKILL.md`（frontmatter `name` + `description`，',
   '   正文三节：`## When to Use` / `## Procedure` / `## When NOT to Use`（失败模式：',
   '   什么时候**不该**用——输入不符、缺前提、超出岗位职责，遇到要停下而不是硬套）；',
   '   **没有就 0 条**，不要硬凑；',
@@ -1004,7 +1004,7 @@ export function describeBuiltinAgent(slot: PlatformSlot | null): string {
  * 有两个来源。现在只有一条：**起草者挂什么，起草 run 就注入什么**。
  *
  * 「未安装」怎么表示：`skillIds` 只在装了的时候有 id（**不造假记录**，那是本仓库大忌）；
- * 智能体页拿这个 slug 去库里找，找不到就画一颗灰 chip「distilly（未安装）」并给安装入口。
+ * 智能体页拿这个 name 去库里找，找不到就画一颗灰 chip「distilly（未安装）」并给安装入口。
  */
 export const DRAFTER_SKILL_SLUG = 'distilly'
 
@@ -1013,7 +1013,7 @@ export const DRAFTER_SKILL_SLUG = 'distilly'
  *
  * 三条口径：
  *   · 只在"改了才写"（避免每次调用都 insertAgent 一条日志）；
- *   · 只挂 slug === `DRAFTER_SKILL_SLUG` 的那一条，**其它一概不动**（将来若允许给起草者挂
+ *   · 只挂 name === `DRAFTER_SKILL_SLUG` 的那一条，**其它一概不动**（将来若允许给起草者挂
  *     别的技能，这里不会把它们抹掉）；
  *   · 内置 agent 是只读的 ⇒ 这个字段由**平台**维护（装/卸技能、daemon 启动、每次起草前都会对齐），
  *     界面上那句话要说清"平台替你挂的"。
@@ -1031,7 +1031,7 @@ export async function syncDrafterSkillMount(
    *   现在：不传 ⇒ 读表 → 用 → 写回（`saveSlotTable`），与 `withSlots` 同一口径。
    */
   slots?: SlotTable,
-): Promise<{ agentId: string | null; skillIds: string[]; skillSlugs: string[] }> {
+): Promise<{ agentId: string | null; skillIds: string[]; skillNames: string[] }> {
   if (slots !== undefined) return await syncDrafterSkillMountInner(store, workspaceId, slots)
   const table = await loadSlotTable(store, workspaceId)
   const out = await syncDrafterSkillMountInner(store, workspaceId, table)
@@ -1043,19 +1043,19 @@ async function syncDrafterSkillMountInner(
   store: Store,
   workspaceId: WorkspaceId,
   table: SlotTable,
-): Promise<{ agentId: string | null; skillIds: string[]; skillSlugs: string[] }> {
+): Promise<{ agentId: string | null; skillIds: string[]; skillNames: string[] }> {
   await ensureBuiltinDrafter(store, workspaceId, table)
   // 认人只走表（`ensureBuiltinDrafter` 刚把槽位认领好）
   const drafter = await resolveSlot(store, workspaceId, table, 'drafter')
-  if (!drafter) return { agentId: null, skillIds: [], skillSlugs: [] }
+  if (!drafter) return { agentId: null, skillIds: [], skillNames: [] }
 
   const skills = await store.listSkills(workspaceId)
-  const wanted = skills.filter((sk) => sk.slug === DRAFTER_SKILL_SLUG)
+  const wanted = skills.filter((sk) => sk.name === DRAFTER_SKILL_SLUG)
   const wantedIds = new Set(wanted.map((sk) => sk.id as string))
   // 保留它自己原有的、且不是"沉淀用技能"的那些（现在恒为空，但别写死成"清空"）
   const kept = drafter.skillIds
     .map((id) => id as string)
-    .filter((id) => !skills.some((sk) => (sk.id as string) === id && sk.slug === DRAFTER_SKILL_SLUG))
+    .filter((id) => !skills.some((sk) => (sk.id as string) === id && sk.name === DRAFTER_SKILL_SLUG))
   const next = [...kept, ...wantedIds]
   const same =
     next.length === drafter.skillIds.length &&
@@ -1070,9 +1070,9 @@ async function syncDrafterSkillMountInner(
   return {
     agentId: drafter.id as string,
     skillIds: next,
-    skillSlugs: skills
+    skillNames: skills
       .filter((sk) => wantedIds.has(sk.id as string))
-      .map((sk) => sk.slug),
+      .map((sk) => sk.name),
   }
 }
 

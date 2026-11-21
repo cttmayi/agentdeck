@@ -149,7 +149,7 @@ describe('远端服务（M3）', () => {
     const { status, body } = await call('/api/catalog')
     assert.equal(status, 200)
     const b = body as {
-      skills: { slug: string }[]
+      skills: { name: string }[]
       loginMethods: { name: string }[]
     }
     // ★ D38 的那条规矩**仍然成立**：公共目录里**不该有审核标准**（`general-review`
@@ -160,7 +160,7 @@ describe('远端服务（M3）', () => {
     //   （标准不许进目录）根本没被守住——一条会被无关变化弄红的断言，等于没有。
     //   所以这里断言的是**意图**：没有一个条目是审核标准。
     assert.equal(
-      b.skills.some((s) => s.slug === 'general-review'),
+      b.skills.some((s) => s.name === 'general-review'),
       false,
       '审核标准不该出现在公共目录里',
     )
@@ -646,13 +646,13 @@ describe('远端服务：技能目录（内容由独立工具写，本服务只�
           items: [
             {
               url: 'https://github.com/anthropics/skills/tree/main/skills/pptx',
-              name: 'PowerPoint 生成',
+              title: 'PowerPoint 生成',
               category: '文档',
               origin: 'official',
               summary: '生成 pptx',
               fills: '能出稿',
               needs: '装完还得自己配 python-pptx',
-              slug: 'pptx',
+              name: 'pptx',
               sourceRef: 'github:anthropics/skills@main:skills/pptx',
               version: 'abc1234',
               fetchedAt: '2026-10-05T00:00:00.000Z',
@@ -662,13 +662,13 @@ describe('远端服务：技能目录（内容由独立工具写，本服务只�
             },
             {
               url: 'https://github.com/o/r/tree/main/skills/gone',
-              name: '目录不在的那条',
+              title: '目录不在的那条',
               category: 'other',
               origin: 'community',
               summary: '',
               fills: null,
               needs: null,
-              slug: 'gone',
+              name: 'gone',
               sourceRef: 'github:o/r@main:skills/gone',
               version: null,
               fetchedAt: '2026-10-05T00:00:00.000Z',
@@ -697,7 +697,6 @@ describe('远端服务：技能目录（内容由独立工具写，本服务只�
     assert.equal(res.status, 200)
     const body = (await res.json()) as {
       skills: Array<{
-        slug: string
         name: string
         version: string | null
         content: string
@@ -708,7 +707,7 @@ describe('远端服务：技能目录（内容由独立工具写，本服务只�
       }>
     }
 
-    const pptx = body.skills.find((s) => s.slug === 'pptx')
+    const pptx = body.skills.find((s) => s.name === 'pptx')
     assert.ok(pptx, '工具写下的技能要出现在公共目录里（只读那个目录，不联网）')
     assert.equal(pptx.sourceRef, 'github:anthropics/skills@main:skills/pptx')
     // ★ 溯源指回上游，不是 `remote:pptx`：远端是中转，不是出处——落库记录与
@@ -720,19 +719,55 @@ describe('远端服务：技能目录（内容由独立工具写，本服务只�
     assert.equal(pptx.needs, '装完还得自己配 python-pptx', '装之前就要说清还要配什么')
     // ★ 「内容不完整」也要一路传到界面上：维持者声明了排除 ⇒ 条目如实带上
     assert.deepEqual(pptx.excluded, ['docs/'], '被清单排除的东西要在接口里看得见')
+    // ★ D236：清单里那句中文标题单独一栏（`name` 是技能名 = 目录名）
+    assert.equal((pptx as unknown as { title: string }).title, 'PowerPoint 生成')
   })
 
   it('★ 索引里有、内容却读不出来 ⇒ 跳过它**并说出原因**，而不是列出半条', async () => {
     const loaded = await loadCatalogSkills(join(dataDir, 'catalog-skills'))
 
     assert.deepEqual(
-      loaded.skills.map((s) => s.slug),
+      loaded.skills.map((s) => s.name),
       ['pptx'],
       '目录不在的那条不许被列成"可装"',
     )
     assert.equal(loaded.skipped.length, 1, '跳过就要给出原因，不能静默少一条')
     assert.match(loaded.skipped[0]!.path, /gone/)
     assert.match(loaded.skipped[0]!.reason, /内容读不出来/)
+  })
+
+  /*
+   * ★★ D236 的兼容判据：索引里技能名那一栏**以前叫 `slug`**。远端目录是"工具写、
+   *   本服务读"的跨进程契约，不认老键就等于远端目录整页空——而那个失效没有任何报错。
+   */
+  it('★★ 老索引（技能名那一栏叫 `slug`）照样列得出来', async () => {
+    const root = await makeTempDir('remote-legacy-index')
+    try {
+      const dir = join(root, 'catalog-skills', 'old-skill')
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, 'SKILL.md'), '---\nname: old-skill\n---\n\n老索引里的技能\n', 'utf8')
+      await writeFile(
+        join(root, 'catalog-skills', '.sync.json'),
+        JSON.stringify({
+          items: [
+            {
+              url: 'https://github.com/o/r/tree/main/skills/old-skill',
+              slug: 'old-skill',
+              title: '老的',
+              sourceRef: 'github:o/r@main:skills/old-skill',
+              version: null,
+              fetchedAt: '2026-10-01T00:00:00.000Z',
+            },
+          ],
+        }),
+        'utf8',
+      )
+      const loaded = await loadCatalogSkills(join(root, 'catalog-skills'))
+      assert.deepEqual(loaded.skills.map((s) => s.name), ['old-skill'])
+      assert.deepEqual(loaded.skipped, [])
+    } finally {
+      await cleanup(root)
+    }
   })
 
   it('★ 还没同步过（没有 .sync.json）⇒ 空目录是**真话**，不是错误', async () => {

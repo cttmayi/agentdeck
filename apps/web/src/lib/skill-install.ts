@@ -39,13 +39,13 @@ export interface InstallFile {
 }
 
 export interface InstallSkipped {
-  slug: string
+  name: string
   reason: string
   existingSource?: string
 }
 
 export interface InstallResult {
-  installed: Array<{ slug: string; id: string; source: string }>
+  installed: Array<{ name: string; id: string; source: string }>
   skipped: InstallSkipped[]
   /** 从哪儿解析的（人可读）。 */
   resolvedFrom: string
@@ -97,7 +97,7 @@ export function installFromPathOrUrl(input: {
   /** `path` 走本地目录；`url` 目前只支持 GitHub。 */
   kind: 'path' | 'url'
   value: string
-  slug?: string
+  name?: string
   /**
    * 来源标记（只对 `path` 有用）。「从本地安装」页签装的时候传 `localdir:<根目录>`，
    * 落库后列表里就能显示「来自本地技能目录：…」。不给 = daemon 用默认的 `path:<目录>`。
@@ -114,14 +114,14 @@ export function installFromPathOrUrl(input: {
             ...(input.sourceRef ? { sourceRef: input.sourceRef } : {}),
           }
         : { kind: 'url', url: input.value },
-    ...(input.slug ? { slug: input.slug } : {}),
+    ...(input.name ? { name: input.name } : {}),
     ...(input.overwrite ? { overwrite: true } : {}),
   })
 }
 
 /** 把远端目录里的一个条目交给 daemon 装。 */
 export function installRemoteEntry(input: {
-  slug: string
+  name: string
   /** SKILL.md 的内容（远端目录的 `content`）。 */
   body: string
   /**
@@ -139,7 +139,7 @@ export function installRemoteEntry(input: {
   return post({
     source: {
       kind: 'payload',
-      slug: input.slug,
+      name: input.name,
       body: input.body,
       ...(input.files && Object.keys(input.files).length > 0 ? { files: input.files } : {}),
       version: input.version,
@@ -163,19 +163,19 @@ export interface InstallMessage {
   params?: Readonly<Record<string, InstallParamValue>>
 }
 
-/** 插值。列表占位符（`{slugs}` / `{items}`）的值是 `InstallList`（见 `renderInstallMessage`）。 */
+/** 插值。列表占位符（`{names}` / `{items}`）的值是 `InstallList`（见 `renderInstallMessage`）。 */
 export type InstallParamValue = string | number | InstallList
 
 /**
  * 一串要连接起来的片段。
  *
  * ★ 用一个显式的包装而不是"直接传数组"：数组在运行时**分不出**是"一串片段"
- *   还是"一个片段"（`['a','b']` 既可能是两个 slug，也可能是一段消息），照
- *   "是数组就当消息列表"处理会把 slug 列表渲染成空串。包一层之后，"这是列表"
+ *   还是"一个片段"（`['a','b']` 既可能是两个 name，也可能是一段消息），照
+ *   "是数组就当消息列表"处理会把 name 列表渲染成空串。包一层之后，"这是列表"
  *   在类型上和运行上都是看得见的事。
  */
 export interface InstallList {
-  /** 片段：原样的值（如 slug），或另一段消息（如"某个没装进来的文件"）。 */
+  /** 片段：原样的值（如 name），或另一段消息（如"某个没装进来的文件"）。 */
   items: readonly (string | number | InstallMessage)[]
 }
 
@@ -216,10 +216,10 @@ export function renderInstallMessage(message: InstallMessage, render: TextRender
 export function describeInstallMessages(result: InstallResult): InstallMessage[] {
   const messages: InstallMessage[] = []
   if (result.installed.length > 0) {
-    // slugs 用 `InstallList` 包起来：分隔符由渲染方按语言取（见 `renderInstallMessage`）。
+    // names 用 `InstallList` 包起来：分隔符由渲染方按语言取（见 `renderInstallMessage`）。
     messages.push({
       id: 'install.installedList',
-      params: { slugs: { items: result.installed.map((s) => s.slug) } },
+      params: { names: { items: result.installed.map((s) => s.name) } },
     })
     messages.push({ id: 'install.fromSource', params: { source: result.resolvedFrom } })
   }
@@ -237,7 +237,7 @@ export function describeInstallMessages(result: InstallResult): InstallMessage[]
     })
   }
   for (const s of result.skipped) {
-    messages.push({ id: 'install.skipped', params: { slug: s.slug, reason: s.reason } })
+    messages.push({ id: 'install.skipped', params: { name: s.name, reason: s.reason } })
   }
   return messages
 }
@@ -256,8 +256,8 @@ export function installErrorHintMessage(code: string): InstallMessage | null {
       return { id: 'install.errRateLimited' }
     case 'missing_skill_md':
       return { id: 'install.errMissingSkillMd' }
-    case 'bad_slug':
-      return { id: 'install.errBadSlug' }
+    case 'bad_name':
+      return { id: 'install.errBadName' }
     case 'not_found':
       return { id: 'install.errNotFound' }
     case 'too_large':

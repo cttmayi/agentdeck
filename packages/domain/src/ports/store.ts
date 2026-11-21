@@ -249,7 +249,7 @@ export interface Store {
    */
   deleteAgent(id: AgentId): Promise<boolean>
 
-  // ── 独有技能（D111：`agents/<id>/skills/<slug>/SKILL.md` 这类文件资产）──
+  // ── 独有技能（D111：`agents/<名字>/skills/<名字>/SKILL.md` 这类文件资产）──
 
   // 两类技能的分界（设计定稿 `docs/design/agent-directory.md` §4）：
   //   · **独有** = 跟着某个实体目录走的文件——不进技能库、不进技能页、不可卸载，
@@ -257,7 +257,7 @@ export interface Store {
   //   · **共享** = 技能库里的资产，用 `skillIds` 引用（见 `Skill` 一节）。
   //
   // ⚠️ 独有技能**没有库 id**：run 的 `skillRefs` 里它们长这样——
-  //    `{ id: null, slug, source: 'agent' }`（`SkillRef.id` 可空，D111）。
+  //    `{ id: null, name, source: 'agent' }`（`SkillRef.id` 可空，D111）。
   //
   // ★ 2026-11（D228）：**"谁的技能"从 `AgentId` 换成一个来源描述符**。
   //
@@ -268,16 +268,16 @@ export interface Store {
   //   现在参数是 `ExclusiveSkillOwner`：说清"这是谁的文件"，不说"它在哪个目录"。
   //   目录从哪来由**存储实现**决定（文件适配器按 owner 解析；路径词汇不许进端口，
   //   `FR-STOR-03` 那条机器判据盯着）。
-  /** 列出这个来源的独有技能（slug + 正文）。正文 = `SKILL.md` 原文。 */
+  /** 列出这个来源的独有技能（名字 + 正文）。正文 = `SKILL.md` 原文。 */
   listExclusiveSkills(
     owner: ExclusiveSkillOwner,
-  ): Promise<Array<{ slug: string; body: string }>>
+  ): Promise<Array<{ name: string; body: string }>>
   /** 读一条独有技能的正文；没有返回 null（**不是错误**）。 */
-  getExclusiveSkill(owner: ExclusiveSkillOwner, slug: string): Promise<string | null>
-  /** 写一条独有技能（覆盖同 slug）。校验（slug/正文规则）由调用方做。 */
-  writeExclusiveSkill(owner: ExclusiveSkillOwner, slug: string, body: string): Promise<void>
+  getExclusiveSkill(owner: ExclusiveSkillOwner, name: string): Promise<string | null>
+  /** 写一条独有技能（覆盖同名）。校验（名字/正文规则）由调用方做。 */
+  writeExclusiveSkill(owner: ExclusiveSkillOwner, name: string, body: string): Promise<void>
   /** 删一条独有技能。真的删到了返回 true；本来就没有返回 false（**不是错误**）。 */
-  removeExclusiveSkill(owner: ExclusiveSkillOwner, slug: string): Promise<boolean>
+  removeExclusiveSkill(owner: ExclusiveSkillOwner, name: string): Promise<boolean>
 
   /*
    * ⚠️ 2026-11（S3）：这里原来是**智能体组**那一组端口（`getGroup` / `listGroups` /

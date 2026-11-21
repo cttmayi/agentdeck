@@ -50,13 +50,15 @@ export function makeAgent(over: Omit<Partial<Agent>, 'id'> & { id: string }): Ag
   }
 }
 
-export function makeSkill(
-  over: Omit<Partial<Skill>, 'id'> & { id: string; slug?: string },
-): Skill {
+export function makeSkill(over: Omit<Partial<Skill>, 'id'> & { id: string }): Skill {
   return {
     workspaceId: wsId(),
-    slug: over.slug ?? over.id,
-    name: over.id,
+    /*
+     * ★ D236：技能只有一个名字（= 目录名）。夹具缺省用 id 当名字（好认、不撞），
+     *   要改就显式给 `name`——以前这里还有 `slug` 与 `name` 两个，缺省分别是
+     *   id 与 id，那个形状只在"两个字段"的时代成立。
+     */
+    name: over.name ?? over.id,
     description: null,
     body: '',
     verdictSchemaVersion: 1,

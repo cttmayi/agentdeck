@@ -69,11 +69,11 @@ describe('远端目录：手动装的技能（本地层）', () => {
         name: '示例技能',
         summary: '一句话',
         needs: '还得配个 key',
-        takenSlugs: new Set(),
+        takenNames: new Set(),
         fetchImpl,
       })
 
-      assert.equal(item.slug, 'foo')
+      assert.equal(item.name, 'foo')
       assert.equal(item.manual, true)
       assert.equal(item.sourceRef, 'github:o/r@main:skills/foo')
       assert.deepEqual(item.files.sort(), ['SKILL.md', 'extra.md'])
@@ -86,15 +86,15 @@ describe('远端目录：手动装的技能（本地层）', () => {
 
       // 索引：条目 + manual 标记
       const index = JSON.parse(await readFile(join(localDir, '.sync.json'), 'utf8')) as {
-        items: Array<{ slug: string; manual: boolean }>
+        items: Array<{ name: string; manual: boolean }>
       }
       assert.equal(index.items.length, 1)
-      assert.equal(index.items[0]!.slug, 'foo')
+      assert.equal(index.items[0]!.name, 'foo')
       assert.equal(index.items[0]!.manual, true)
 
       // ★ 同步目录**一个字都没动**
       assert.deepEqual(await readdir(syncedDir).catch(() => []), [], '本地装的不许碰同步目录')
-      assert.deepEqual((await listLocalSkills(localDir)).map((i) => i.slug), ['foo'])
+      assert.deepEqual((await listLocalSkills(localDir)).map((i) => i.name), ['foo'])
     } finally {
       await cleanup(root)
     }
@@ -105,17 +105,18 @@ describe('远端目录：手动装的技能（本地层）', () => {
     const localDir = join(root, 'catalog-skills-local')
     try {
       const fetchImpl = fakeGithub({ 'skills/foo/SKILL.md': '# 正文' })
-      // 「同步目录里已经有了」这种情况由调用方把 slug 传进来（`takenSlugs`）
+      // 「同步目录里已经有了」这种情况由调用方把 name 传进来（`takenNames`）
       await assert.rejects(
         () =>
           installLocalSkill(localDir, {
             url: 'https://github.com/o/r/tree/main/skills/foo',
-            takenSlugs: new Set(['foo']),
+            takenNames: new Set(['foo']),
             fetchImpl,
           }),
         (err: unknown) => {
           assert.ok(err instanceof LocalSkillConflict)
-          assert.equal(err.slug, 'foo')
+          // Error 自己有一个 name（错误类型名）⇒ 技能名挂在 skillName 上（D236）
+          assert.equal(err.skillName, 'foo')
           return true
         },
       )
@@ -133,12 +134,12 @@ describe('远端目录：手动装的技能（本地层）', () => {
       const fetchImpl = fakeGithub({ 'skills/foo/SKILL.md': '# 正文' })
       await installLocalSkill(localDir, {
         url: 'https://github.com/o/r/tree/main/skills/foo',
-        takenSlugs: new Set(),
+        takenNames: new Set(),
         fetchImpl,
       })
       assert.equal(await uninstallLocalSkill(localDir, 'foo'), true)
       assert.deepEqual(await readdir(localDir), ['.sync.json'], '内容清掉、索引留着（空是真话）')
-      assert.deepEqual((await listLocalSkills(localDir)).map((i) => i.slug), [])
+      assert.deepEqual((await listLocalSkills(localDir)).map((i) => i.name), [])
       assert.equal(await uninstallLocalSkill(localDir, 'foo'), false, '再删一次是 false，不是抛')
     } finally {
       await cleanup(root)
@@ -155,7 +156,7 @@ describe('远端目录：手动装的技能（本地层）', () => {
         () =>
           installLocalSkill(localDir, {
             url: 'https://github.com/o/r/tree/main/skills/foo',
-            takenSlugs: new Set(),
+            takenNames: new Set(),
             fetchImpl,
           }),
         (err: unknown) => {

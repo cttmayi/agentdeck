@@ -570,10 +570,10 @@ export const agentsText = {
    */
   'agents.exclusiveSkillsEdit': { zh: '编辑', en: 'Edit' },
   'agents.exclusiveSkillsDelete': { zh: '删除', en: 'Delete' },
-  'agents.exclusiveSkillsSlug': { zh: '机器名（slug）', en: 'Slug' },
-  'agents.exclusiveSkillsSlugLockedHint': {
-    zh: 'slug 在保存后不可改名（要换名就删掉重建）',
-    en: 'The slug cannot be renamed after saving (delete and recreate to rename)',
+  'agents.exclusiveSkillsName': { zh: '机器名（name）', en: 'Name' },
+  'agents.exclusiveSkillsNameLockedHint': {
+    zh: 'name 在保存后不可改名（要换名就删掉重建）',
+    en: 'The name cannot be renamed after saving (delete and recreate to rename)',
   },
   'agents.exclusiveSkillsBody': { zh: 'SKILL.md 正文', en: 'SKILL.md body' },
   'agents.exclusiveSkillsBodyPlaceholder': {
@@ -582,24 +582,24 @@ export const agentsText = {
   },
   'agents.exclusiveSkillsSave': { zh: '保存', en: 'Save' },
   'agents.exclusiveSkillsSaved': {
-    zh: '已保存独有技能「{slug}」',
-    en: 'Exclusive skill "{slug}" saved',
+    zh: '已保存独有技能「{name}」',
+    en: 'Exclusive skill "{name}" saved',
   },
   'agents.exclusiveSkillsSaveFailed': {
     zh: '保存失败：{error}',
     en: 'Save failed: {error}',
   },
   'agents.exclusiveSkillsDeleted': {
-    zh: '已删除独有技能「{slug}」',
-    en: 'Exclusive skill "{slug}" deleted',
+    zh: '已删除独有技能「{name}」',
+    en: 'Exclusive skill "{name}" deleted',
   },
   'agents.exclusiveSkillsDeleteFailed': {
     zh: '删除失败：{error}',
     en: 'Delete failed: {error}',
   },
   'agents.exclusiveSkillsDeleteConfirm': {
-    zh: '删除独有技能「{name}（{slug}）」？它只是这条智能体的文件，不会影响技能库。',
-    en: 'Delete exclusive skill "{name} ({slug})"? It is only this agent\'s file; the skill library is unaffected.',
+    zh: '删除独有技能「{name}（{name}）」？它只是这条智能体的文件，不会影响技能库。',
+    en: 'Delete exclusive skill "{name} ({name})"? It is only this agent\'s file; the skill library is unaffected.',
   },
   'agents.exclusiveSkillsLoading': { zh: '读取中…', en: 'Loading…' },
   'agents.exclusiveSkillsDeleteTitle': {
@@ -611,18 +611,18 @@ export const agentsText = {
     en: 'The body cannot be empty.',
   },
   /**
-   * ⚠️ 选择器里**必须**带上来源目录：同 slug 可以有好几条（每个来源目录各一条
+   * ⚠️ 选择器里**必须**带上来源目录：同 name 可以有好几条（每个来源目录各一条
    *    ——实测 `~/.claude`、`~/.codex`、`~/.cursor` 里都有 `browser-use`）。
-   *    只显示 slug 的话会出现三个一模一样的东西，使用者只能靠猜。
+   *    只显示 name 的话会出现三个一模一样的东西，使用者只能靠猜。
    */
   // ★ 分批第 209 批：`skillFromDir`（「（来自 {dir}）」）删了——那句话从技能选项上撤掉，
   //   来源目录改为悬停 `title`（见 `AgentDetail` 里那段注释）。
   /** 行动权限为空时的说明（在「行动权限」那一段里，与标准无关）。 */
   /**
-   * 顿号：一串 skill slug 之间的列表分隔符（老数据那两句提示里用）。
+   * 顿号：一串 skill name 之间的列表分隔符（老数据那两句提示里用）。
    *
    * ⚠️ 原来这条还管"动作名之间的顿号"，那一列随《动作权限》收口与内置动作的
-   *    移除一起没有了——现在这里只服务 skill slug。
+   *    移除一起没有了——现在这里只服务 skill name。
    */
   /** 上面那句末尾的句号（它排在 `{#each}` 后面，是一个独立的文本节点）。 */
   /**

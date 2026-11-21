@@ -18,8 +18,8 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
  * 这个文件盯的是"认得出真实形状"
  * ══════════════════════════════════════════════════════════════════
  *
- * 实测这台机器上 `~/.claude/skills` 是扁平的 `<slug>/SKILL.md`，而
- * `~/.codex/skills` 底下多一层 `.system/<slug>/SKILL.md`。只认一种形状的实现会在
+ * 实测这台机器上 `~/.claude/skills` 是扁平的 `<name>/SKILL.md`，而
+ * `~/.codex/skills` 底下多一层 `.system/<name>/SKILL.md`。只认一种形状的实现会在
  * 另一台上**静默地少列一半**——而那看起来像"我明明有，怎么没列出来"。
  *
  * ⚠️ 曾经这里还盯另外两件事（对账：内容没变就不写库 / 取消勾选不抽走能力）。
@@ -51,12 +51,11 @@ async function makeSkillDir(
   return dir
 }
 
-function existingRecord(input: { id: string; slug: string; dir: string; body: string }): Skill {
+function existingRecord(input: { id: string; name: string; dir: string; body: string }): Skill {
   return {
     id: input.id as Skill['id'],
     workspaceId: WS,
-    slug: input.slug,
-    name: input.slug,
+    name: input.name,
     description: null,
     body: input.body,
     verdictSchemaVersion: 1,
@@ -69,7 +68,7 @@ function existingRecord(input: { id: string; slug: string; dir: string; body: st
 }
 
 describe('★ 扫描：认得出真实存在的两种形状', () => {
-  test('★ 扁平形状（claude / cursor）：`<slug>/SKILL.md`', async () => {
+  test('★ 扁平形状（claude / cursor）：`<name>/SKILL.md`', async () => {
     const root = await makeTempDir('scandir-flat')
     try {
       await makeSkillDir(root, 'browser-use')
@@ -87,7 +86,7 @@ describe('★ 扫描：认得出真实存在的两种形状', () => {
     }
   })
 
-  test('★ 嵌套形状（codex）：`.system/<slug>/SKILL.md` —— 实测 ~/.codex/skills 就是这样', async () => {
+  test('★ 嵌套形状（codex）：`.system/<name>/SKILL.md` —— 实测 ~/.codex/skills 就是这样', async () => {
     const root = await makeTempDir('scandir-nested')
     try {
       await makeSkillDir(root, '.system/skill-creator')
@@ -199,13 +198,13 @@ describe('★ 内置候选目录', () => {
 
 describe('★ sourceDirOf：只认自己写的那个前缀', () => {
   test('认 `localdir:`，别的（path: / remote: / null）一律 null', () => {
-    assert.equal(sourceDirOf(existingRecord({ id: 'a', slug: 'a', dir: '/x', body: '' })), '/x')
+    assert.equal(sourceDirOf(existingRecord({ id: 'a', name: 'a', dir: '/x', body: '' })), '/x')
     assert.equal(
-      sourceDirOf({ ...existingRecord({ id: 'b', slug: 'b', dir: '/x', body: '' }), sourceRef: 'path:/x' }),
+      sourceDirOf({ ...existingRecord({ id: 'b', name: 'b', dir: '/x', body: '' }), sourceRef: 'path:/x' }),
       null,
     )
     assert.equal(
-      sourceDirOf({ ...existingRecord({ id: 'c', slug: 'c', dir: '/x', body: '' }), sourceRef: null }),
+      sourceDirOf({ ...existingRecord({ id: 'c', name: 'c', dir: '/x', body: '' }), sourceRef: null }),
       null,
     )
   })

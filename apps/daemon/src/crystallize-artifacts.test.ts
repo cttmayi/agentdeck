@@ -238,7 +238,7 @@ describe('assembleArtifacts：两种产出形态（分批第 211 批：没交就
   /**
    * ★ 分批第 217 批（使用者定："可以是 skill 目录，也可以是 skill 下的子目录，动态侦测"）：
    * 起草者可能调它自己的写入器（真机上 distilly 的 `tools/skill_writer.py` 落点是
-   * `<base-dir>/<slug>/SKILL.md`）⇒ 产出在 `skill/<dir>/` 里。**唯一一层子目录也认**：
+   * `<base-dir>/<name>/SKILL.md`）⇒ 产出在 `skill/<dir>/` 里。**唯一一层子目录也认**：
    * 在内存里归一到根，于是编辑器/差异/入库看到的是同一套相对路径。
    */
   test('files：子目录里的 SKILL.md 也认——但**路径原样**（不动它产生的东西）', () => {

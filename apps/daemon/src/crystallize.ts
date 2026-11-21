@@ -37,7 +37,6 @@ export interface CrystallizeTargets {
   /** 本次对话/任务**实际加载**的 skill（agent 挂的 ∪ 对话额外带的）。 */
   loadedSkills: Array<{
     id: string
-    slug: string
     name: string
     description: string | null
     /** 'mine' = 提炼的（可进化）；'local'/'remote' = 安装的（更新=存为你的版本并遮蔽）。 */
@@ -308,7 +307,6 @@ async function resolveLoadedSkills(
     if (skill) {
       out.push({
         id: skill.id as string,
-        slug: skill.slug,
         name: skill.name,
         description: skill.description,
         source: skill.source,
@@ -375,7 +373,7 @@ async function resolveLoadedSkills(
  *
  * 按他说的去核对了一遍——用真机上装的那份 distilly 的写入器真生成一份：
  *
- *     python3 <distilly>/tools/skill_writer.py --action create --slug mini-flow \
+ *     python3 <distilly>/tools/skill_writer.py --action create --name mini-flow \
  *       --name 小流程 --meta meta.json --work work.md --persona work.md --base-dir skill
  *
  * 它写出 `skill/mini-flow/{SKILL.md,meta.json,manifest.json,work.md,work_skill.md,
@@ -405,12 +403,12 @@ export function buildDraftPrompt(opts: {
   /** 产出目录（相对工作目录，固定 `skill`）。 */
   outputDir: string
   /**
-   * 这一轮**真的注入到这个工作目录里**的技能 slug（分批第 210 批）。
+   * 这一轮**真的注入到这个工作目录里**的技能 name（分批第 210 批）。
    *
    * 拿它点名"照哪份技能写"——不写死 `distilly`：使用者可以装别的技能并把它挂到
    * 起草者身上（挂什么就注入什么）。空数组说明调用方漏了注入（门禁应当先拦下来）。
    */
-  skillSlugs: readonly string[]
+  skillNames: readonly string[]
   /**
    * 这一版是"**在上一版上改**"（`skill/` 里已有上一版的产出，意见在 `material/feedback.md`）。
    *
@@ -423,10 +421,10 @@ export function buildDraftPrompt(opts: {
    */
   continuing?: boolean
 }): string {
-  const { materialDir, outputDir, skillSlugs, revised = false, continuing = false } = opts
+  const { materialDir, outputDir, skillNames, revised = false, continuing = false } = opts
   // 空 = 调用方漏了注入（门禁应当先拦下来）；那时不写括号，只说"你挂着的技能"。
-  const skillNames = skillSlugs.map((s) => `\`${s}\``).join('、')
-  return `素材在 \`${materialDir}/\`（先读 \`${materialDir}/00-README.md\`），产出写到 \`${outputDir}/\` 下——\`SKILL.md\` 是主产出，**写法与产物格式照你挂着的技能${skillNames === '' ? '' : `（${skillNames}）`}**，只把它自己那份 \`./skills/…\` 换成这里的 \`${outputDir}/\`。
+  const listedNames = skillNames.map((s) => `\`${s}\``).join('、')
+  return `素材在 \`${materialDir}/\`（先读 \`${materialDir}/00-README.md\`），产出写到 \`${outputDir}/\` 下——\`SKILL.md\` 是主产出，**写法与产物格式照你挂着的技能${listedNames === '' ? '' : `（${listedNames}）`}**，只把它自己那份 \`./skills/…\` 换成这里的 \`${outputDir}/\`。
 
 交不出东西就用说的：要问就问、不值得做就直说——别自己编答案，也别硬凑一条 skill。
 ${

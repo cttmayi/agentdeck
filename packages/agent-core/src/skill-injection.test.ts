@@ -79,13 +79,13 @@ describe('extractSkillMeta（只读元数据）', () => {
 })
 
 describe('元数据规范化（FR-CLI-20~22）', () => {
-  test('slug 是权威名：与作者填的名字不一致时按 slug 改写', () => {
+  test('name 是权威名：与作者填的名字不一致时按 name 改写', () => {
     const r = normalizeSkillFrontmatter('sec-vuln', '---\nname: 安全审计\ndescription: x\n---\n正文')
     assert.equal(frontmatterOf(r.content)['name'], 'sec-vuln')
-    assert.ok(r.notes.some((n) => n.includes('按 slug 改写')))
+    assert.ok(r.notes.some((n) => n.includes('按 name 改写')))
   })
 
-  test('缺少 name ⇒ 注入 slug', () => {
+  test('缺少 name ⇒ 注入 name', () => {
     const r = normalizeSkillFrontmatter('doc-review', '---\ndescription: 只看文档\n---\n正文')
     assert.equal(frontmatterOf(r.content)['name'], 'doc-review')
     assert.ok(r.notes.some((n) => n.includes('缺少 name')))
@@ -112,7 +112,7 @@ describe('元数据规范化（FR-CLI-20~22）', () => {
     const r = normalizeSkillFrontmatter('hidden-skill', original)
     const meta = frontmatterOf(r.content)
 
-    assert.equal(meta['name'], 'hidden-skill', 'slug 权威')
+    assert.equal(meta['name'], 'hidden-skill', 'name 权威')
     assert.equal(meta['disable-model-invocation'], true, '★ 隐藏开关必须保留')
     assert.equal(meta['description'], '描述')
     assert.equal(meta['allowed-tools'], 'Read, Grep')
@@ -144,7 +144,7 @@ describe('元数据规范化（FR-CLI-20~22）', () => {
     assert.equal(countKeys(withValue.content, 'name'), 1)
   })
 
-  test('name 与 slug 相同 ⇒ 不改动，也不记 note', () => {
+  test('name 与 name 相同 ⇒ 不改动，也不记 note', () => {
     const r = normalizeSkillFrontmatter('same', '---\nname: same\n---\n正文')
     assert.equal(frontmatterOf(r.content)['name'], 'same')
     assert.equal(r.notes.length, 0)
@@ -213,7 +213,7 @@ describe('★ 技能在工作目录里的去留：按落盘的归属清单对账
       await assert.rejects(
         () =>
           syncInjectedSkills(dir, '.claude/skills', [
-            { slug: 'mine', content: '# 平台的标准' },
+            { name: 'mine', content: '# 平台的标准' },
           ]),
         (err: unknown) => err instanceof SkillCollisionError,
         '★ 覆盖使用者的文件比 run 失败糟得多',
@@ -231,11 +231,11 @@ describe('★ 技能在工作目录里的去留：按落盘的归属清单对账
   test('★★ 空正文 ⇒ 当场失败，绝不写一个空 SKILL.md 出去（2026-10）', async () => {
     const dir = await tmp()
     try {
-      // 场景：技能正文存在磁盘上（`<skillsRoot>/<slug>/SKILL.md`），使用者手删了
+      // 场景：技能正文存在磁盘上（`<skillsRoot>/<name>/SKILL.md`），使用者手删了
       // 那个目录 ⇒ store 回填出来的正文是空的。不管它就会写一个空 `SKILL.md`
       // 到工作目录——CLI 会发现它、它却什么都没说，一个**静默的坏技能**。
       await assert.rejects(
-        () => syncInjectedSkills(dir, '.claude/skills', [{ slug: 'empty', content: '  \n' }]),
+        () => syncInjectedSkills(dir, '.claude/skills', [{ name: 'empty', content: '  \n' }]),
         /正文是空的/,
       )
       // 坏技能不该留在工作目录里
@@ -250,13 +250,13 @@ describe('★ 技能在工作目录里的去留：按落盘的归属清单对账
     const dir = await tmp()
     try {
       await syncInjectedSkills(dir, '.claude/skills', [
-        { slug: 'a', content: '# A' },
-        { slug: 'b', content: '# B' },
+        { name: 'a', content: '# A' },
+        { name: 'b', content: '# B' },
       ])
       assert.deepEqual(await listManagedSkills(dir, '.claude/skills'), ['a', 'b'])
 
       // 下一次这个 agent 只挂 a 了（b 被摘下）
-      const result = await syncInjectedSkills(dir, '.claude/skills', [{ slug: 'a', content: '# A2' }])
+      const result = await syncInjectedSkills(dir, '.claude/skills', [{ name: 'a', content: '# A2' }])
       assert.deepEqual(result.pruned, ['b'], '★ 摘掉的必须消失，否则它会被 CLI 继续发现并使用')
       assert.deepEqual(await listManagedSkills(dir, '.claude/skills'), ['a'])
 
@@ -273,12 +273,12 @@ describe('★ 技能在工作目录里的去留：按落盘的归属清单对账
     }
   })
 
-  test('★ 崩溃残渣能自愈：清单里的 slug 下次仍然会被清理', async () => {
+  test('★ 崩溃残渣能自愈：清单里的 name 下次仍然会被清理', async () => {
     // 模拟"上一次跑完没来得及收拾"：文件在、清单也在
     const dir = await tmp()
     try {
       await syncInjectedSkills(dir, '.claude/skills', [
-        { slug: 'leftover', content: '# 残留' },
+        { name: 'leftover', content: '# 残留' },
       ])
       // 这次一个技能都不挂了
       const result = await syncInjectedSkills(dir, '.claude/skills', [])
@@ -292,7 +292,7 @@ describe('★ 技能在工作目录里的去留：按落盘的归属清单对账
   test('★ 收尾只收清单里记着的：点名一个别人的目录也不会删', async () => {
     const dir = await tmp()
     try {
-      await syncInjectedSkills(dir, '.claude/skills', [{ slug: 'ours', content: '# 我们的' }])
+      await syncInjectedSkills(dir, '.claude/skills', [{ name: 'ours', content: '# 我们的' }])
       // 使用者自己的（不在清单里）
       await mkdir(join(dir, '.claude', 'skills', 'theirs'), { recursive: true })
       await writeFile(join(dir, '.claude', 'skills', 'theirs', 'SKILL.md'), '别人的', 'utf8')
@@ -318,8 +318,8 @@ describe('★ 技能在工作目录里的去留：按落盘的归属清单对账
     const dir = await tmp()
     try {
       await syncInjectedSkills(dir, '.claude/skills', [
-        { slug: 'a', content: '# A' },
-        { slug: 'b', content: '# B' },
+        { name: 'a', content: '# A' },
+        { name: 'b', content: '# B' },
       ])
       const swept = await removeInjectedSkills(dir, '.claude/skills', ['a'])
       assert.deepEqual(swept.removed, ['a'])
@@ -329,8 +329,8 @@ describe('★ 技能在工作目录里的去留：按落盘的归属清单对账
       assert.ok(left.includes('b') && !left.includes('a'))
       const manifest = JSON.parse(
         await readFile(join(dir, '.claude', 'skills', '.agentdeck-managed.json'), 'utf8'),
-      ) as { slugs: string[] }
-      assert.deepEqual(manifest.slugs, ['b'], '★ 清单要跟着更新，否则残留无从识别')
+      ) as { names: string[] }
+      assert.deepEqual(manifest.names, ['b'], '★ 清单要跟着更新，否则残留无从识别')
     } finally {
       await cleanup(dir)
     }
@@ -344,6 +344,31 @@ describe('★ 技能在工作目录里的去留：按落盘的归属清单对账
       const swept = await removeInjectedSkills(dir, '.claude/skills', ['theirs'])
       assert.deepEqual(swept.removed, [], '★ 没有清单 = 我们什么都没放过 = 一个都不删')
       assert.equal(await readFile(join(dir, '.claude', 'skills', 'theirs', 'SKILL.md'), 'utf8'), '别人的')
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
+  /*
+   * ★★ D236 的升级判据：老清单写的是 `{ slugs: [...] }`（那时技能名那一栏叫 slug）。
+   *   不认老键的后果不是"少删几个目录"，而是下一次 run 把我们自己上一轮放进去的
+   *   技能当成**使用者的文件** ⇒ `SkillCollisionError` 让整条 run 失败。
+   *   所以在"我们放过的技能被摘掉"这条路上，老清单必须能认出自己人。
+   */
+  test('★★ 老清单（`{ slugs: [...] }`）照样认得出"这是我们放的"', async () => {
+    const dir = await tmp()
+    try {
+      await mkdir(join(dir, '.claude', 'skills', 'old-one'), { recursive: true })
+      await writeFile(join(dir, '.claude', 'skills', 'old-one', 'SKILL.md'), '我们放的', 'utf8')
+      await writeFile(
+        join(dir, '.claude', 'skills', '.agentdeck-managed.json'),
+        JSON.stringify({ slugs: ['old-one'] }),
+        'utf8',
+      )
+      // 这一轮不再需要它 ⇒ 该被摘掉（而不是报"撞上使用者的技能"）
+      const result = await syncInjectedSkills(dir, '.claude/skills', [])
+      assert.deepEqual(result.pruned, ['old-one'], '老清单里的条目要认得出来')
+      assert.deepEqual(await readdir(join(dir, '.claude', 'skills')), ['.agentdeck-managed.json'])
     } finally {
       await cleanup(dir)
     }

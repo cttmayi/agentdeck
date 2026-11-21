@@ -279,7 +279,7 @@ export type SkillSourceErrorCode =
   | 'not_found'
   | 'not_a_directory'
   | 'missing_skill_md'
-  | 'bad_slug'
+  | 'bad_name'
   | 'binary_file'
   | 'too_large'
   | 'too_many_files'
@@ -306,8 +306,8 @@ export class SkillSourceError extends Error {
 // ─────────────────────────────────────────────────────────────
 
 export interface ResolvedSkillSource {
-  /** 权威 slug（来源名派生，或显式指定）。 */
-  slug: string
+  /** 权威 name（来源名派生，或显式指定）。 */
+  name: string
   /** SKILL.md 原文。 */
   body: string
   /** 支持文件：相对路径 → UTF-8 文本。 */
@@ -482,20 +482,20 @@ export function assertValidPathPatterns(
 }
 
 // ─────────────────────────────────────────────────────────────
-// slug
+// name
 // ─────────────────────────────────────────────────────────────
 
 /**
- * 把任意名字收敛成合法 slug。
+ * 把任意来源名收敛成**技能名**（D236：一个技能一个名字，就是规范里的 `name`）。
  *
- * slug 有严格格式（kebab-case、≤63 字符），它同时是**磁盘上的目录名**
- * （注入到 `.claude/skills/<slug>/`）。而来源名是任意的：`My_Skill`、
+ * name 有严格格式（kebab-case、≤63 字符），它同时是**磁盘上的目录名**
+ * （注入到 `.claude/skills/<name>/`）。而来源名是任意的：`My_Skill`、
  * `技能`、`foo.bar` 都可能出现。
  *
  * 收敛规则刻意保守：非 `[a-z0-9]` 一律变 `-`，压掉连续 `-`，去掉首尾 `-`。
  * 收敛后仍不合法就报错要求显式指定，**不瞎猜**。
  */
-export function toSlug(name: string): string {
+export function toSkillName(name: string): string {
   return name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -504,13 +504,13 @@ export function toSlug(name: string): string {
     .slice(0, 63)
 }
 
-const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/
+const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/
 
-export function assertValidSlug(slug: string, hint: string | null = null): void {
-  if (!SLUG_PATTERN.test(slug)) {
+export function assertValidSkillName(name: string, hint: string | null = null): void {
+  if (!SKILL_NAME_PATTERN.test(name)) {
     throw new SkillSourceError(
-      'bad_slug',
-      `slug「${slug}」不合法：只能是小写字母、数字与连字符，并以字母或数字开头（最长 63 字符）。` +
+      'bad_name',
+      `name「${name}」不合法：只能是小写字母、数字与连字符，并以字母或数字开头（最长 63 字符）。` +
         `它同时是磁盘上的目录名。`,
       hint,
     )
@@ -606,7 +606,7 @@ function checkOthers(files: readonly CollectedFile[]): void {
 }
 
 function assemble(input: {
-  slug: string
+  name: string
   sourceRef: string
   resolvedFrom: string
   skillMd: string
@@ -619,7 +619,7 @@ function assemble(input: {
 
   const excluded = input.excluded ?? []
   return {
-    slug: input.slug,
+    name: input.name,
     body: input.skillMd,
     files,
     sourceRef: input.sourceRef,
@@ -665,7 +665,7 @@ interface Collected {
  */
 export async function resolveLocalPath(
   inputPath: string,
-  options: { slug?: string | null; sourceRef?: string | null } = {},
+  options: { name?: string | null; sourceRef?: string | null } = {},
 ): Promise<ResolvedSkillSource> {
   const expanded = expandHome(inputPath)
 
@@ -701,13 +701,13 @@ export async function resolveLocalPath(
 
   const collected = await collectLocal(dir)
   const fallback = basename(dir)
-  const slug = options.slug ?? toSlug(fallback)
-  assertValidSlug(
-    slug,
-    `来源目录名是「${fallback}」，收敛后是「${toSlug(fallback)}」。如果这不对，请显式指定 slug。`,
+  const name = options.name ?? toSkillName(fallback)
+  assertValidSkillName(
+    name,
+    `来源目录名是「${fallback}」，收敛后是「${toSkillName(fallback)}」。如果这不对，请显式指定 name。`,
   )
   return finish(collected, {
-    slug,
+    name,
     // 调用方可以给一个更贴切的来源标识（例如「从本地安装」页签给的
     // `localdir:<根目录>`）——没有就用默认的 `path:<技能目录>`。
     sourceRef: options.sourceRef?.trim() || `path:${dir}`,
@@ -792,7 +792,7 @@ async function collectLocal(root: string): Promise<Collected> {
 /** 公共收尾：SKILL.md 存在性检查 + 限额 + 组装。 */
 function finish(
   collected: Collected,
-  meta: { slug: string; sourceRef: string; resolvedFrom: string; emptyDirNames: string[] },
+  meta: { name: string; sourceRef: string; resolvedFrom: string; emptyDirNames: string[] },
 ): ResolvedSkillSource {
   if (collected.skillMd === null) {
     const names = collected.topLevelNames.length > 0 ? collected.topLevelNames : meta.emptyDirNames
@@ -808,7 +808,7 @@ function finish(
   checkOthers(collected.others)
 
   return assemble({
-    slug: meta.slug,
+    name: meta.name,
     sourceRef: meta.sourceRef,
     resolvedFrom: meta.resolvedFrom,
     skillMd: collected.skillMd,
@@ -1181,7 +1181,7 @@ async function fetchFile(
  */
 export async function resolveGithubUrl(
   url: string,
-  options: { slug?: string | null } = {},
+  options: { name?: string | null } = {},
   deps: ResolveDeps = {},
 ): Promise<ResolvedSkillSource> {
   const target = parseGithubUrl(url)
@@ -1315,13 +1315,13 @@ export async function resolveGithubUrl(
   await walk(target.dir, entries, 0)
 
   const fallback = target.dir === '' ? target.repo : basename(target.dir)
-  const slug = options.slug ?? toSlug(fallback)
-  assertValidSlug(slug, `来源名是「${fallback}」，收敛后是「${toSlug(fallback)}」。要改请显式指定 slug。`)
+  const name = options.name ?? toSkillName(fallback)
+  assertValidSkillName(name, `来源名是「${fallback}」，收敛后是「${toSkillName(fallback)}」。要改请显式指定 name。`)
 
   return finish(
     { skillMd, others, ignored, topLevelNames: names, excluded },
     {
-      slug,
+      name,
       sourceRef:
         `github:${target.owner}/${target.repo}@${target.ref ?? 'default'}` +
         `${target.dir ? `:${target.dir}` : ''}`,
@@ -1346,11 +1346,11 @@ export async function resolveGithubUrl(
  * "SKILL.md 的内容"。
  */
 export function resolvePayloadEntry(input: {
-  slug: string
+  name: string
   body: string
   files?: Record<string, string> | null
   sourceRef: string
-  slugOverride?: string | null
+  nameOverride?: string | null
 }): ResolvedSkillSource {
   const filesIn = { ...(input.files ?? {}) }
   const fromFiles = filesIn['SKILL.md']
@@ -1360,7 +1360,7 @@ export function resolvePayloadEntry(input: {
   if (typeof body !== 'string' || body.trim() === '') {
     throw new SkillSourceError(
       'missing_skill_md',
-      `远端条目「${input.slug}」没有 SKILL.md 的内容（files['SKILL.md'] 与 body 都是空的）。`,
+      `远端条目「${input.name}」没有 SKILL.md 的内容（files['SKILL.md'] 与 body 都是空的）。`,
       '远端目录必须给出 SKILL.md 的正文，否则装进来的技能永远不会生效。',
     )
   }
@@ -1378,15 +1378,15 @@ export function resolvePayloadEntry(input: {
     others.push({ relPath, bytes: Buffer.byteLength(text, 'utf8'), text })
   }
 
-  const slug = input.slugOverride ?? toSlug(input.slug)
-  assertValidSlug(slug, `远端条目给的 slug 是「${input.slug}」。`)
+  const name = input.nameOverride ?? toSkillName(input.name)
+  assertValidSkillName(name, `远端条目给的 name 是「${input.name}」。`)
 
   return finish(
     { skillMd: body, others, ignored: [], topLevelNames: [] },
     {
-      slug,
+      name,
       sourceRef: input.sourceRef,
-      resolvedFrom: `远端目录：${input.slug}`,
+      resolvedFrom: `远端目录：${input.name}`,
       emptyDirNames: [],
     },
   )
@@ -1406,7 +1406,7 @@ export type SkillSourceSpec =
   | { kind: 'url'; url: string }
   | {
       kind: 'payload'
-      slug: string
+      name: string
       body: string
       files?: Record<string, string> | null
       sourceRef: string
@@ -1414,10 +1414,10 @@ export type SkillSourceSpec =
       version?: string | null
     }
 
-/** 解析任意一种来源。`slug` 给使用者一个纠偏的机会。 */
+/** 解析任意一种来源。`name` 给使用者一个纠偏的机会。 */
 export async function resolveSkillSource(
   spec: SkillSourceSpec,
-  options: { slug?: string | null } = {},
+  options: { name?: string | null } = {},
   deps: ResolveDeps = {},
 ): Promise<ResolvedSkillSource> {
   switch (spec.kind) {
@@ -1426,7 +1426,7 @@ export async function resolveSkillSource(
     case 'url':
       return resolveGithubUrl(spec.url, options, deps)
     case 'payload':
-      return resolvePayloadEntry({ ...spec, slugOverride: options.slug ?? null })
+      return resolvePayloadEntry({ ...spec, nameOverride: options.name ?? null })
   }
 }
 
@@ -1441,6 +1441,6 @@ export function describeSource(spec: SkillSourceSpec): string {
     case 'url':
       return `链接 ${spec.url}`
     case 'payload':
-      return `远端目录 ${spec.slug}`
+      return `远端目录 ${spec.name}`
   }
 }

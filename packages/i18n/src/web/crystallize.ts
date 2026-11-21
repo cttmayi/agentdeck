@@ -88,7 +88,7 @@ export const crystallizeText = {
    * ★ 分批第 38 批：「沉淀成 Agent」的草稿行。只用 id 尾段——列表接口只给 id，
    * 而为了一个名字把整张智能体表带进列表接口（或反过来在列表里 N+1 查）都不划算。
    */
-  'crystallize.rowUpdate': { zh: '更新 {slug}', en: 'Update {slug}' },
+  'crystallize.rowUpdate': { zh: '更新 {name}', en: 'Update {name}' },
 
   // ── 步骤条 ──
   'crystallize.stepTarget': { zh: '沉淀目标', en: 'Target' },
@@ -148,7 +148,7 @@ export const crystallizeText = {
   },
   // ★ 分批第 150 批：顶栏「开始提炼」删掉之后 `crystallize.start` 没有引用处了
   //   （开始那一问的按钮文字在 `CrystallizeIntake` 里写着"开始提炼"）。
-  //   同一个位置换成本条：说明「确认入库」为什么按不动（体检没过 / slug 空）。
+  //   同一个位置换成本条：说明「确认入库」为什么按不动（体检没过 / 名字空）。
   'crystallize.confirmBlocked': {
     zh: '还不能入库：机械体检没过（右上「产物」栏能逐项看）',
     en: 'Not ready: the mechanical check failed (see the artifact pane for details)',
@@ -235,13 +235,13 @@ export const crystallizeText = {
   // ── 草稿审阅 ──
   // ★ 分批第 194 批：`crystallize.reviewTitle`（「审阅草稿」）删了——它只挂在"起草者拒绝"
   //   那块抽屉分节的抬头（`<h3>`）上，而那块已经改成一条消息（气泡）。
-  'crystallize.slugLabel': { zh: 'slug', en: 'slug' },
+  'crystallize.nameLabel': { zh: '名字', en: 'Name' },
   /**
-   * ★ 分批第 196 批：「确认入库」的确认框（使用者："中栏的「slug」也不应该显示，
+   * ★ 分批第 196 批：「确认入库」的确认框（使用者："中栏的那个标识也不应该显示，
    * 如果要，可以放在「确认入库」后弹出的对话框中"）。
    */
   'crystallize.commitTitle': { zh: '确认入库？', en: 'Save this skill?' },
-  'crystallize.commitSlugHint': {
+  'crystallize.commitNameHint': {
     zh: '它的唯一标识（kebab-case）。同名会问到「是不是要更新那一条」。',
     en: 'Its unique id (kebab-case). A clash asks whether to update the existing one.',
   },
@@ -307,8 +307,8 @@ export const crystallizeText = {
   // 不带 markdown 记号（界面文案守卫）。
   'crystallize.confirm': { zh: '确认入库', en: 'Save' },
   'crystallize.clashMine': {
-    zh: '已有你提炼的同名 skill（{slug}）——选「覆盖（进化）」或改名',
-    en: 'You already crystallized a skill with this slug ({slug}) — overwrite (evolve) or rename',
+    zh: '已有你提炼的同名 skill（{name}）——选「覆盖（进化）」或改名',
+    en: 'You already crystallized a skill with this name ({name}) — overwrite (evolve) or rename',
   },
   'crystallize.switchToUpdate': { zh: '改为更新它', en: 'Update it instead' },
 

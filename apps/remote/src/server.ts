@@ -534,7 +534,7 @@ export class RemoteService {
      *
      * 一个条目就是**一个包**（一段可以装进来的目录），不是单个动作：
      *
-     *   · `slug`     —— 包名，同时是动作的命名空间（动作名是 `<slug>.<动作名>`）
+     *   · `name`     —— 包名，同时是动作的命名空间（动作名是 `<name>.<动作名>`）
      *   · `name`     —— 给人看的名字
      *   · `version`  —— 清单里的版本（`x.y.z`），没有就是 null
      *   · `summary`  —— 一句话说明
@@ -738,12 +738,12 @@ export class RemoteService {
         for (const item of loadedLocal.skipped) {
           console.warn(`[warn] 本地装的技能没有列出去：${item.path} —— ${item.reason}`)
         }
-        const syncedSlugs = new Set(loadedSkills.skills.map((s) => s.slug))
+        const syncedNames = new Set(loadedSkills.skills.map((s) => s.name))
         const localSkills: CatalogSkillEntry[] = []
         for (const entry of loadedLocal.skills) {
-          if (syncedSlugs.has(entry.slug)) {
+          if (syncedNames.has(entry.name)) {
             console.warn(
-              `[warn] 本地装的技能「${entry.slug}」没有列出去：推荐清单里已经有同名的（同步来的优先）`,
+              `[warn] 本地装的技能「${entry.name}」没有列出去：推荐清单里已经有同名的（同步来的优先）`,
             )
             continue
           }
@@ -822,11 +822,11 @@ export class RemoteService {
           // 永远列不出来，等于装了个隐形条目）
           const synced = await loadCatalogSkills(this.#skillsDir)
           const local = await listLocalSkills(this.#localSkillsDir)
-          const taken = new Set([...synced.skills.map((s) => s.slug), ...local.map((s) => s.slug)])
+          const taken = new Set([...synced.skills.map((s) => s.name), ...local.map((s) => s.name)])
           try {
             const item = await installLocalSkill(this.#localSkillsDir, {
               url,
-              takenSlugs: taken,
+              takenNames: taken,
               ...(this.#fetchImpl ? { fetchImpl: this.#fetchImpl } : {}),
               ...(typeof body.name === 'string' ? { name: body.name } : {}),
               ...(typeof body.summary === 'string' ? { summary: body.summary } : {}),
@@ -835,12 +835,12 @@ export class RemoteService {
                 ? { needs: body.needs as string | null }
                 : {}),
             })
-            send(201, { installed: { slug: item.slug, sourceRef: item.sourceRef, files: item.files } })
+            send(201, { installed: { name: item.name, sourceRef: item.sourceRef, files: item.files } })
           } catch (err) {
             if (err instanceof LocalSkillConflict) {
               send(409, {
                 error:
-                  `已经有一个叫「${err.slug}」的技能了（推荐清单里或本地装的）。` +
+                  `已经有一个叫「${err.skillName}」的技能了（推荐清单里或本地装的）。` +
                   '要换内容请先卸掉那一条，或者改用别的来源目录。',
                 code: 'conflict',
               })
@@ -853,24 +853,24 @@ export class RemoteService {
         }
 
         if (req.method === 'DELETE' && path.startsWith('/api/catalog/skills/local/')) {
-          const slug = decodeURIComponent(path.slice('/api/catalog/skills/local/'.length))
+          const name = decodeURIComponent(path.slice('/api/catalog/skills/local/'.length))
           // ⚠️ 同步来的**不在这一层**，删不到——要说清"该怎么删"，而不是回一个 404
           const synced = await loadCatalogSkills(this.#skillsDir)
-          if (synced.skills.some((s) => s.slug === slug)) {
+          if (synced.skills.some((s) => s.name === name)) {
             send(409, {
               error:
-                `「${slug}」是推荐清单同步下来的，不能在页面上删：` +
+                `「${name}」是推荐清单同步下来的，不能在页面上删：` +
                 '把它从清单里去掉、再跑一次同步即可（页面上那个「重新同步」按钮）。',
               code: 'synced_entry',
             })
             return
           }
-          const removed = await uninstallLocalSkill(this.#localSkillsDir, slug)
+          const removed = await uninstallLocalSkill(this.#localSkillsDir, name)
           if (!removed) {
-            send(404, { error: `本地装的技能里没有「${slug}」`, code: 'not_found' })
+            send(404, { error: `本地装的技能里没有「${name}」`, code: 'not_found' })
             return
           }
-          send(200, { removed: slug })
+          send(200, { removed: name })
           return
         }
 

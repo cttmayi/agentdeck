@@ -115,8 +115,8 @@ describe('一个智能体 = 一个目录（D111）', () => {
     await store.writeExclusiveSkill(agentSkillOwner(id), 'second-one', '# 第二条\n\n正文。')
 
     const listed = await store.listExclusiveSkills(agentSkillOwner(id))
-    assert.deepEqual(listed.map((s) => s.slug).sort(), ['private-notes', 'second-one'])
-    assert.equal(listed.find((s) => s.slug === 'private-notes')?.body, body)
+    assert.deepEqual(listed.map((s) => s.name).sort(), ['private-notes', 'second-one'])
+    assert.equal(listed.find((s) => s.name === 'private-notes')?.body, body)
     assert.equal(await store.getExclusiveSkill(agentSkillOwner(id), 'private-notes'), body)
     assert.equal(await store.getExclusiveSkill(agentSkillOwner(id), 'missing'), null)
 
@@ -124,7 +124,7 @@ describe('一个智能体 = 一个目录（D111）', () => {
     assert.equal(await store.removeExclusiveSkill(agentSkillOwner(id), 'second-one'), true)
     assert.equal(await store.removeExclusiveSkill(agentSkillOwner(id), 'second-one'), false)
     const rest = await store.listExclusiveSkills(agentSkillOwner(id))
-    assert.deepEqual(rest.map((s) => s.slug), ['private-notes'])
+    assert.deepEqual(rest.map((s) => s.name), ['private-notes'])
 
     // ★ 与技能库**完全无关**：库里一条都没有
     assert.deepEqual(await store.listSkills(WS), [])
@@ -159,7 +159,7 @@ describe('一个智能体 = 一个目录（D111）', () => {
       })
       // 读得到（说明文件夹已经在小写目录下了）
       const listed = await store.listExclusiveSkills(agentSkillOwner(id))
-      assert.deepEqual(listed.map((x) => x.slug), ['old-one'])
+      assert.deepEqual(listed.map((x) => x.name), ['old-one'])
       assert.match(listed[0]!.body, /在大写目录里/)
       // 大写目录没了、小写目录在（目录名同时被 D231 改成了名字的 slug）
       const slugDir = slugForAgentName('老智能体')

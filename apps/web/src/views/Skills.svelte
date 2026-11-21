@@ -45,10 +45,10 @@
   // ── D80：列表分组（我提炼的 / 安装的）+ 遮蔽标注 ──
   /**
    * 双根之后列表要分组（设计 §1.1）：mine（我提炼的）在前、安装的在后，各自按
-   * updatedAt 倒序。遮蔽标注：安装的 slug 若已有提炼版（注入时提炼版优先，
+   * updatedAt 倒序。遮蔽标注：安装的 name 若已有提炼版（注入时提炼版优先，
    * 见 daemon `loadAgentSkills`），在行尾点破"被你的版本遮蔽"。
    */
-  $: mineSlugs = new Set($skills.filter((s) => s.source === 'mine').map((s) => s.slug))
+  $: mineNames = new Set($skills.filter((s) => s.source === 'mine').map((s) => s.name))
   $: groupedSkills = [
     ...$skills
       .filter((s) => s.source === 'mine')
@@ -60,7 +60,7 @@
       .map((s) => ({
         skill: s,
         group: 'installed' as const,
-        shadowed: mineSlugs.has(s.slug),
+        shadowed: mineNames.has(s.name),
       })),
   ]
   // ── 安装面板 ──
@@ -86,13 +86,13 @@
    *
    * 当初做成抽屉的理由是"表单插在页头和列表之间会把列表推到看不见的地方"——那个
    * 顾虑现在换一种方式解决：面板**取代**列表（不是把它推下去），所以列表一行都不会
-   * 被挤到视口外；而"装完看不见列表"这件事由**结果块**兜住（装了哪些文件、哪个 slug、
+   * 被挤到视口外；而"装完看不见列表"这件事由**结果块**兜住（装了哪些文件、哪个 name、
    * 来源逐条列出来），返回列表时它已经刷新过。
    */
   let panelOpen = false
   let tab: 'path' | 'dirs' | 'remote' | 'list' = 'path'
   let sourceInput = ''
-  let slugInput = ''
+  let nameInput = ''
   /**
    * 「本地清单」页签的内容。
    *
@@ -196,28 +196,28 @@
       installFromPathOrUrl({
         kind,
         value,
-        ...(slugInput.trim() ? { slug: slugInput.trim() } : {}),
+        ...(nameInput.trim() ? { name: nameInput.trim() } : {}),
         ...(overwrite ? { overwrite: true } : {}),
       }),
     )
   }
 
-  function installFromCatalog(slug: string): void {
-    const entry = $remoteCatalog?.skills.find((s) => s.slug === slug)
+  function installFromCatalog(name: string): void {
+    const entry = $remoteCatalog?.skills.find((s) => s.name === name)
     if (!entry) {
-      errorMessage = tx('skills.errNoRemoteEntry', { slug })
+      errorMessage = tx('skills.errNoRemoteEntry', { name })
       return
     }
     // ★ 状态由 `catalogEntryState` 统一判定：它是纯函数、有测试。
     //   界面**不自己**拼"要不要 overwrite"——那正是"更新/替换"这类动作
     //   容易写错的地方（漏了 overwrite 会被拒，多加了会覆盖不该覆盖的东西）。
     const state = catalogEntryState(
-      $skills.find((s) => s.slug === entry.slug),
-      { slug: entry.slug, version: entry.version },
+      $skills.find((s) => s.name === entry.name),
+      { name: entry.name, version: entry.version },
     )
     void runInstall(() =>
       installRemoteEntry({
-        slug: entry.slug,
+        name: entry.name,
         // 远端目录给的是 SKILL.md 的正文；空的话服务端会拒绝并说清楚
         body: entry.content ?? '',
         // ★ 支持文件要一起交下去（少了它技能是坏的，而且坏得很安静）
@@ -225,7 +225,7 @@
         version: entry.version,
         // ★ 溯源：用目录给的**原始来源**（`github:owner/repo@ref:dir`），
         //   而不是 `remote:…`。远端是中转，不是出处——落库记录要指回上游。
-        sourceRef: entry.sourceRef ?? `remote:${entry.slug}@${entry.version ?? 'unknown'}`,
+        sourceRef: entry.sourceRef ?? `remote:${entry.name}@${entry.version ?? 'unknown'}`,
         ...(state.needsOverwrite || overwrite ? { overwrite: true } : {}),
       }),
     )
@@ -243,8 +243,8 @@
    *   界面不自己拼"要不要 overwrite"（那正是最容易写错的地方）。
    */
   function installFromList(entry: SkillListEntry): void {
-    const state = catalogEntryState($skills.find((s) => s.slug === entry.slug), {
-      slug: entry.slug,
+    const state = catalogEntryState($skills.find((s) => s.name === entry.name), {
+      name: entry.name,
       version: null,
     })
     void runInstall(() =>
@@ -347,11 +347,11 @@
    * 服务端会拒掉"还有 agent 挂着它"，并把它们列出来——那条错误原文要**带回来**
    * 显示，不在前端改写。
    */
-  async function uninstall(id: string, slug: string): Promise<void> {
+  async function uninstall(id: string, name: string): Promise<void> {
     // ★ 平台自己的确认框（居中），不是 `window.confirm`——理由见 `lib/confirm.ts`
     if (
       !(await askConfirm({
-        title: tx('skills.confirmUninstallTitle', { slug }),
+        title: tx('skills.confirmUninstallTitle', { name }),
         message: tx('skills.confirmUninstallBody'),
         confirmLabel: tx('common.uninstall'),
         danger: true,
@@ -362,7 +362,7 @@
     pageError = ''
     try {
       await uninstallSkill(id)
-      showToast(tx('skills.uninstalled', { slug }))
+      showToast(tx('skills.uninstalled', { name }))
     } catch (err) {
       // ★ 写在**页面级**（列表上方会渲染）：卸载是从列表行触发的，错误就该在那儿
       pageError = err instanceof Error ? err.message : String(err)
@@ -449,7 +449,7 @@
    * daemon 现扫那几个目录、把里面的技能列出来，**逐条安装**才进库。
    *
    * ★ 2026-10 之前它是"勾上目录 ⇒ 一直跟着磁盘读进来"（自动对账）。那套撤掉了：
-   *   装进来之后就是一条**普通技能**（正文落在 `~/.agentdeck/skills/<slug>/`），
+   *   装进来之后就是一条**普通技能**（正文落在 `~/.agentdeck/skills/<name>/`），
    *   与其它来源完全一致。所以这个页签**没有勾选框、没有"导入"按钮**——只有
    *   「安装」，一条一条点。
    */
@@ -492,7 +492,7 @@
    *
    * ★ 走的是**与手填路径同一条路**（`installFromPathOrUrl`）——`path` 指向那个技能
    *   目录，额外带上 `sourceRef: localdir:<根目录>`（来源标记）。daemon 那边解析、
-   *   校验、落库都是同一套，所以 slug 规则只有一处。
+   *   校验、落库都是同一套，所以 name 规则只有一处。
    */
   async function installFromDir(dir: LocalSkillScanDir, candidate: LocalSkillCandidate): Promise<void> {
     installingDir = candidate.dir
@@ -502,7 +502,7 @@
         installFromPathOrUrl({
           kind: 'path',
           value: candidate.dir,
-          slug: candidate.slug,
+          name: candidate.name,
           sourceRef: dir.sourceRef,
           ...(overwrite ? { overwrite: true } : {}),
         }),
@@ -639,8 +639,8 @@
       </div>
 
       <div class="field">
-        <label for="skill-slug">{$t('skills.slugLabel')}</label>
-        <input id="skill-slug" bind:value={slugInput} placeholder="my-skill" />
+        <label for="skill-name">{$t('skills.nameLabel')}</label>
+        <input id="skill-name" bind:value={nameInput} placeholder="my-skill" />
       </div>
     {:else if tab === 'dirs'}
       <!--
@@ -662,7 +662,7 @@
         {:else}
           <Table
             columns={[
-              { label: $t('skills.colSlug') },
+              { label: $t('skills.colName') },
               { label: $t('skills.colSource') },
               { label: $t('skills.colSummary') },
               { label: $t('skills.colLocal') },
@@ -691,9 +691,9 @@
                   {#each dir.skills as s (s.dir)}
                     <tr>
                       <td>
-                        <code>{s.slug}</code>
-                        <!-- 目录名派生的 name 常常与 slug 相同，重复一行没有信息量。 -->
-                        {#if s.name && s.name !== s.slug}
+                        <code>{s.name}</code>
+                        <!-- 目录名派生的 name 常常与 name 相同，重复一行没有信息量。 -->
+                        {#if s.name && s.name !== s.name}
                           <div class="faint fs-xs">{s.name}</div>
                         {/if}
                       </td>
@@ -796,7 +796,7 @@
           <p class="faint fs-xs" style="margin:0 0 var(--sp-2)">{$t('skills.remotePickedNote')}</p>
           <Table
             columns={[
-              { label: $t('skills.colSlug') },
+              { label: $t('skills.colName') },
               { label: $t('skills.colSource') },
               { label: $t('skills.colVersion') },
               { label: $t('skills.colSummary') },
@@ -805,20 +805,19 @@
             ]}
           >
             {#snippet rows()}
-              {#each $remoteCatalog.skills as s (s.slug)}
-                  {@const local = $skills.find((x) => x.slug === s.slug)}
-                  {@const state = catalogEntryState(local, { slug: s.slug, version: s.version })}
+              {#each $remoteCatalog.skills as s (s.name)}
+                  {@const local = $skills.find((x) => x.name === s.name)}
+                  {@const state = catalogEntryState(local, { name: s.name, version: s.version })}
                   <tr>
                     <td>
-                      <code>{s.slug}</code>
-                      {#if s.name}
-                        <div class="faint fs-xs">{s.name}</div>
-                      {/if}
-                      <!-- ★ 「内容不完整」必须在**装之前**看得见（2026-10）：
+                      <code>{s.name}</code>
+                      <!-- ★ D236：清单里那句中文标题只作措辞展示（技能名就是上面那个）。
+                           「内容不完整」也必须在**装之前**看得见（2026-10）：
                            维护者可以在清单里声明 exclude（仓库里混着营销素材/测试产物
                            时用得上）。装了的东西少了零件而界面上不说，正是这个仓库
                            最防的那种失败：跑起来才发现少东西。
                            全文在 title 里，行内只说个数。 -->
+                      {#if s.title}<div class="faint fs-xs">{s.title}</div>{/if}
                       {#if s.excluded && s.excluded.length > 0}
                         <div
                           class="warn fs-xs"
@@ -859,7 +858,7 @@
                         class={state.action === 'update' ? 'btn btn--sm' : 'btn btn--secondary btn--sm'}
                         disabled={busy || state.disabled}
                         title={$t(state.hintId, state.hintParams)}
-                        onclick={() => installFromCatalog(s.slug)}
+                        onclick={() => installFromCatalog(s.name)}
                       >
                         {$t(state.labelId, state.labelParams)}
                       </button>
@@ -900,7 +899,7 @@
           {#if skillList.entries.length > 0}
             <Table
               columns={[
-                { label: $t('skills.colSlug') },
+                { label: $t('skills.colName') },
                 { label: $t('skills.colSource') },
                 { label: $t('skills.colSummary') },
                 { label: $t('skills.colLocal') },
@@ -928,12 +927,12 @@
                     </td>
                   </tr>
                   {#if openCats[group.id]}
-                    {#each group.entries as e (e.slug)}
-                      {@const local = $skills.find((x) => x.slug === e.slug)}
-                      {@const state = catalogEntryState(local, { slug: e.slug, version: null })}
+                    {#each group.entries as e (e.name)}
+                      {@const local = $skills.find((x) => x.name === e.name)}
+                      {@const state = catalogEntryState(local, { name: e.name, version: null })}
                       <tr>
                         <td>
-                          <code>{e.slug}</code>
+                          <code>{e.name}</code>
                           {#if e.name}
                             <div class="faint fs-xs">{e.name}</div>
                           {/if}
@@ -1034,7 +1033,7 @@
       <div class="notice {result.installed.length > 0 ? 'good' : 'warn'}" style="margin-top:var(--sp-3)">
         <strong>{result.installed.length > 0 ? $t('skills.installedTitle') : $t('skills.noChangesTitle')}</strong>
         <!-- 几段话按原顺序拼起来即可（`；` 这些标点已经在各条词条里）。插值里有
-             **列表**（已装的 slug、被忽略的文件），由 `renderInstallMessage()`
+             **列表**（已装的 name、被忽略的文件），由 `renderInstallMessage()`
              按渲染方语言取 `install.listSeparator` 连接——所以传进去的是 `$t`：
              分隔符跟着语言走，这几行也才会跟着语言重渲染。 -->
         <p style="margin:var(--sp-2) 0 0">{#each note as message (message)}{renderInstallMessage(message, (id, params) => $t(id, params))}{/each}</p>
@@ -1118,7 +1117,7 @@
 {:else}
   <Table
     columns={[
-      { label: $t('skills.colSlug') },
+      /* ★ D236：名字只有一个（= 目录名），所以原来那两列（标识 / 名称）并成一列 */
       { label: $t('skills.colName') },
       { label: $t('skills.colSource') },
       { label: $t('skills.colVersion') },
@@ -1134,7 +1133,7 @@
           {@const prev = groupedSkills[i - 1]}
           {#if i === 0 || !prev || prev.group !== entry.group}
             <tr class="group-head">
-              <td colspan="7">
+              <td colspan="6">
                 <span class="faint fs-xs group-label">
                   {entry.group === 'mine'
                     ? $t('crystallize.groupMine')
@@ -1148,7 +1147,7 @@
               <!-- ★ 与工具页同一个做法：展开入口从行尾挪到首格 chevron——
                    行尾那格只留卸载（和"为什么不能卸"的说明）。真按钮：
                    tab 能到、读屏器能读、aria-expanded 能报状态。 -->
-              <!-- D69.8：chevron + slug 包进 flex（.row-title）——列一窄内联元素
+              <!-- D69.8：chevron + name 包进 flex（.row-title）——列一窄内联元素
                    会折行（table 是 width:100%），flex 永不折行 -->
               <div class="row-title">
                 <ExpandToggle
@@ -1157,14 +1156,9 @@
                   labelCollapse={$t('skills.collapseStandard')}
                   onclick={() => (expanded = expanded === s.id ? null : s.id)}
                 />
-                <code class="skill-slug">{s.slug}</code>
+                <code class="skill-name">{s.name}</code>
               </div>
-            </td>
-            <td>
-              <!-- D69：名称与目录表 / remote 同一档（`faint fs-xs`，298 批前叫 `small`）——slug 才是
-                   主标识，名称是第二行 -->
-              <div class="faint fs-xs">{s.name}</div>
-              <!-- ★ 与工具页同一格式：名称下面跟一句说明（没有就不画）。
+              <!-- ★ 与工具页同一格式：名字下面跟一句说明（没有就不画）。
                    ⚠️ 说明可能很长（实测有 400+ 字符的），所以**最多两行**截断、
                    全文在 `title` 里——列表是用来扫的，一行被撑成十行就扫不动了。
                    完整内容在展开后的正文里。 -->
@@ -1194,7 +1188,7 @@
                 </span>
               {/if}
               {#if entry.shadowed}
-                <!-- D80：安装的 slug 被提炼版遮蔽——注入用提炼版，这一条实际不生效 -->
+                <!-- D80：安装的 name 被提炼版遮蔽——注入用提炼版，这一条实际不生效 -->
                 <span class="badge shadowed" title={$t('crystallize.shadowed')}>
                   {$t('crystallize.shadowed')}
                 </span>
@@ -1229,7 +1223,7 @@
                   class="btn btn--danger btn--sm"
                   disabled={removing === s.id}
                   title={$t('skills.uninstallTitle')}
-                  onclick={() => void uninstall(s.id, s.slug)}
+                  onclick={() => void uninstall(s.id, s.name)}
                 >
                   {removing === s.id ? $t('common.uninstalling') : $t('common.uninstall')}
                 </button>
@@ -1238,8 +1232,8 @@
           </tr>
           {#if expanded === s.id}
             <tr>
-              <!-- 7 列：动作那一列随"skill 不再带动作"一起去掉了 -->
-              <td colspan="7">
+              <!-- 6 列（D236 把"标识 + 名称"并成一列）：动作那一列随"skill 不再带动作"一起去掉了 -->
+              <td colspan="6">
                 <pre class="skill-body">{s.body}</pre>
                 <!-- 历史（git）只对「我提炼的」有意义：安装来的是外部内容，重新装就行
                      （设计 §「版本管理」那一行）。所以 non-mine 连这一节都不出现——
@@ -1247,7 +1241,7 @@
                      ★ 2026-10：这一节就是 P2 的界面（历史一直躺在 skills-mine 的 git 里，
                        从前没有入口 ⇒ "更新之后看不出改了什么"，进化等于盲签）。 -->
                 {#if s.source === 'mine'}
-                  <SkillHistory skill={{ id: s.id, slug: s.slug, source: s.source }} />
+                  <SkillHistory skill={{ id: s.id, name: s.name, source: s.source }} />
                 {/if}
                 {#if fileCount > 0}
                   <details class="support">

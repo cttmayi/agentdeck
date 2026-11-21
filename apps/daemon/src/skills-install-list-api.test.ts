@@ -13,7 +13,7 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
  * 这条接口**不联网**
  * ══════════════════════════════════════════════════════════════════
  *
- * 它只读本地那份 JSON、算 slug（见 `skill-list.ts`），不抓 GitHub——真正的下载
+ * 它只读本地那份 JSON、算 name（见 `skill-list.ts`），不抓 GitHub——真正的下载
  * 发生在使用者点「安装」之后。所以这里的 daemon 用 stub backend、`port: 0`，
  * 不跑真 CLI、不碰网络。
  *
@@ -55,7 +55,6 @@ async function withDaemon<T>(
 }
 
 interface Entry {
-  slug: string
   name: string
   source: { kind: 'url' | 'path'; value: string }
 }
@@ -73,7 +72,7 @@ describe('★ 本地安装清单接口', () => {
       assert.equal(status, 200)
       assert.ok(entries.length > 0, '自带清单不该是空的')
       for (const e of entries) {
-        assert.ok(e.slug, '每条都要有 daemon 算出来的 slug')
+        assert.ok(e.name, '每条都要有 daemon 算出来的 name')
         assert.ok(['url', 'path'].includes(e.source.kind))
         assert.ok(e.source.value, '每条都要有一个来源值')
       }
@@ -95,7 +94,7 @@ describe('★ 本地安装清单接口', () => {
       await withDaemon(
         async (url) => {
           const { entries } = await getList(url)
-          assert.deepEqual(entries.map((e) => e.slug), ['custom-skill'])
+          assert.deepEqual(entries.map((e) => e.name), ['custom-skill'])
         },
         { skillListPath: manifest },
       )

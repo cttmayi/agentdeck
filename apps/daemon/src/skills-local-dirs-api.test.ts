@@ -65,7 +65,7 @@ async function withDaemon<T>(
 
 interface SkillView {
   id: string
-  slug: string
+  name: string
   body: string
   description: string | null
   source: string
@@ -80,10 +80,9 @@ interface ScanDir {
   exists: boolean
   error: string | null
   skills: Array<{
-    slug: string
+    name: string
     rel: string
     dir: string
-    name: string
     description: string | null
     installed: boolean
   }>
@@ -103,13 +102,13 @@ async function scanDirs(url: string): Promise<ScanDir[]> {
 }
 
 /** 走「从本地安装」那条路装一条（正是界面点「安装」时发的请求）。 */
-async function installFromDir(url: string, dir: ScanDir, skillDir: string, slug: string) {
+async function installFromDir(url: string, dir: ScanDir, skillDir: string, name: string) {
   const res = await fetch(`${url}/api/skills/install`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       source: { kind: 'path', path: skillDir, sourceRef: dir.sourceRef, },
-      slug,
+      name,
     }),
   })
   return { status: res.status, body: (await res.json()) as Record<string, unknown> }
@@ -137,7 +136,7 @@ async function makeAgent(url: string, body: Record<string, unknown>) {
 }
 
 describe('★ 从本地安装：扫描', () => {
-  test('列出目录里发现的技能（slug / 相对路径 / 说明），一开始都是「未安装」', async () => {
+  test('列出目录里发现的技能（name / 相对路径 / 说明），一开始都是「未安装」', async () => {
     const root = await makeTempDir('localdirs-scan')
     const other = await makeTempDir('localdirs-scan-other')
     try {
@@ -156,13 +155,13 @@ describe('★ 从本地安装：扫描', () => {
           assert.equal(claude.error, null, '目录读得了')
           assert.equal(claude.sourceRef, `localdir:${root}`, '★ 来源标记 = localdir:<根目录>')
           assert.deepEqual(
-            claude.skills.map((s) => s.slug).sort(),
+            claude.skills.map((s) => s.name).sort(),
             ['browser-use', 'skill-creator'],
             '★ 扁平与嵌套两种形状都要认出来',
           )
           for (const s of claude.skills) {
             assert.equal(s.installed, false, '一个都还没装')
-            assert.equal(s.description, `${s.slug} 的说明`, 'frontmatter 里的说明要带出来')
+            assert.equal(s.description, `${s.name} 的说明`, 'frontmatter 里的说明要带出来')
           }
           // 第二个目录是空的
           assert.equal(dirs[1]!.skills.length, 0)
@@ -183,7 +182,7 @@ describe('★ 从本地安装：扫描', () => {
       await withDaemon(
         async ({ url }) => {
           const [claude] = await scanDirs(url)
-          assert.deepEqual(claude!.skills.map((s) => s.slug), ['real-one'])
+          assert.deepEqual(claude!.skills.map((s) => s.name), ['real-one'])
           assert.equal(claude!.skipped.length, 1, '★ 那个空目录必须说出来')
           assert.match(claude!.skipped[0]!.rel, /baoyu-markdown-to-html/)
           assert.match(claude!.skipped[0]!.reason, /SKILL\.md/)
@@ -218,10 +217,10 @@ describe('★ 从本地安装：装进来', () => {
         async ({ url, skillsRoot }) => {
           // ① 扫到两条，都还没装
           const dir = (await scanDirs(url))[0]!
-          const target = dir.skills.find((s) => s.slug === 'browser-use')!
+          const target = dir.skills.find((s) => s.name === 'browser-use')!
 
           // ② 装一条（界面点「安装」时发的就是这一条）
-          const install = await installFromDir(url, dir, target.dir, target.slug)
+          const install = await installFromDir(url, dir, target.dir, target.name)
           assert.equal(install.status, 201, JSON.stringify(install.body))
 
           // ③ ★★ 正文落在**我们自己的** skillsRoot 下——这是"显式安装"的核心承诺：
@@ -231,15 +230,15 @@ describe('★ 从本地安装：装进来', () => {
 
           // ④ 列表里看得见，带着来源标记
           const skills = await listSkills(url)
-          const found = skills.find((s) => s.slug === 'browser-use')!
+          const found = skills.find((s) => s.name === 'browser-use')!
           assert.equal(found.sourceRef, `localdir:${root}`, '★ 落库的 sourceRef 就是给的 localdir:<根目录>')
           assert.equal(found.localDir, root, '列表据此显示"来自本地技能目录：…"')
           assert.equal(found.source, 'local')
 
           // ⑤ 再扫一遍：装过的显示「已安装」，没装的还是「未安装」
           const again = (await scanDirs(url))[0]!
-          assert.equal(again.skills.find((s) => s.slug === 'browser-use')!.installed, true)
-          assert.equal(again.skills.find((s) => s.slug === 'my-helper')!.installed, false)
+          assert.equal(again.skills.find((s) => s.name === 'browser-use')!.installed, true)
+          assert.equal(again.skills.find((s) => s.name === 'my-helper')!.installed, false)
 
           // ⑥ ★★ 真把它挂到一个执行者身上——这是使用者要的最后一环
           const agent = await makeAgent(url, {
@@ -264,14 +263,14 @@ describe('★ 从本地安装：装进来', () => {
         async ({ url }) => {
           const dir = (await scanDirs(url))[0]!
           const target = dir.skills[0]!
-          assert.equal((await installFromDir(url, dir, target.dir, target.slug)).status, 201)
+          assert.equal((await installFromDir(url, dir, target.dir, target.name)).status, 201)
 
           // 使用者在 Claude Code 那边把整个技能目录删了
           await cleanup(join(root, 'standalone'))
 
           // ★ 库里那条照旧可用、正文照旧读得出来——这正是"改成显式安装"要的效果：
           //   以前对账会把这条标成"失效"，现在它是一条独立技能。
-          const found = (await listSkills(url)).find((s) => s.slug === 'standalone')!
+          const found = (await listSkills(url)).find((s) => s.name === 'standalone')!
           assert.ok(found, '★ 源目录没了，技能还在')
           assert.match(found.body, /正文/)
 
@@ -299,7 +298,6 @@ describe('★ 列表里的「说明」列', () => {
       await store.insertSkill({
         id: 'sk_legacy' as Skill['id'],
         workspaceId: ws,
-        slug: 'legacy-skill',
         name: 'legacy-skill',
         description: null,
         body: '---\nname: legacy-skill\ndescription: 老记录里那句说明\n---\n\n正文。\n',
@@ -311,7 +309,7 @@ describe('★ 列表里的「说明」列', () => {
         updatedAt: Date.now(),
       })
 
-      const found = (await listSkills(url)).find((s) => s.slug === 'legacy-skill')
+      const found = (await listSkills(url)).find((s) => s.name === 'legacy-skill')
       assert.ok(found, '这条旧记录应该在列表里')
       assert.equal(found.description, '老记录里那句说明', '★ 库里的 null 不该盖住 frontmatter 里的说明')
       // ★ 只补展示，**不动库**：库里那份仍然是 null（审计是 append-only 的）
@@ -326,7 +324,6 @@ describe('★ 列表里的「说明」列', () => {
       await store.insertSkill({
         id: 'sk_stored' as Skill['id'],
         workspaceId: ws,
-        slug: 'stored-desc',
         name: 'stored-desc',
         description: '库里登记的那句',
         body: '---\nname: stored-desc\ndescription: frontmatter 里那句\n---\n\n正文。\n',
@@ -337,7 +334,7 @@ describe('★ 列表里的「说明」列', () => {
         createdAt: Date.now(),
         updatedAt: Date.now(),
       })
-      const found = (await listSkills(url)).find((s) => s.slug === 'stored-desc')
+      const found = (await listSkills(url)).find((s) => s.name === 'stored-desc')
       assert.equal(found?.description, '库里登记的那句')
     })
   })

@@ -11,8 +11,10 @@ import { renderText } from '@agentdeck/i18n'
  *   daemon 那边要维护一个"远端地址 + 登录态"，是因为它在**另一个源**上。
  */
 export interface CatalogSkill {
-  slug: string
+  /** 技能名（= 目录名；远端接口 D236 起就叫 name）。 */
   name: string
+  /** 推荐清单里那句中文标题（只是措辞，不是身份）。 */
+  title: string
   version: string | null
   summary: string
   category: string
@@ -116,14 +118,14 @@ export const api = {
     name?: string
     summary?: string
     needs?: string
-  }): Promise<{ slug: string; files: string[] }> {
+  }): Promise<{ name: string; files: string[] }> {
     const res = await fetch('/api/catalog/skills/local', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(input),
     })
     const body = (await res.json().catch(() => ({}))) as {
-      installed?: { slug: string; files: string[] }
+      installed?: { name: string; files: string[] }
       error?: string
     }
     if (res.status === 201 && body.installed) return body.installed
@@ -133,8 +135,8 @@ export const api = {
   },
 
   /** 从远端目录卸掉一条**本地装的**。同步来的会被服务端 409 拒绝（那是清单的事）。 */
-  async uninstallSkill(slug: string): Promise<void> {
-    const res = await fetch(`/api/catalog/skills/local/${encodeURIComponent(slug)}`, {
+  async uninstallSkill(name: string): Promise<void> {
+    const res = await fetch(`/api/catalog/skills/local/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     })
     if (res.status === 200) return

@@ -213,19 +213,19 @@ async function scenario(store: Store): Promise<unknown[]> {
     (await store.listAgents(WS_B)).map((a) => a.id),
   )
 
-  await store.insertSkill(makeSkill({ id: 's1', workspaceId: WS_A, slug: 'sec-vuln' }))
-  await store.insertSkill(makeSkill({ id: 's2', workspaceId: WS_A, slug: 'style' }))
-  await store.insertSkill(makeSkill({ id: 's3', workspaceId: WS_B, slug: 'other' }))
-  await rec('listSkills.A', async () => (await store.listSkills(WS_A)).map((s) => s.slug))
+  await store.insertSkill(makeSkill({ id: 's1', workspaceId: WS_A, name: 'sec-vuln' }))
+  await store.insertSkill(makeSkill({ id: 's2', workspaceId: WS_A, name: 'style' }))
+  await store.insertSkill(makeSkill({ id: 's3', workspaceId: WS_B, name: 'other' }))
+  await rec('listSkills.A', async () => (await store.listSkills(WS_A)).map((s) => s.name))
   // ★ 卸载（D38）：删得掉、幂等、删完取不到、别的 workspace 不受影响
   await rec('deleteSkill.ok', () => store.deleteSkill(skillId('s1')))
   await rec('deleteSkill.again', () => store.deleteSkill(skillId('s1')))
   await rec('getSkill.afterDelete', () => store.getSkill(skillId('s1')))
   await rec('listSkills.A.afterDelete', async () =>
-    (await store.listSkills(WS_A)).map((s) => s.slug),
+    (await store.listSkills(WS_A)).map((s) => s.name),
   )
   await rec('listSkills.B.untouched', async () =>
-    (await store.listSkills(WS_B)).map((s) => s.slug),
+    (await store.listSkills(WS_B)).map((s) => s.name),
   )
   await rec('listSkillsByIds', async () =>
     (await store.listSkillsByIds(['s2', 's3', 's1'] as never)).map((s) => s.id),
@@ -234,8 +234,8 @@ async function scenario(store: Store): Promise<unknown[]> {
 
   /*
    * ⚠️ 2026-11（D123）：这里原来整块是**工具包**的差分记录（`getTool` / `listTools` /
-   *   `getToolBySlug` / `deleteTool` / `listToolsByIds`，含"只在一个 workspace 内按
-   *   slug 找"与"夹着已卸载的 id 也照常返回"两条特有语义）。工具包随动作能力退场，
+   *   `getToolByName` / `deleteTool` / `listToolsByIds`，含"只在一个 workspace 内按
+   *   name 找"与"夹着已卸载的 id 也照常返回"两条特有语义）。工具包随动作能力退场，
    *   端口删了，这块差分记录没有对象，整块删。
    */
 
@@ -705,7 +705,7 @@ describe('差分契约：SQLite 适配器与文件适配器行为一致（FR-STO
 
     /*
      * ⚠️ 2026-11（D123）：这里原来是**工具包**那一段答案断言（卸载的语义、删除
-     *   "删第二次是 false 不是错误"、`getToolBySlug` 只在一个 workspace 内唯一、
+     *   "删第二次是 false 不是错误"、`getToolByName` 只在一个 workspace 内唯一、
      *   批量取跳过已卸载的 id）。工具包随动作能力退场，端口删了，这一段整块删。
      */
 

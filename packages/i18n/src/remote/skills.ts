@@ -8,7 +8,7 @@ export const remoteSkillsText = {
     zh: '目录里现在没有技能：维护者还没同步推荐清单。',
     en: 'No skills in the catalog yet: the maintainer has not synced the list.',
   },
-  'remote.colSlug': { zh: '技能', en: 'Skill' },
+  'remote.colName': { zh: '技能', en: 'Skill' },
   'remote.colVersion': { zh: '版本', en: 'Version' },
   'remote.colSource': { zh: '来源', en: 'Source' },
   'remote.colFiles': { zh: '文件', en: 'Files' },

@@ -59,7 +59,7 @@ describe('新对话的下拉：skill 是执行者的另一条入口', () => {
       skillIds,
       ...(builtinKind === undefined ? {} : { builtin: true, builtinKind }),
     }) as unknown as Agent
-  const skill = (id: string, slug: string): Skill => ({ id, slug, name: slug }) as unknown as Skill
+  const skill = (id: string, name: string): Skill => ({ id, name }) as unknown as Skill
 
   const executors = [agent('a1', '助手'), agent('a2', '算法艺术', ['s1']), agent('a3', '文章写作')]
   const skills = [skill('s1', 'algorithmic-art'), skill('s2', 'skill-creator')]
@@ -196,7 +196,7 @@ describe('新对话的下拉：skill 是执行者的另一条入口', () => {
 
   test('★ 被旧 daemon 挡住的是哪几条，要用名字报出来（否则列表看起来像坏了）', () => {
     assert.deepEqual(
-      skillsHeldBackByDaemon(executors, skills, false).map((s) => s.slug),
+      skillsHeldBackByDaemon(executors, skills, false).map((s) => s.name),
       ['skill-creator'],
     )
     // 新 daemon 上一条都不挡
@@ -345,13 +345,13 @@ describe('★ 能聊天 = 接入点里有 chat（一处定义，三处都读它�
   test('★★ skillsHeldBackByDaemon 用的是同一句判据（它原来自己写了一份）', () => {
     // 这个 fixture 在上面那段 describe 里局部定义（作用域不同，这里自己造一份）
     const skills: Skill[] = [
-      { id: 's1', slug: 'algorithmic-art', name: 'algorithmic-art' } as unknown as Skill,
-      { id: 's2', slug: 'skill-creator', name: 'skill-creator' } as unknown as Skill,
+      { id: 's1', name: 'algorithmic-art' } as unknown as Skill,
+      { id: 's2', name: 'skill-creator' } as unknown as Skill,
     ]
     // 平台成员 + chat 入口 = 执行者 ⇒ 没人挂的 skill 会被挡（旧 daemon 不支持对话带 skill）
     const platformChat = withEntries('p1', ['chat'], { owner: 'platform', builtin: true })
     assert.deepEqual(
-      skillsHeldBackByDaemon([platformChat], skills, false).map((s) => s.slug),
+      skillsHeldBackByDaemon([platformChat], skills, false).map((s) => s.name),
       ['algorithmic-art', 'skill-creator'],
       '它既然能聊，那"没人挂"的 skill 就都该按它的口径算（两条都没人挂）',
     )

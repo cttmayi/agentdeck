@@ -93,15 +93,15 @@ describe('★ 新建 agent：缺 name 要报错，不能造出"新 agent"', () =
 
 describe('★ 挂载不存在的 skill 要在**创建时**就报错', () => {
   /** 造一条 skill 当夹具（D38 之后首启**不再播种** skill，技能库是空的）。 */
-  async function installOne(url: string): Promise<{ id: string; slug: string }> {
+  async function installOne(url: string): Promise<{ id: string; name: string }> {
     const res = await fetch(`${url}/api/skills`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        skills: [{ slug: 'fixture-skill', name: '夹具技能', body: '# 夹具', source: 'local' }],
+        skills: [{ name: 'fixture-skill', body: '# 夹具', source: 'local' }],
       }),
     })
-    const body = (await res.json()) as { installed: Array<{ id: string; slug: string }> }
+    const body = (await res.json()) as { installed: Array<{ id: string; name: string }> }
     return body.installed[0]!
   }
 
@@ -114,7 +114,7 @@ describe('★ 挂载不存在的 skill 要在**创建时**就报错', () => {
       assert.equal(res.status, 400)
       assert.match(String(res.body['error']), /skill 不存在/)
       // 要给出可用的，否则使用者只能去翻接口
-      assert.match(String(res.body['error']), new RegExp(one.slug))
+      assert.match(String(res.body['error']), new RegExp(one.name))
     })
   })
 

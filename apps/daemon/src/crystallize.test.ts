@@ -38,7 +38,7 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
 let dir: string
 let store: FileStore
 
-/** 夹具里的技能 slug：prompt 里点名的那份（真身是使用者装的 distilly）。 */
+/** 夹具里的技能 name：prompt 里点名的那份（真身是使用者装的 distilly）。 */
 const DRAFTER_SKILLS = ['distilly'] as const
 
 const WS = wsId('ws-crystal')
@@ -96,8 +96,8 @@ async function seedAgent(over: Omit<Partial<Agent>, 'id'> & { id: string }): Pro
 
 describe('crystallizeTargets：目标面板信息', () => {
   test('conversation：加载 skill = 执行者挂的 ∪ 对话额外带的', async () => {
-    const mine = makeSkill({ id: 'm1', workspaceId: WS, slug: 'my-flow', source: 'mine' })
-    const installed = makeSkill({ id: 'i1', workspaceId: WS, slug: 'general-review', source: 'remote' })
+    const mine = makeSkill({ id: 'm1', workspaceId: WS, name: 'my-flow', source: 'mine' })
+    const installed = makeSkill({ id: 'i1', workspaceId: WS, name: 'general-review', source: 'remote' })
     await store.insertSkill(mine)
     await store.insertSkill(installed)
 
@@ -123,9 +123,9 @@ describe('crystallizeTargets：目标面板信息', () => {
     })
     const targets = await crystallizeTargets(store, run)
     assert.equal(targets.scope, 'conversation')
-    const slugs = targets.loadedSkills.map((s) => s.slug).sort()
-    assert.deepEqual(slugs, ['general-review', 'my-flow'], '执行者挂的 ∪ 对话带的')
-    const mineEntry = targets.loadedSkills.find((s) => s.slug === 'my-flow')
+    const names = targets.loadedSkills.map((s) => s.name).sort()
+    assert.deepEqual(names, ['general-review', 'my-flow'], '执行者挂的 ∪ 对话带的')
+    const mineEntry = targets.loadedSkills.find((s) => s.name === 'my-flow')
     assert.equal(mineEntry?.source, 'mine', '提炼的来源如实带出（可进化）')
     /*
      * ⚠️ 2026-11（D125）：这里原来断言 `targets.reviewed === false`（"聊天没有审核"）。
@@ -570,14 +570,13 @@ describe('collectMaterial / writeMaterial：素材落盘（四轮）', () => {
         target: {
           kind: 'update',
           skill: {
-            slug: 'my-flow',
-            name: '我的流程',
+            name: 'my-flow',
             description: '旧描述',
             body: '---\nname: my-flow\n---\n旧版全文',
             files: { 'references/x.md': '参考' },
           },
         },
-        existingSkills: [{ slug: 'general-review', name: '通用审核', description: '审报告' }],
+        existingSkills: [{ name: 'general-review', description: '审报告' }],
       },
     )
     assert.ok(written.includes('00-README.md'), '索引在')
@@ -684,7 +683,7 @@ describe('buildDraftPrompt：起草指令（210/211/218 批：只说索引页没
     const prompt = buildDraftPrompt({
       materialDir: 'material',
       outputDir: 'skill',
-      skillSlugs: DRAFTER_SKILLS,
+      skillNames: DRAFTER_SKILLS,
     })
     assert.match(prompt, /material\/00-README\.md/, '先读索引')
     assert.match(prompt, /产出写到 `skill\/`/, '产出写到哪')
@@ -694,7 +693,7 @@ describe('buildDraftPrompt：起草指令（210/211/218 批：只说索引页没
     assert.match(prompt, /`SKILL\.md` 是主产出/, '主产出的名字')
     assert.doesNotMatch(prompt, /frontmatter/, '不再复述技能自己模板里的 frontmatter 字段')
     // ★ 分批第 210 批（使用者："怎么还在用 writing-skill，不是应该用安装的 distilly 吗"）：
-    //   写法**只在技能里**。这条钉两件事：点名的是**实际注入的那份**（slug 来自挂载，
+    //   写法**只在技能里**。这条钉两件事：点名的是**实际注入的那份**（name 来自挂载，
     //   不是写死的常量），并且 prompt 里**不再有**第二份写法权威。
     assert.match(prompt, /`distilly`/, '点名这一轮真的注入的那份技能')
     assert.doesNotMatch(prompt, /writing-skills/, '平台自带的写作规范不再进 prompt')
@@ -717,7 +716,7 @@ describe('buildDraftPrompt：起草指令（210/211/218 批：只说索引页没
    * ★ 分批第 216 批（使用者："skill 的写法描述是否有必须，distilly 是否已经有描述了"）：
    * 去读了真机上装的那份 distilly 才发现的——它**不是**"怎么写 skill"的规范，而是一个
    * **persona 蒸馏器**（owner / colleague / relationship / celebrity 四族，落点在
-   * `./skills/<family>/<slug>`，写入只走它自己的 `tools/skill_writer.py`，还带一套交互式
+   * `./skills/<family>/<name>`，写入只走它自己的 `tools/skill_writer.py`，还带一套交互式
    * intake）。也就是说：prompt 里那四条**不是**在重复它，而是平台契约唯一说出口的地方；
    * 反过来，"照它写"如果不划线，模型真会去走它那套流程、写到一个平台看不见的目录。
    * 所以这一条钉住那句**优先级**。
@@ -726,7 +725,7 @@ describe('buildDraftPrompt：起草指令（210/211/218 批：只说索引页没
     const prompt = buildDraftPrompt({
       materialDir: 'material',
       outputDir: 'skill',
-      skillSlugs: DRAFTER_SKILLS,
+      skillNames: DRAFTER_SKILLS,
     })
     assert.match(prompt, /写法与产物格式照你挂着的技能/, '写法与格式交给那份技能')
     assert.match(prompt, /`\.\/skills\/…`/, '点名它那条冲突的落点（否则模型会照抄）')
@@ -743,17 +742,17 @@ describe('buildDraftPrompt：起草指令（210/211/218 批：只说索引页没
     const prompt = buildDraftPrompt({
       materialDir: 'material',
       outputDir: 'skill',
-      skillSlugs: DRAFTER_SKILLS,
+      skillNames: DRAFTER_SKILLS,
     })
     assert.doesNotMatch(prompt, /existing-skill/, '更新基线由索引页说（prompt 不重复）')
     assert.doesNotMatch(prompt, /作用描述/, '更新时没有作用描述那段')
   })
 
-  test('没解析到技能时那句退化成"你挂着的那份技能"（不编一个 slug）', () => {
+  test('没解析到技能时那句退化成"你挂着的那份技能"（不编一个 name）', () => {
     const prompt = buildDraftPrompt({
       materialDir: 'material',
       outputDir: 'skill',
-      skillSlugs: [],
+      skillNames: [],
     })
     // ★ 分批第 220 批：写法那一句改成"写法与产物格式照你挂着的技能"。
     assert.match(prompt, /照你挂着的技能/)

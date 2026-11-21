@@ -103,7 +103,7 @@
         ...(installNeeds.trim() !== '' ? { needs: installNeeds.trim() } : {}),
       })
       installNoteBad = false
-      installNote = tx('remote.installOk', { slug: done.slug, count: done.files.length })
+      installNote = tx('remote.installOk', { name: done.name, count: done.files.length })
       installUrl = ''
       installName = ''
       installSummary = ''
@@ -117,21 +117,21 @@
     }
   }
 
-  async function doUninstall(slug: string): Promise<void> {
+  async function doUninstall(name: string): Promise<void> {
     // 卸载是**不可逆**的（目录里那份会被删掉），所以问一句；文案里说清"影响的只是目录"
     const ok = await askConfirm({
       title: tx('remote.uninstall'),
-      message: tx('remote.uninstallConfirm', { slug }),
+      message: tx('remote.uninstallConfirm', { name }),
       confirmLabel: tx('remote.uninstall'),
       danger: true,
     })
     if (!ok) return
-    uninstalling = slug
+    uninstalling = name
     try {
-      await api.uninstallSkill(slug)
+      await api.uninstallSkill(name)
       installNoteBad = false
-      installNote = tx('remote.uninstallOk', { slug })
-      if (detail?.slug === slug) detail = null
+      installNote = tx('remote.uninstallOk', { name })
+      if (detail?.name === name) detail = null
       await load()
     } catch (err) {
       installNoteBad = true
@@ -279,7 +279,7 @@
   empty={emptyText}
   titleCount={titleCount}
   columns={[
-    { label: $t('remote.colSlug') },
+    { label: $t('remote.colName') },
     { label: $t('remote.colSource') },
     { label: $t('remote.colVersion') },
     { label: $t('remote.colFiles') },
@@ -291,29 +291,29 @@
   retryText={$t('remote.retry')}
   closeText={$t('remote.close')}
   onretry={() => void load()}
-  detailTitle={detail ? detail.name || detail.slug : ''}
+  detailTitle={detail ? detail.title || detail.name : ''}
   detailRef={detail ? detail.sourceRef : ''}
   onclose={() => (detail = null)}
 >
   {#snippet rows()}
-    {#each skills as s (s.slug)}
+    {#each skills as s (s.name)}
       {@const fileCount = Object.keys(s.files).length}
         <tr>
           <td>
-            <!-- D69.6：技能列只放技能本身（slug + 名称 + 内容不完整提示）——
+            <!-- D69.6：技能列只放技能本身（name + 名称 + 内容不完整提示）——
                  来源相关（徽章 + `github:…`）都挪去「来源」列，与 daemon 主表同一布局。 -->
             <div class="row-title">
               <!-- D69.8：remote 补上 ▸ 入口（与 daemon 同一入口）——点它开抽屉；
                    抽屉开着时箭头朝下。查看按钮仍保留。 -->
               <ExpandToggle
-                expanded={detail?.slug === s.slug}
+                expanded={detail?.name === s.name}
                 labelExpand={$t('remote.expandDetail')}
                 labelCollapse={$t('remote.collapseDetail')}
-                onclick={() => (detail = detail?.slug === s.slug ? null : s)}
+                onclick={() => (detail = detail?.name === s.name ? null : s)}
               />
-              <code>{s.slug}</code>
+              <code>{s.name}</code>
             </div>
-            {#if s.name}<div class="faint fs-xs">{s.name}</div>{/if}
+            {#if s.title}<div class="faint fs-xs">{s.title}</div>{/if}
             {#if s.excluded && s.excluded.length > 0}
               <div class="warn fs-xs" title={s.excluded.join('\n')}>
                 {$t('remote.incomplete', { count: s.excluded.length })}
@@ -347,8 +347,8 @@
                 <button
                   type="button"
                   class="btn btn--danger btn--sm"
-                  disabled={uninstalling === s.slug}
-                  onclick={() => void doUninstall(s.slug)}
+                  disabled={uninstalling === s.name}
+                  onclick={() => void doUninstall(s.name)}
                 >
                   {$t('remote.uninstall')}
                 </button>

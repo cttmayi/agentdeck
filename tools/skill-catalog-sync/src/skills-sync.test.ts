@@ -141,7 +141,7 @@ describe('★ sync-skills：抓取 → 校验 → 原子替换', () => {
       })
       assert.equal(report.failures.length, 0, JSON.stringify(report.failures))
       assert.equal(report.swapped, true)
-      assert.equal(report.items[0]!.slug, 'foo')
+      assert.equal(report.items[0]!.name, 'foo')
       assert.equal(report.items[0]!.sourceRef, 'github:o/r@main:skills/foo')
       assert.equal(report.items[0]!.version, 'abc1234')
       assert.deepEqual(report.items[0]!.files, ['SKILL.md', 'reference.md'])
@@ -172,9 +172,9 @@ describe('★ sync-skills：抓取 → 校验 → 原子替换', () => {
           'name',
           'needs',
           'origin',
-          'slug',
           'sourceRef',
           'summary',
+          'title',
           'url',
           'version',
         ],
@@ -187,7 +187,7 @@ describe('★ sync-skills：抓取 → 校验 → 原子替换', () => {
       //   由 `apps/remote/src/server.test.ts` 钉住——两边各测各的那一段，
       //   跨进程的那条缝就是"一个目录"，也正是这里在测的东西。
       const resolved = await resolveLocalPath(join(skillsDir, 'foo'))
-      assert.equal(resolved.slug, 'foo')
+      assert.equal(resolved.name, 'foo')
       assert.equal(resolved.body, '---\nname: foo\n---\n\n正文')
       assert.equal(resolved.files['reference.md'], '参考资料', '支持文件必须一起装得进去')
     } finally {
@@ -271,7 +271,7 @@ describe('★ sync-skills：抓取 → 校验 → 原子替换', () => {
     }
   })
 
-  test('两条 slug 撞车 ⇒ 失败（技能库按 slug 唯一，装第二条会顶掉第一条）', async () => {
+  test('两条 name 撞车 ⇒ 失败（技能库按 name 唯一，装第二条会顶掉第一条）', async () => {
     const root = await makeTempDir('sync-clash')
     try {
       const gh = fakeGithub({
@@ -287,7 +287,7 @@ describe('★ sync-skills：抓取 → 校验 → 原子替换', () => {
         fetchImpl: gh.impl,
       })
       assert.equal(report.failures.length, 1)
-      assert.match(report.failures[0]!.reason, /slug/)
+      assert.match(report.failures[0]!.reason, /name/)
       assert.equal(report.swapped, false)
     } finally {
       await cleanup(root)

@@ -7,9 +7,9 @@
    * ══════════════════════════════════════════════════════════════════
    *
    *   ① 打开 ⇒ `GET /api/conversations/{id}/agent-draft`：把岗位卡（agent-draft/agent-draft.md）
-   *      与配套技能草稿（skill/<slug>/SKILL.md）读出来；
+   *      与配套技能草稿（skill/<name>/SKILL.md）读出来；
    *   ② 岗位卡拆成 岗位名 + 角色 + 指令（正文）三段，**人可改**——确认前要能改；
-   *   ③ 配套技能逐条摆出来（slug / name / description / SKILL.md 正文），可改可删；
+   *   ③ 配套技能逐条摆出来（name / name / description / SKILL.md 正文），可改可删；
    *      黄条提示"未经验证"（提示不是校验）；
    *   ④ 点「确认生成」⇒ `POST /api/conversations/{id}/agent-commit`：配套技能
    *      作为**新智能体的独有技能**（`agents/<id>/skills/`，不进共享技能池）——
@@ -29,7 +29,7 @@
   export let conversationId = ''
 
   interface DraftSkill {
-    slug: string
+    /** 技能名（= 目录名，D236）。 */
     name: string
     description: string
     body: string
@@ -65,14 +65,13 @@
     try {
       const body = await api<{
         agentDraft: string | null
-        skills: Array<{ slug: string; name: string; description: string; body: string }>
+        skills: Array<{ name: string; description: string; body: string }>
       }>(`/api/conversations/${encodeURIComponent(conversationId)}/agent-draft`)
       const text = body.agentDraft ?? ''
       const parts = splitFrontmatter(text)
       name = parts.name
       instructions = parts.body
       skills = (body.skills ?? []).map((s) => ({
-        slug: s.slug,
         name: s.name,
         description: s.description,
         body: s.body,
@@ -122,14 +121,14 @@
       error = ''
       const agentDraft = `---\nname: ${name}\n---\n${instructions}`
       try {
-        const out = await api<{ agent: { name: string }; exclusiveSlugs: string[] }>(
+        const out = await api<{ agent: { name: string }; exclusiveNames: string[] }>(
           `/api/conversations/${encodeURIComponent(conversationId)}/agent-commit`,
           {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
               agentDraft,
-              skills: skills.filter((s) => !s.removed).map((s) => ({ slug: s.slug, body: s.body })),
+              skills: skills.filter((s) => !s.removed).map((s) => ({ name: s.name, body: s.body })),
             }),
           },
         )
@@ -141,7 +140,7 @@
         showToast(
           $t('chat.agentMakerDone', {
             name: out.agent.name,
-            n: String(out.exclusiveSlugs.length),
+            n: String(out.exclusiveNames.length),
           }),
         )
       } catch (err) {
@@ -185,7 +184,7 @@
       {#each skills.filter((s) => !s.removed) as skill (skill.key)}
         <div class="skill-card">
           <div class="skill-head">
-            <strong>{skill.slug}</strong>
+            <strong>{skill.name}</strong>
             <span class="hint ellipsis">{skill.name}{skill.description ? ` · ${skill.description}` : ''}</span>
             <button class="btn btn--ghost btn--sm" onclick={() => (skill.removed = true)}>
               {$t('chat.agentMakerRemoveSkill')}

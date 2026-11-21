@@ -5,8 +5,8 @@
  * 第一句话的 skillsBrief）：
  *
  *   ① **共享技能**（技能库）——`skillIds` 引用，mine 遮蔽安装（D80）；
- *   ② **独有技能**（`<来源目录>/skills/<slug>/SKILL.md` 文件资产）——不在库里，
- *      是"这个来源"自己的；同 slug 时**独有优先**（它的就是它的，遮蔽库里那份）。
+ *   ② **独有技能**（`<来源目录>/skills/<name>/SKILL.md` 文件资产）——不在库里，
+ *      是"这个来源"自己的；同 name 时**独有优先**（它的就是它的，遮蔽库里那份）。
  *
  * 聊天与任务/返工都走这里——不要在别处再拼一遍（两处各拼一遍迟早分叉，
  * 而"共享的没带、独有的带了"这种差别没人会当成 bug 去查）。
@@ -27,23 +27,20 @@ import { agentSkillOwner, type ExclusiveSkillOwner, type Store } from '@agentdec
 import type { Agent, Skill, SkillPayload } from '@agentdeck/protocol'
 
 function libraryToPayload(s: Skill): SkillPayload {
+  // ★ D236：名字只在 `ref` 里出现一次（以前是 `ref.slug` + 顶层 `slug` + 顶层 `name`）
   return {
-    ref: { id: s.id, slug: s.slug, source: s.source },
-    slug: s.slug,
-    name: s.name,
+    ref: { id: s.id, name: s.name, source: s.source },
     body: s.body,
     ...(s.description ? { description: s.description } : {}),
     files: s.files ?? {},
   }
 }
 
-function exclusiveToPayload(slug: string, body: string): SkillPayload {
+function exclusiveToPayload(name: string, body: string): SkillPayload {
   const meta = extractSkillMeta(body)
   return {
-    // ★ 独有技能**没有库 id**（D111）：ref 只留 slug + 来源 `agent`。
-    ref: { id: null, slug, source: 'agent' },
-    slug,
-    name: meta.name ?? slug,
+    // ★ 独有技能**没有库 id**（D111）：ref 只留名字 + 来源 `agent`。
+    ref: { id: null, name, source: 'agent' },
     body,
     ...(meta.description ? { description: meta.description } : {}),
     files: {},
@@ -101,17 +98,17 @@ export async function loadInjectableSkills(
     if (skill) library.push(skill)
   }
 
-  // ★ 同 slug 遮蔽（D80，设计 §1.1）：提炼的（mine）优先于安装的。
-  const mineBySlug = new Map(all.filter((s) => s.source === 'mine').map((s) => [s.slug, s]))
+  // ★ 同 name 遮蔽（D80，设计 §1.1）：提炼的（mine）优先于安装的。
+  const mineByName = new Map(all.filter((s) => s.source === 'mine').map((s) => [s.name, s]))
   const libraryPayloads = library.map((skill) => {
     if (skill.source === 'mine') return libraryToPayload(skill)
-    const mine = mineBySlug.get(skill.slug)
+    const mine = mineByName.get(skill.name)
     return mine ? libraryToPayload(mine) : libraryToPayload(skill)
   })
 
-  // ★ 独有技能（D111）：这个智能体自己的文件，同 slug 遮蔽库技能。
+  // ★ 独有技能（D111）：这个智能体自己的文件，同 name 遮蔽库技能。
   const exclusive = await store.listExclusiveSkills(sources.exclusive)
-  const exclusiveSlugs = new Set(exclusive.map((e) => e.slug))
-  const shared = libraryPayloads.filter((p) => !exclusiveSlugs.has(p.slug))
-  return [...shared, ...exclusive.map((e) => exclusiveToPayload(e.slug, e.body))]
+  const exclusiveNames = new Set(exclusive.map((e) => e.name))
+  const shared = libraryPayloads.filter((p) => !exclusiveNames.has(p.ref.name))
+  return [...shared, ...exclusive.map((e) => exclusiveToPayload(e.name, e.body))]
 }

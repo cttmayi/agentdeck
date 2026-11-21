@@ -372,9 +372,8 @@ describe('★ 分批第 77 批：claude 也按工作目录分（技能与 hook �
       const work = await makeTempDir('claude-skill-work')
       const skills = [
         {
-          ref: { id: 'sk-claude', slug: 'probe-claude', source: 'builtin' },
-          slug: 'probe-claude',
-          name: '探针技能',
+          ref: { id: 'sk-claude', name: 'probe-claude', source: 'builtin' },
+          name: 'probe-claude',
           body: '# probe-claude\n',
           description: '探针',
         },
@@ -398,13 +397,11 @@ describe('★ 分批第 77 批：claude 也按工作目录分（技能与 hook �
 })
 
 describe('★ 分批第 75 批：技能落点（隔离生效 ⇒ 受管 home；失败 ⇒ 退回工作目录）', () => {
-  const oneSkill = (slug: string): Array<Record<string, unknown>> => [
+  const oneSkill = (name: string): Array<Record<string, unknown>> => [
     {
-      ref: { id: `sk-${slug}`, slug, source: 'builtin' },
-      slug,
-      name: `技能 ${slug}`,
-      body: `# ${slug}\n\n正文。\n`,
-      description: `探针技能 ${slug}`,
+      ref: { id: `sk-${name}`, name, source: 'builtin' },
+      body: `# ${name}\n\n正文。\n`,
+      description: `探针技能 ${name}`,
     },
   ]
 
@@ -416,7 +413,7 @@ describe('★ 分批第 75 批：技能落点（隔离生效 ⇒ 受管 home；�
       const codexHome = h.backend.seenEnv['CODEX_HOME'] ?? ''
       assert.notEqual(codexHome, '', '前提：隔离生效')
       /**
-       * 实测（0.157.1）：`<CODEX_HOME>/skills/<slug>/SKILL.md` 会被 codex 当成一条技能，
+       * 实测（0.157.1）：`<CODEX_HOME>/skills/<name>/SKILL.md` 会被 codex 当成一条技能，
        * `codex debug prompt-input` 里技能根是 `r0 = <CODEX_HOME>/skills`，
        * app-server 模式下模型能抄出它的 description。
        *

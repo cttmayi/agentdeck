@@ -233,11 +233,11 @@ describe('★ 第二个 runtime：审计、技能投递、日志都不许写死 
     try {
       // ⚠️ 夹具自己装一条 skill：D38 之后首启**不再播种** skill（技能库是空的），
       //    而这条用例要测的正是"挂了 skill 但那个 runtime 没有技能发现机制"。
-      const installed = await api<{ installed: Array<{ id: string; slug: string }> }>('/api/skills', {
+      const installed = await api<{ installed: Array<{ id: string; name: string }> }>('/api/skills', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          skills: [{ slug: 'agnostic-skill', name: '夹具技能', body: '# 夹具', source: 'local' }],
+          skills: [{ name: 'agnostic-skill', body: '# 夹具', source: 'local' }],
         }),
       })
       const skill = installed.installed[0]
@@ -296,7 +296,7 @@ describe('★ 第二个 runtime：审计、技能投递、日志都不许写死 
       const text = messages.map((m) => m.content ?? '').join('\n')
       assert.match(text, /没有技能发现机制/, '★ 不写文件这件事必须在 run 日志里说清')
       assert.match(text, /挂了 1 个 skill/, '要说清"不是没挂，而是这个 runtime 送不进去"')
-      assert.match(text, new RegExp(skill.slug), '并点名是哪个 skill')
+      assert.match(text, new RegExp(skill.name), '并点名是哪个 skill')
     } finally {
       await cleanup(dir)
     }
@@ -506,11 +506,11 @@ describe('★ 第三个 runtime（service 形状）：整条 daemon 跑在 codex
   test('★ 技能注入走描述表声明的目录：codex 是 .codex/skills，文件写下去 + 日志明说', async () => {
     const dir = await makeTempDir('service-run')
     try {
-      const installed = await api<{ installed: Array<{ id: string; slug: string }> }>('/api/skills', {
+      const installed = await api<{ installed: Array<{ id: string; name: string }> }>('/api/skills', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          skills: [{ slug: 'service-skill', name: '夹具技能', body: '# 夹具', source: 'local' }],
+          skills: [{ name: 'service-skill', body: '# 夹具', source: 'local' }],
         }),
       })
       const skill = installed.installed[0]
@@ -554,10 +554,10 @@ describe('★ 第三个 runtime（service 形状）：整条 daemon 跑在 codex
         return r && r.status === 'completed' ? r : null
       })
 
-      // ① 注入发生在 execute 之前：假后端当场快照到了 `<CODEX_HOME>/skills/<slug>/`
+      // ① 注入发生在 execute 之前：假后端当场快照到了 `<CODEX_HOME>/skills/<name>/`
       assert.ok(
-        backend.skillsDirsAtExecute.includes(skill.slug),
-        `★ execute 时技能目录里应该有 ${skill.slug}（实际 ${backend.skillsTargetAtExecute}：` +
+        backend.skillsDirsAtExecute.includes(skill.name),
+        `★ execute 时技能目录里应该有 ${skill.name}（实际 ${backend.skillsTargetAtExecute}：` +
           `${backend.skillsDirsAtExecute.join('、')}）`,
       )
       // ★ 分批第 75 批：隔离生效时技能**不写工作目录**（这正是使用者要的那件事）
@@ -582,7 +582,7 @@ describe('★ 第三个 runtime（service 形状）：整条 daemon 跑在 codex
         /写入受管运行时目录的 skills\//,
         '★ 说清写进哪个目录（现在是受管 CODEX_HOME，不是写死的工作目录）',
       )
-      assert.match(text, new RegExp(skill.slug), '并点名是哪个 skill')
+      assert.match(text, new RegExp(skill.name), '并点名是哪个 skill')
       assert.match(text, /已移除本次注入的 skill/, '★ 跑完要收掉：工作目录只留 agent 的产出')
       // ③ 收尾之后受管目录里那份也收干净了（"跑完即清"的设计，不是没写）
       assert.deepEqual(

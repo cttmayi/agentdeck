@@ -3170,7 +3170,8 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           const row = [...d().querySelectorAll('.main table tbody tr')].find((r) =>
             text(r).includes('probe-skill'),
           )
-          const cell = row ? row.children[4] : null
+          // ★ D236：表少了一列（"标识 + 名称"并成一列）⇒ 文件列从第 5 格挪到第 4 格
+          const cell = row ? row.children[3] : null
           return cell ? text(cell).trim() : null
         })()
         // ★ D69.7：技能表首列叫「技能」（不是「标识」），且「来源」列在「版本」之前
@@ -3254,7 +3255,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           facts['skills.historyDiffMatchesApi'] = await (async () => {
             try {
               const list = await f.contentWindow.fetch('/api/skills').then((r) => r.json())
-              const mine = (list.skills ?? []).find((sk) => sk.slug === 'probe-mine')
+              const mine = (list.skills ?? []).find((sk) => sk.name === 'probe-mine')
               if (!mine) return null
               const hist = await f.contentWindow
                 .fetch(`/api/skills/${encodeURIComponent(mine.id)}/history`)
@@ -3583,7 +3584,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               const installedBefore = await f.contentWindow
                 .fetch('/api/skills')
                 .then((r) => r.json())
-                .then((p) => (p.skills ?? []).map((s) => s.slug))
+                .then((p) => (p.skills ?? []).map((s) => s.name))
                 .catch(() => null)
               click(firstInstall.btn)
               // ★ 等的是**接口上真的有了**（不是等按钮变灰——那可能只是本地状态）
@@ -3592,7 +3593,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
                 after = await f.contentWindow
                   .fetch('/api/skills')
                   .then((r) => r.json())
-                  .then((p) => (p.skills ?? []).map((s) => s.slug))
+                  .then((p) => (p.skills ?? []).map((s) => s.name))
                   .catch(() => null)
                 if (after && after.includes(firstInstall.slug)) break
                 await wait(200)
@@ -3610,7 +3611,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               const installedSkill = await f.contentWindow
                 .fetch('/api/skills')
                 .then((r) => r.json())
-                .then((p) => (p.skills ?? []).find((s) => s.slug === firstInstall.slug) ?? null)
+                .then((p) => (p.skills ?? []).find((s) => s.name === firstInstall.slug) ?? null)
                 .catch(() => null)
               facts['skills.localInstallSourceKind'] = installedSkill
                 ? installedSkill.source
@@ -3692,7 +3693,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           const ldsExecItem = [...d().querySelectorAll('.list-row-main')].find((el) =>
             (el.textContent ?? '').includes('探针用的执行者'),
           )
-          const wantSlug = facts['skills.localInstalledSlug'] ?? null
+          const wantName = facts['skills.localInstalledSlug'] ?? null
           if (ldsExecItem) {
             click(ldsExecItem)
             await until(
@@ -3713,11 +3714,11 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               .then((r) => r.json())
               .then((p) => p.skills ?? [])
               .catch(() => [])
-            const slugOf = new Map(allSkills.map((sk) => [String(sk.id), sk.slug]))
+            const nameOf = new Map(allSkills.map((sk) => [String(sk.id), sk.name]))
             facts['skills.pickerOptions'] = ldsOptions
-            facts['skills.pickerOptionSlugs'] = ldsOptions.map((v) => slugOf.get(v) ?? `?${v}`)
-            const wantId = wantSlug
-              ? String((allSkills.find((sk) => sk.slug === wantSlug) ?? {}).id ?? '')
+            facts['skills.pickerOptionNames'] = ldsOptions.map((v) => nameOf.get(v) ?? `?${v}`)
+            const wantId = wantName
+              ? String((allSkills.find((sk) => sk.name === wantName) ?? {}).id ?? '')
               : ''
             facts['skills.pickerWantId'] = wantId || null
             facts['skills.pickerHasLocalSkill'] = !!wantId && ldsOptions.includes(wantId)
@@ -9227,8 +9228,8 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           try {
             const agents = (await f.contentWindow.fetch('/api/agents').then((r) => r.json())).agents ?? []
             const skills = (await f.contentWindow.fetch('/api/skills').then((r) => r.json())).skills ?? []
-            const owned = skills.find((s) => s.slug === 'chat-probe-skill')
-            const orphan = skills.find((s) => s.slug === 'chat-orphan-skill')
+            const owned = skills.find((s) => s.name === 'chat-probe-skill')
+            const orphan = skills.find((s) => s.name === 'chat-orphan-skill')
             // ★ 2026-11（D154）：执行者 = **没有占到任何出厂槽位**（`slot` 为空）。
             //   用"有没有槽位"而不是"名字不等于某几个"，后者会在明天多一个成员时静默把
             //   内置的也算成执行者。
@@ -9260,7 +9261,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           const missing = skills.filter((s) => !opts.includes(`skill:${s.id}`))
           if (missing.length > 0) {
             errors.push(
-              `装了却没出现在下拉里的 skill：${missing.map((s) => s.slug).join('、')}` +
+              `装了却没出现在下拉里的 skill：${missing.map((s) => s.name).join('、')}` +
                 `（下拉里 ${opts.length} 项，装着 ${skills.length} 条）`,
             )
             return false

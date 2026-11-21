@@ -1061,23 +1061,23 @@ export class SqliteStore implements Store {
   //    假装能存更诚实——真接线时（SQLite 管文件路径？）再重新设计。
   async listExclusiveSkills(
     _owner: ExclusiveSkillOwner,
-  ): Promise<Array<{ slug: string; body: string }>> {
+  ): Promise<Array<{ name: string; body: string }>> {
     throw new Error('store-sqlite 不支持智能体的独有技能（D111）：独有技能是文件资产，请用 store-file')
   }
 
-  async getExclusiveSkill(_owner: ExclusiveSkillOwner, _slug: string): Promise<string | null> {
+  async getExclusiveSkill(_owner: ExclusiveSkillOwner, _name: string): Promise<string | null> {
     throw new Error('store-sqlite 不支持智能体的独有技能（D111）：独有技能是文件资产，请用 store-file')
   }
 
   async writeExclusiveSkill(
     _owner: ExclusiveSkillOwner,
-    _slug: string,
+    _name: string,
     _body: string,
   ): Promise<void> {
     throw new Error('store-sqlite 不支持智能体的独有技能（D111）：独有技能是文件资产，请用 store-file')
   }
 
-  async removeExclusiveSkill(_owner: ExclusiveSkillOwner, _slug: string): Promise<boolean> {
+  async removeExclusiveSkill(_owner: ExclusiveSkillOwner, _name: string): Promise<boolean> {
     throw new Error('store-sqlite 不支持智能体的独有技能（D111）：独有技能是文件资产，请用 store-file')
   }
 

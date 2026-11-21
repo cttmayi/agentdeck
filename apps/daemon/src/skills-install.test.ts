@@ -23,7 +23,7 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
  *    于是"本地内容不因远端变化而改变"这条保证**在数据上无从判断**——
  *    根本分不清谁是谁。
  *
- * **② 没有任何同名处理。** `insertSkill` 按 **id** 写入，所以两个 slug 相同、
+ * **② 没有任何同名处理。** `insertSkill` 按 **id** 写入，所以两个 name 相同、
  *    id 不同的 skill 会**同时存在**——同名冲突不是"被覆盖"，而是
  *    "悄悄多出一条"，而加载时只会取到其中一条。两种结果都不对，且都没有提示。
  */
@@ -80,7 +80,7 @@ async function install(url: string, body: unknown) {
 async function listSkills(url: string) {
   const res = await fetch(`${url}/api/skills`)
   return ((await res.json()) as {
-    skills: Array<{ slug: string; source: string; id: string; body: string }>
+    skills: Array<{ name: string; source: string; id: string; body: string }>
   }).skills
 }
 
@@ -93,13 +93,13 @@ describe('★ skill 安装：来源要如实（FR-AGENT-10）', () => {
         //    D41：夹具值换成工具动作名（动作只可能来自工具包，内置动作已经全删）——
         //    这个字段的内容反正不参与任何判断，换名字只是为了别让人以为它是内置动作。
         skills: [
-          { slug: 'from-catalog', name: '目录里的', body: '标准', allowedActions: ['fixture-tool.act'] },
+          { name: 'from-catalog', body: '标准', allowedActions: ['fixture-tool.act'] },
         ],
         batchId: 'b1',
       })
       assert.equal(res.status, 201)
       const skills = await listSkills(url)
-      const found = skills.find((s) => s.slug === 'from-catalog')
+      const found = skills.find((s) => s.name === 'from-catalog')
       assert.ok(found)
       assert.equal(
         (found as Record<string, unknown>)['allowedActions'],
@@ -117,10 +117,10 @@ describe('★ skill 安装：来源要如实（FR-AGENT-10）', () => {
   test('显式声明为 local 时如实记 local', async () => {
     await withDaemon(async (url) => {
       await install(url, {
-        skills: [{ slug: 'mine', name: '我自己写的', body: 'x', source: 'local' }],
+        skills: [{ name: 'mine', body: 'x', source: 'local' }],
         batchId: 'b1',
       })
-      assert.equal((await listSkills(url)).find((s) => s.slug === 'mine')?.source, 'local')
+      assert.equal((await listSkills(url)).find((s) => s.name === 'mine')?.source, 'local')
     })
   })
 
@@ -129,14 +129,13 @@ describe('★ skill 安装：来源要如实（FR-AGENT-10）', () => {
       await install(url, {
         skills: [
           {
-            slug: 'from-frontmatter',
             name: 'from-frontmatter',
             body: '---\nname: from-frontmatter\ndescription: 生成算法艺术图\n---\n\n正文。\n',
           },
         ],
         batchId: 'b1',
       })
-      const found = (await listSkills(url)).find((s) => s.slug === 'from-frontmatter')
+      const found = (await listSkills(url)).find((s) => s.name === 'from-frontmatter')
       assert.equal(
         (found as { description?: string | null } | undefined)?.description,
         '生成算法艺术图',
@@ -149,7 +148,6 @@ describe('★ skill 安装：来源要如实（FR-AGENT-10）', () => {
       await install(url, {
         skills: [
           {
-            slug: 'explicit-desc',
             name: 'explicit-desc',
             description: '目录里登记的那句',
             body: '---\nname: explicit-desc\ndescription: frontmatter 里那句\n---\n\n正文。\n',
@@ -157,7 +155,7 @@ describe('★ skill 安装：来源要如实（FR-AGENT-10）', () => {
         ],
         batchId: 'b1',
       })
-      const found = (await listSkills(url)).find((s) => s.slug === 'explicit-desc')
+      const found = (await listSkills(url)).find((s) => s.name === 'explicit-desc')
       assert.equal((found as { description?: string | null }).description, '目录里登记的那句')
     })
   })
@@ -167,24 +165,24 @@ describe('★ 同名冲突：确定的优先级 + 明确提示，绝不静默（
   test('★ 同名一律拒绝写入，并在 skipped 里说清与谁冲突', async () => {
     await withDaemon(async (url) => {
       await install(url, {
-        skills: [{ slug: 'dup', name: '第一次', body: 'A', source: 'local' }],
+        skills: [{ name: 'dup', body: 'A', source: 'local' }],
         batchId: 'b1',
       })
       const second = await install(url, {
-        skills: [{ slug: 'dup', name: '第二次', body: 'B' }],
+        skills: [{ name: 'dup', body: 'B' }],
         batchId: 'b2',
       })
 
-      const skipped = second.body['skipped'] as Array<{ slug: string; reason: string; existingSource: string }>
+      const skipped = second.body['skipped'] as Array<{ name: string; reason: string; existingSource: string }>
       assert.equal(skipped.length, 1)
-      assert.equal(skipped[0]?.slug, 'dup')
+      assert.equal(skipped[0]?.name, 'dup')
       assert.equal(skipped[0]?.existingSource, 'local', '要告诉调用方冲突对方**是哪来的**')
       assert.match(skipped[0]?.reason ?? '', /同名|冲突/)
       assert.match(skipped[0]?.reason ?? '', /overwrite/, '要给出可行动的做法')
 
       // ★ 原有内容**一字未动**
       const skills = await listSkills(url)
-      const dup = skills.filter((s) => s.slug === 'dup')
+      const dup = skills.filter((s) => s.name === 'dup')
       assert.equal(dup.length, 1, '★ 不能"悄悄多出一条同名"——那正是旧实现的行为')
       assert.equal(dup[0]?.source, 'local', '★ 使用者自己的东西没被远端覆盖')
     })
@@ -192,16 +190,16 @@ describe('★ 同名冲突：确定的优先级 + 明确提示，绝不静默（
 
   test('显式 overwrite 才替换，且**复用原 id**（不留孤儿记录）', async () => {
     await withDaemon(async (url) => {
-      await install(url, { skills: [{ slug: 'r', name: '旧', body: 'A' }], batchId: 'b1' })
-      const before = (await listSkills(url)).find((s) => s.slug === 'r')
+      await install(url, { skills: [{ name: 'r', body: 'A' }], batchId: 'b1' })
+      const before = (await listSkills(url)).find((s) => s.name === 'r')
       const second = await install(url, {
-        skills: [{ slug: 'r', name: '新', body: 'B' }],
+        skills: [{ name: 'r', body: 'B' }],
         batchId: 'b2',
         overwrite: true,
       })
       assert.deepEqual(second.body['skipped'], [])
       const after = await listSkills(url)
-      const items = after.filter((s) => s.slug === 'r')
+      const items = after.filter((s) => s.name === 'r')
       assert.equal(items.length, 1)
       assert.equal(items[0]?.id, before?.id, '复用原 id：否则会留下一条永远没人引用的孤儿')
     })
@@ -211,22 +209,22 @@ describe('★ 同名冲突：确定的优先级 + 明确提示，绝不静默（
     await withDaemon(async (url) => {
       const res = await install(url, {
         skills: [
-          { slug: 'same', name: 'A', body: 'x' },
-          { slug: 'same', name: 'B', body: 'y' },
+          { name: 'same', body: 'x' },
+          { name: 'same', body: 'y' },
         ],
         batchId: 'b1',
       })
       assert.equal((res.body['installed'] as unknown[]).length, 1)
       assert.equal((res.body['skipped'] as unknown[]).length, 1)
-      assert.equal((await listSkills(url)).filter((s) => s.slug === 'same').length, 1)
+      assert.equal((await listSkills(url)).filter((s) => s.name === 'same').length, 1)
     })
   })
 
-  test('slug 为空时拒绝并说明原因（它是 skill 的权威标识）', async () => {
+  test('name 为空时拒绝并说明原因（它是 skill 的权威标识）', async () => {
     await withDaemon(async (url) => {
-      const res = await install(url, { skills: [{ name: '没有 slug' }], batchId: 'b1' })
+      const res = await install(url, { skills: [{ name: '没有 name' }], batchId: 'b1' })
       const skipped = res.body['skipped'] as Array<{ reason: string }>
-      assert.match(skipped[0]?.reason ?? '', /slug/)
+      assert.match(skipped[0]?.reason ?? '', /name/)
     })
   })
 
@@ -239,11 +237,11 @@ describe('★ 同名冲突：确定的优先级 + 明确提示，绝不静默（
 
   test('部分成功也要分别报告，不能整批算成功', async () => {
     await withDaemon(async (url) => {
-      await install(url, { skills: [{ slug: 'exists', name: 'x', body: 'x' }], batchId: 'b0' })
+      await install(url, { skills: [{ name: 'exists', body: 'x' }], batchId: 'b0' })
       const res = await install(url, {
         skills: [
-          { slug: 'brand-new', name: '新的', body: 'x' },
-          { slug: 'exists', name: '撞了', body: 'x' },
+          { name: 'brand-new', body: 'x' },
+          { name: 'exists', body: 'x' },
         ],
         batchId: 'b1',
       })
@@ -285,7 +283,7 @@ describe('★ 执行 run 的 skill 解析（一次真实的静默失效）', () 
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          skills: [{ slug: 'probe-skill', name: '夹具技能', body: '# 夹具\n\n正文。' }],
+          skills: [{ name: 'probe-skill', body: '# 夹具\n\n正文。' }],
         }),
       })
     ).json()) as { installed: Array<{ id: string; builtin?: boolean }> }
@@ -358,8 +356,7 @@ describe('★ 执行 run 的 skill 解析（一次真实的静默失效）', () 
       const { status } = await submitRun(url, agent.id, {
         skills: [
           {
-            ref: { id: 'x', slug: 'only-this', source: 'local' },
-            slug: 'only-this',
+            ref: { id: 'x', name: 'only-this', source: 'local' },
             name: 'only-this',
             body: '标准',
             files: {},
@@ -501,7 +498,7 @@ describe('★ 从路径安装 skill（FR-AGENT-09）', () => {
 
         // 真的进了库
         const listed = await listSkills(url)
-        assert.equal(listed.some((s) => s.slug === installed[0]?.['slug']), true)
+        assert.equal(listed.some((s) => s.name === installed[0]?.['name']), true)
       })
     } finally {
       await cleanup(src)
@@ -521,8 +518,8 @@ describe('★ 从路径安装 skill（FR-AGENT-09）', () => {
           'localdir:/home/u/.claude/skills',
           '★ 给的 sourceRef 要原样落库（不是默认的 path:<目录>）',
         )
-        const slug = (res.body['installed'] as Array<{ slug: string }>)[0]!.slug
-        const found = (await listSkills(url)).find((s) => s.slug === slug)
+        const name = (res.body['installed'] as Array<{ name: string }>)[0]!.name
+        const found = (await listSkills(url)).find((s) => s.name === name)
         assert.ok(found, '装进来的那条要在列表里')
         assert.equal((found as Record<string, unknown>)['sourceRef'], 'localdir:/home/u/.claude/skills')
       })
@@ -566,25 +563,25 @@ describe('★ 从路径安装 skill（FR-AGENT-09）', () => {
         //    （它分不清你这是从哪儿来的），而这条用例要断言的正是
         //    "冲突对方是**本地**的那一条"。
         await install(url, {
-          skills: [{ slug: 'existing', name: '已有的', body: '# 原始', source: 'local' }],
+          skills: [{ name: 'existing', body: '# 原始', source: 'local' }],
           batchId: 'b0',
         })
 
         const res = await installFromSource(url, {
           source: { kind: 'path', path: src },
-          slug: 'existing',
+          name: 'existing',
         })
         // 201 只在装上时返回；这里应当是"没装上 + 明确原因"
         assert.equal(res.body['installed'] ? (res.body['installed'] as unknown[]).length : 0, 0)
-        const skipped = res.body['skipped'] as Array<{ slug: string; existingSource: string; reason: string }>
-        assert.equal(skipped[0]?.slug, 'existing')
+        const skipped = res.body['skipped'] as Array<{ name: string; existingSource: string; reason: string }>
+        assert.equal(skipped[0]?.name, 'existing')
         assert.equal(skipped[0]?.existingSource, 'local')
         assert.match(skipped[0]?.reason ?? '', /overwrite/)
 
         // 已有那条**一字未动**
         const listed = await listSkills(url)
-        assert.equal(listed.filter((s) => s.slug === 'existing').length, 1)
-        assert.equal(listed.find((s) => s.slug === 'existing')?.body, '# 原始')
+        assert.equal(listed.filter((s) => s.name === 'existing').length, 1)
+        assert.equal(listed.find((s) => s.name === 'existing')?.body, '# 原始')
       })
     } finally {
       await cleanup(src)
@@ -596,17 +593,17 @@ describe('★ 从路径安装 skill（FR-AGENT-09）', () => {
     try {
       await withDaemon(async (url) => {
         await install(url, {
-          skills: [{ slug: 'existing', name: '已有的', body: '# 原始' }],
+          skills: [{ name: 'existing', body: '# 原始' }],
           batchId: 'b0',
         })
-        const before = (await listSkills(url)).find((s) => s.slug === 'existing')
+        const before = (await listSkills(url)).find((s) => s.name === 'existing')
         const res = await installFromSource(url, {
           source: { kind: 'path', path: src },
-          slug: 'existing',
+          name: 'existing',
           overwrite: true,
         })
         assert.equal((res.body['installed'] as unknown[]).length, 1)
-        const after = (await listSkills(url)).find((s) => s.slug === 'existing')
+        const after = (await listSkills(url)).find((s) => s.name === 'existing')
         assert.equal(after?.id, before?.id, '复用原 id，不留孤儿')
         assert.equal(after?.body, '# 换掉已有的')
       })
@@ -630,7 +627,7 @@ describe('★ 从路径安装 skill（FR-AGENT-09）', () => {
         const res = await installFromSource(url, {
           source: { kind: 'path', path: src },
           // 老客户端的写法：动作跟着 skill 一起装。
-          // D41：夹具值换成工具动作名（`<包 slug>.<动作名>` 是动作**唯一**的形状，
+          // D41：夹具值换成工具动作名（`<包 name>.<动作名>` 是动作**唯一**的形状，
           // 内置动作已经全部移除）；这个字段的内容在这里本来就不参与任何判断。
           allowedActions: ['fixture-tool.act', 'other-tool.act'],
         })
@@ -697,7 +694,7 @@ describe('★ 从路径安装 skill（FR-AGENT-09）', () => {
         })
         assert.equal(res.status, 201)
         const installed = res.body['installed'] as Array<Record<string, unknown>>
-        assert.equal(installed[0]?.['slug'], 'foo')
+        assert.equal(installed[0]?.['name'], 'foo')
         assert.equal(installed[0]?.['body'], '# 远端技能')
         assert.deepEqual(installed[0]?.['files'], { 'extra.md': '远端的补充' })
         assert.equal(
@@ -768,7 +765,7 @@ describe('★ 从路径安装 skill（FR-AGENT-09）', () => {
       const res = await installFromSource(url, {
         source: {
           kind: 'payload',
-          slug: 'remote-thing',
+          name: 'remote-thing',
           body: '# 远端的标准',
           version: '2.3.4',
           sourceRef: 'remote:remote-thing@2.3.4',
@@ -781,9 +778,9 @@ describe('★ 从路径安装 skill（FR-AGENT-09）', () => {
 
       // 再查一次，确认不是只在响应里带了一下
       const listed = ((await (await fetch(`${url}/api/skills`)).json()) as {
-        skills: Array<{ slug: string; version?: string | null }>
+        skills: Array<{ name: string; version?: string | null }>
       }).skills
-      assert.equal(listed.find((s) => s.slug === 'remote-thing')?.version, '2.3.4')
+      assert.equal(listed.find((s) => s.name === 'remote-thing')?.version, '2.3.4')
     })
   })
 
@@ -794,7 +791,7 @@ describe('★ 从路径安装 skill（FR-AGENT-09）', () => {
       const first = await installFromSource(url, {
         source: {
           kind: 'payload',
-          slug: 'updatable',
+          name: 'updatable',
           body: '# 第一版',
           version: '1.0.0',
           sourceRef: 'remote:updatable@1.0.0',
@@ -806,7 +803,7 @@ describe('★ 从路径安装 skill（FR-AGENT-09）', () => {
       const refused = await installFromSource(url, {
         source: {
           kind: 'payload',
-          slug: 'updatable',
+          name: 'updatable',
           body: '# 第二版',
           version: '1.1.0',
           sourceRef: 'remote:updatable@1.1.0',
@@ -821,7 +818,7 @@ describe('★ 从路径安装 skill（FR-AGENT-09）', () => {
       const updated = await installFromSource(url, {
         source: {
           kind: 'payload',
-          slug: 'updatable',
+          name: 'updatable',
           body: '# 第二版',
           version: '1.1.0',
           sourceRef: 'remote:updatable@1.1.0',
@@ -831,14 +828,14 @@ describe('★ 从路径安装 skill（FR-AGENT-09）', () => {
       assert.equal((updated.body['installed'] as unknown[]).length, 1)
 
       const listed = ((await (await fetch(`${url}/api/skills`)).json()) as {
-        skills: Array<{ slug: string; version?: string | null; body: string }>
-      }).skills.find((x) => x.slug === 'updatable')
+        skills: Array<{ name: string; version?: string | null; body: string }>
+      }).skills.find((x) => x.name === 'updatable')
       assert.equal(listed?.version, '1.1.0', '★ 版本必须真的被换掉')
       assert.equal(listed?.body, '# 第二版')
       // 只剩一条，不能"悄悄多出一条同名"
       const all = ((await (await fetch(`${url}/api/skills`)).json()) as {
-        skills: Array<{ slug: string }>
-      }).skills.filter((x) => x.slug === 'updatable')
+        skills: Array<{ name: string }>
+      }).skills.filter((x) => x.name === 'updatable')
       assert.equal(all.length, 1)
     })
   })
@@ -892,14 +889,14 @@ describe('★ 两条安装路径必须过同一关', () => {
     await withDaemon(async (url) => {
       const res = await install(url, {
         batchId: 'b-empty',
-        skills: [{ slug: 'empty-body', name: '空的', body: '' }],
+        skills: [{ name: 'empty-body', body: '' }],
       })
       assert.equal((res.body['installed'] as unknown[]).length, 0, '★ 空正文不能入库')
       const skipped = res.body['skipped'] as Array<{ reason: string }>
       assert.match(skipped[0]?.reason ?? '', /SKILL\.md/, '要说清缺的是 SKILL.md 的内容')
 
       const listed = await listSkills(url)
-      assert.equal(listed.some((s) => s.slug === 'empty-body'), false)
+      assert.equal(listed.some((s) => s.name === 'empty-body'), false)
     })
   })
 
@@ -909,7 +906,6 @@ describe('★ 两条安装路径必须过同一关', () => {
         batchId: 'b-version',
         skills: [
           {
-            slug: 'from-drawer',
             name: 'from-drawer',
             body: '# 正文',
             source: 'remote',
@@ -919,8 +915,8 @@ describe('★ 两条安装路径必须过同一关', () => {
         ],
       })
       const listed = ((await (await fetch(`${url}/api/skills`)).json()) as {
-        skills: Array<{ slug: string; version?: string | null }>
-      }).skills.find((s) => s.slug === 'from-drawer')
+        skills: Array<{ name: string; version?: string | null }>
+      }).skills.find((s) => s.name === 'from-drawer')
       assert.equal(
         listed?.version,
         '3.1.4',
@@ -933,7 +929,7 @@ describe('★ 两条安装路径必须过同一关', () => {
     await withDaemon(async (url) => {
       const res = await install(url, {
         batchId: 'b-big',
-        skills: [{ slug: 'too-big', name: 'big', body: 'x'.repeat(300 * 1024) }],
+        skills: [{ name: 'too-big', body: 'x'.repeat(300 * 1024) }],
       })
       assert.equal((res.body['installed'] as unknown[]).length, 0)
       assert.match(
@@ -961,16 +957,16 @@ describe('★ 卸载 skill（D38）', () => {
   test('★ 卸载之后列表里没有了；卸载不存在的是 404（不是静默成功）', async () => {
     await withDaemon(async (url) => {
       const installed = await install(url, {
-        skills: [{ slug: 'to-remove', name: '待卸载', body: '# x', source: 'local' }],
+        skills: [{ name: 'to-remove', body: '# x', source: 'local' }],
         batchId: 'b1',
       })
       const id = (installed.body['installed'] as Array<{ id: string; builtin?: boolean }>)[0]!.id
-      assert.equal((await listSkills(url)).filter((s) => s.slug === 'to-remove').length, 1)
+      assert.equal((await listSkills(url)).filter((s) => s.name === 'to-remove').length, 1)
 
       const res = await remove(url, id)
       assert.equal(res.status, 200)
-      assert.equal(res.body['slug'], 'to-remove')
-      assert.equal((await listSkills(url)).filter((s) => s.slug === 'to-remove').length, 0)
+      assert.equal(res.body['name'], 'to-remove')
+      assert.equal((await listSkills(url)).filter((s) => s.name === 'to-remove').length, 0)
 
       // 幂等性由"第二次是 404"表达：**它已经不在了**是事实，不该报成 500
       assert.equal((await remove(url, id)).status, 404)
@@ -980,7 +976,7 @@ describe('★ 卸载 skill（D38）', () => {
   test('★ 还有 agent 挂着它 ⇒ 拒绝，并说清是谁（静默删掉会在很久以后才发作）', async () => {
     await withDaemon(async (url) => {
       const installed = await install(url, {
-        skills: [{ slug: 'in-use', name: '在用', body: '# x', source: 'local' }],
+        skills: [{ name: 'in-use', body: '# x', source: 'local' }],
         batchId: 'b1',
       })
       const id = (installed.body['installed'] as Array<{ id: string; builtin?: boolean }>)[0]!.id
@@ -1007,7 +1003,7 @@ describe('★ 卸载 skill（D38）', () => {
         /先在它们的配置里把它摘掉|并进「指令」/,
         `要说清怎么改：${error}`,
       )
-      assert.equal((await listSkills(url)).filter((s) => s.slug === 'in-use').length, 1)
+      assert.equal((await listSkills(url)).filter((s) => s.name === 'in-use').length, 1)
     })
   })
 })
@@ -1041,8 +1037,8 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
       // 造一条技能 + 一个只挂它、没有内联标准的审核者（＝老数据的形态）
       const installed = await install(url, {
         skills: [
-          { slug: 'legacy-a', name: '老标准甲', body: '# 甲\n\n只看甲。', source: 'local' },
-          { slug: 'legacy-b', name: '老标准乙', body: '# 乙\n\n只看乙。', source: 'local' },
+          { name: 'legacy-a', body: '# 甲\n\n只看甲。', source: 'local' },
+          { name: 'legacy-b', body: '# 乙\n\n只看乙。', source: 'local' },
         ],
         batchId: 'b1',
       })
@@ -1114,7 +1110,7 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
       //   文件），不再进技能库 ⇒ 卸完那两条老标准后库里应该**一个都不剩**。
       assert.equal(remaining.length, 0, '那两条老标准要卸载干净；库里不该有平台技能')
       assert.equal(
-        remaining.some((s) => s.slug === 'legacy-a' || s.slug === 'legacy-b'),
+        remaining.some((s) => s.name === 'legacy-a' || s.name === 'legacy-b'),
         false,
         '那两条老标准要卸载干净',
       )
@@ -1266,7 +1262,7 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
     test('★ 正文来自挂载的 skill ⇒ 保存**不**摘挂载（那要他自己点按钮）', async () => {
       await withDaemon(async (url) => {
         const installed = await install(url, {
-          skills: [{ slug: 'legacy-body', name: '老正文', body: '# 甲\n\n只看甲。', source: 'local' }],
+          skills: [{ name: 'legacy-body', body: '# 甲\n\n只看甲。', source: 'local' }],
           batchId: 'b1',
         })
         const skillId = (installed.body['installed'] as Array<{ id: string; builtin?: boolean }>)[0]!.id
@@ -1316,7 +1312,7 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
 //
 // 使用者的要求："skill 本身还是要以单独的文件保存，放在 ~/.agentdeck/skills"。
 // 于是装一条技能不再只是往 `skill.jsonl` 写一条记录——正文与支持文件落到
-// `<skillsRoot>/<slug>/`，而且是**磁盘为准**：改文件就生效。
+// `<skillsRoot>/<name>/`，而且是**磁盘为准**：改文件就生效。
 describe('★ 技能内容落盘：正文与支持文件是真文件（2026-10）', () => {
   async function exists(p: string): Promise<boolean> {
     try {
@@ -1327,15 +1323,15 @@ describe('★ 技能内容落盘：正文与支持文件是真文件（2026-10�
     }
   }
 
-  test('★★ 从路径装 ⇒ 文件真落在 <skillsRoot>/<slug>/ 下', async () => {
+  test('★★ 从路径装 ⇒ 文件真落在 <skillsRoot>/<name>/ 下', async () => {
     const src = await makeSkillDir({ 'SKILL.md': '# 我的标准', 'extra.md': '补充材料' })
     try {
       await withDaemon(async (url, { skillsRoot }) => {
         const res = await installFromSource(url, { source: { kind: 'path', path: src } })
         assert.equal(res.status, 201)
-        const slug = String((res.body['installed'] as Array<Record<string, unknown>>)[0]?.['slug'])
-        assert.equal(await readFile(join(skillsRoot, slug, 'SKILL.md'), 'utf8'), '# 我的标准')
-        assert.equal(await readFile(join(skillsRoot, slug, 'extra.md'), 'utf8'), '补充材料')
+        const name = String((res.body['installed'] as Array<Record<string, unknown>>)[0]?.['name'])
+        assert.equal(await readFile(join(skillsRoot, name, 'SKILL.md'), 'utf8'), '# 我的标准')
+        assert.equal(await readFile(join(skillsRoot, name, 'extra.md'), 'utf8'), '补充材料')
       })
     } finally {
       await cleanup(src)
@@ -1347,12 +1343,12 @@ describe('★ 技能内容落盘：正文与支持文件是真文件（2026-10�
     try {
       await withDaemon(async (url, { skillsRoot }) => {
         const res = await installFromSource(url, { source: { kind: 'path', path: src } })
-        const slug = String((res.body['installed'] as Array<Record<string, unknown>>)[0]?.['slug'])
+        const name = String((res.body['installed'] as Array<Record<string, unknown>>)[0]?.['name'])
         // 直接改盘上的文件——这正是"使用者改技能"的路径
-        await writeFile(join(skillsRoot, slug, 'SKILL.md'), '# 改过的标准', 'utf8')
+        await writeFile(join(skillsRoot, name, 'SKILL.md'), '# 改过的标准', 'utf8')
         const listed = await listSkills(url)
         assert.equal(
-          listed.find((s) => s.slug === slug)?.body,
+          listed.find((s) => s.name === name)?.body,
           '# 改过的标准',
           '★ 磁盘是权威：改了文件，界面/注入读到的就该是改后的',
         )
@@ -1365,7 +1361,7 @@ describe('★ 技能内容落盘：正文与支持文件是真文件（2026-10�
   test('★ 卸载 ⇒ 盘上的目录也一起删掉', async () => {
     await withDaemon(async (url, { skillsRoot }) => {
       const installed = await install(url, {
-        skills: [{ slug: 'to-disk-remove', name: '待卸载', body: '# x', source: 'local' }],
+        skills: [{ name: 'to-disk-remove', body: '# x', source: 'local' }],
         batchId: 'b1',
       })
       const id = (installed.body['installed'] as Array<{ id: string; builtin?: boolean }>)[0]!.id

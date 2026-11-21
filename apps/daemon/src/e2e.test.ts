@@ -163,16 +163,16 @@ class FakeBackend implements AgentBackend {
     const claudeHome = opts.env?.['CLAUDE_CONFIG_DIR']
     const skillsRoot =
       claudeHome === undefined ? join(opts.workDir, '.claude', 'skills') : join(claudeHome, 'skills')
-    for (const slug of await readdir(skillsRoot).catch(() => [] as string[])) {
+    for (const name of await readdir(skillsRoot).catch(() => [] as string[])) {
       const walk = async (dir: string, prefix: string): Promise<void> => {
         for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
           const full = join(dir, entry.name)
           const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`
           if (entry.isDirectory()) await walk(full, rel)
-          else this.seenSkillFiles[`${slug}/${rel}`] = await readFile(full, 'utf8').catch(() => '')
+          else this.seenSkillFiles[`${name}/${rel}`] = await readFile(full, 'utf8').catch(() => '')
         }
       }
-      await walk(join(skillsRoot, slug), '')
+      await walk(join(skillsRoot, name), '')
     }
 
     // ★ 假后端也要像真后端那样上报命令行。
@@ -2042,7 +2042,7 @@ describe('★ 执行日志必须**看得出**用了哪些 skill', () => {
    * 证据是日志里那句「会话已启动（25 个工具可用）」。
    *
    * 那句话说的是 **Claude Code 内置工具的数量**，与我们的 skill 无关——
-   * 我们注入的是 `.claude/skills/<slug>/SKILL.md` 与 `CLAUDE.md`，它们
+   * 我们注入的是 `.claude/skills/<name>/SKILL.md` 与 `CLAUDE.md`，它们
    * **增加**一份标准，并不会去掉 CLI 自带的工具。
    *
    * 但"确实注入了"和"看得出来注入了"是两件事：日志里**没有任何地方**
@@ -2061,9 +2061,8 @@ describe('★ 执行日志必须**看得出**用了哪些 skill', () => {
         agentRef: { id: 'agent-with-skill', name: '带技能的执行者', instructions: '' },
         skills: [
           {
-            ref: { id: 'sk-1', slug: 'general-review', source: 'local' },
-            slug: 'general-review',
-            name: '通用审核',
+            ref: { id: 'sk-1', name: 'general-review', source: 'local' },
+            name: 'general-review',
             body: '# 标准\n\n只判断，不提额外要求。',
             files: {},
           },
@@ -2144,9 +2143,8 @@ describe('★ 执行日志必须**看得出**用了哪些 skill', () => {
           agentRef: { id: 'agent-with-files', name: '带支持文件的执行者', instructions: '' },
           skills: [
             {
-              ref: { id: 'sk-files', slug: 'with-support', source: 'local' },
-              slug: 'with-support',
-              name: '带支持文件',
+              ref: { id: 'sk-files', name: 'with-support', source: 'local' },
+              name: 'with-support',
               body: '# 标准\n\n看 scripts/check.sh。',
               files: { 'scripts/check.sh': '#!/bin/sh\necho ok\n', 'reference.md': '参考资料' },
             },
@@ -2328,7 +2326,7 @@ describe('★ 失败原因码要说对人该去哪儿查', () => {
         body: JSON.stringify({
           runId, kind: 'execute',
           agentRef: { id: 'a', name: 'A', instructions: '' },
-          skills: [{ ref: { id: 's1', slug: 'mine', source: 'local' }, slug: 'mine', name: 'mine', body: '平台的标准' }],
+          skills: [{ ref: { id: 's1', name: 'mine', source: 'local' }, name: 'mine', body: '平台的标准' }],
           subject: { type: 'issue', id: 'i1' },
           prompt: '随便做点事',
           workDir: dir,

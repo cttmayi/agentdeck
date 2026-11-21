@@ -125,8 +125,8 @@ describe('生成产物读取（readAgentDraftArtifacts）', () => {
       const out = await readAgentDraftArtifacts(dir)
       assert.ok(out.agentDraft !== null && out.agentDraft.includes('会议纪要助理'))
       assert.equal(out.skills.length, 1)
-      assert.equal(out.skills[0]!.slug, 'meeting-notes-format')
-      assert.equal(out.skills[0]!.name, '会议纪要格式')
+      // D236：技能名只有目录名那一个（frontmatter 里那句中文是描述的一部分，不再单独成字段）
+      assert.equal(out.skills[0]!.name, 'meeting-notes-format')
       assert.ok(out.skills[0]!.body.includes('## When to Use'))
     } finally {
       await cleanup(dir)
@@ -172,10 +172,10 @@ describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）',
       const maker = (await platformMemberOf(store, WS, 'agent-maker'))!
       const exclusive = await store.listExclusiveSkills(agentSkillOwner(maker.id))
       assert.equal(exclusive.length, AGENT_MAKER_SKILL_SLUGS.length)
-      for (const slug of AGENT_MAKER_SKILL_SLUGS) {
-        const skill = exclusive.find((e) => e.slug === slug)
-        assert.ok(skill, `平台技能 ${slug} 要进生成者的独有目录`)
-        assert.ok(skill!.body.includes('## When to Use'), `${slug} 的正文要完整（含 When to Use）`)
+      for (const name of AGENT_MAKER_SKILL_SLUGS) {
+        const skill = exclusive.find((e) => e.name === name)
+        assert.ok(skill, `平台技能 ${name} 要进生成者的独有目录`)
+        assert.ok(skill!.body.includes('## When to Use'), `${name} 的正文要完整（含 When to Use）`)
       }
       // ★ 不进技能库：库里**一条都没有**（技能页看不到、卸载入口不存在）
       assert.deepEqual(await store.listSkills(WS), [])
@@ -229,14 +229,13 @@ describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）',
       }
       await store.insertAgent(maker)
       const bodies: Record<string, string> = {}
-      for (const slug of AGENT_MAKER_SKILL_SLUGS) {
-        const body = `---\nname: ${slug}\ndescription: 规范\n---\n## When to Use\n${slug}\n## Procedure\n照做。`
-        bodies[slug] = body
+      for (const name of AGENT_MAKER_SKILL_SLUGS) {
+        const body = `---\nname: ${name}\ndescription: 规范\n---\n## When to Use\n${name}\n## Procedure\n照做。`
+        bodies[name] = body
         await store.insertSkill({
-          id: (`sk-${AGENT_MAKER_SKILL_SLUGS.indexOf(slug) + 1}`) as Skill['id'],
+          id: (`sk-${AGENT_MAKER_SKILL_SLUGS.indexOf(name) + 1}`) as Skill['id'],
           workspaceId: WS,
-          slug,
-          name: slug,
+          name,
           description: '规范',
           body,
           verdictSchemaVersion: 1,
@@ -254,9 +253,9 @@ describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）',
       assert.deepEqual(await store.listSkills(WS), [])
       const exclusive = await store.listExclusiveSkills(agentSkillOwner('maker-1' as Agent['id']))
       assert.equal(exclusive.length, AGENT_MAKER_SKILL_SLUGS.length)
-      for (const slug of AGENT_MAKER_SKILL_SLUGS) {
-        const e = exclusive.find((x) => x.slug === slug)
-        assert.equal(e?.body, bodies[slug])
+      for (const name of AGENT_MAKER_SKILL_SLUGS) {
+        const e = exclusive.find((x) => x.name === name)
+        assert.equal(e?.body, bodies[name])
       }
       const after = await store.getAgentById('maker-1' as Agent['id'])
       assert.deepEqual(after?.skillIds, [])
@@ -270,7 +269,7 @@ describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）',
     }
   })
 
-  test('★★ 注入：共享 ∪ 独有走同一条通道；同 slug 时独有**盖过**共享', async () => {
+  test('★★ 注入：共享 ∪ 独有走同一条通道；同 name 时独有**盖过**共享', async () => {
     const dir = await makeTempDir('agent-maker-inject')
     const store = await FileStore.open({ dataDir: dir, fsync: false })
     // ★ 2026-11（D154）：槽位表挂在工作区上 ⇒ 用 store 的用例必须先有工作区
@@ -307,8 +306,7 @@ describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）',
       await store.insertSkill({
         id: 'sk-x' as Skill['id'],
         workspaceId: WS,
-        slug: 'shared-x',
-        name: '共享X',
+        name: 'shared-x',
         description: null,
         body: '# 共享X\n\n## When to Use\n共享\n## Procedure\n用共享的。',
         verdictSchemaVersion: 1,
@@ -321,8 +319,7 @@ describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）',
       await store.insertSkill({
         id: 'sk-y' as Skill['id'],
         workspaceId: WS,
-        slug: 'shared-y',
-        name: '共享Y',
+        name: 'shared-y',
         description: null,
         body: '# 共享Y\n\n## When to Use\n共享\n## Procedure\n用共享的。',
         verdictSchemaVersion: 1,
@@ -335,16 +332,16 @@ describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）',
       await store.writeExclusiveSkill(agentSkillOwner('exec-1' as Agent['id']), 'shared-x', '# 独有X\n\n## When to Use\n独有\n## Procedure\n用独有这份。')
 
       const payloads = await loadInjectableSkills(store, skillSourcesOfAgent(agent))
-      const refs = payloads.map((p) => ({ slug: p.ref.slug, source: p.ref.source }))
+      const refs = payloads.map((p) => ({ name: p.ref.name, source: p.ref.source }))
       assert.deepEqual(
-        refs.sort((a, b) => (a.slug < b.slug ? -1 : 1)),
+        refs.sort((a, b) => (a.name < b.name ? -1 : 1)),
         [
-          { slug: 'shared-x', source: 'agent' },
-          { slug: 'shared-y', source: 'local' },
+          { name: 'shared-x', source: 'agent' },
+          { name: 'shared-y', source: 'local' },
         ],
-        '独有 x 盖过同 slug 的共享 x；共享 y 照常注入',
+        '独有 x 盖过同 name 的共享 x；共享 y 照常注入',
       )
-      const x = payloads.find((p) => p.ref.slug === 'shared-x')!
+      const x = payloads.find((p) => p.ref.name === 'shared-x')!
       assert.ok(x.body.includes('独有这份'), '注入的是独有那份正文，不是共享的')
       assert.equal(x.ref.id, null, '独有技能没有库 id')
     } finally {
@@ -503,21 +500,21 @@ describe('生成智能体整链（2026-11 设计定稿 §3.5–§3.6）', () => 
     const artifacts = await json(`/api/conversations/${conversationId}/agent-draft`)
     const artifactBody = artifacts.body as {
       agentDraft: string | null
-      skills: Array<{ slug: string; name: string; description: string; body: string }>
+      skills: Array<{ name: string; description: string; body: string }>
     }
     assert.ok(artifactBody.agentDraft !== null && artifactBody.agentDraft.includes('会议纪要助理'))
     assert.equal(artifactBody.skills.length, 1)
-    assert.equal(artifactBody.skills[0]!.slug, 'meeting-notes-format')
+    assert.equal(artifactBody.skills[0]!.name, 'meeting-notes-format')
 
     // 确认生成：岗位卡 + 配套技能一起提交
     const committed = await postJson(`/api/conversations/${conversationId}/agent-commit`, {
       agentDraft: artifactBody.agentDraft,
-      skills: artifactBody.skills.map((s) => ({ slug: s.slug, body: s.body })),
+      skills: artifactBody.skills.map((s) => ({ name: s.name, body: s.body })),
     })
     assert.equal(committed.status, 201, `确认生成失败：${JSON.stringify(committed.body)}`)
     const out = committed.body as {
       agent: { id: string; name: string }
-      exclusiveSlugs: string[]
+      exclusiveNames: string[]
     }
     assert.equal(out.agent.name, '会议纪要助理')
     /*
@@ -526,16 +523,16 @@ describe('生成智能体整链（2026-11 设计定稿 §3.5–§3.6）', () => 
      */
 
     // ★ 2026-11（使用者拍板）：配套技能**不进共享技能池**（skills-mine 里没有它），
-    //   落成**新智能体的独有技能**（`agents/<id>/skills/`）——响应带 exclusiveSlugs。
+    //   落成**新智能体的独有技能**（`agents/<id>/skills/`）——响应带 exclusiveNames。
     const skills = await json('/api/skills')
-    const poolHit = (skills.body as { skills: Array<{ slug: string; source: string }> }).skills.find(
-      (x) => x.slug === 'meeting-notes-format',
+    const poolHit = (skills.body as { skills: Array<{ name: string; source: string }> }).skills.find(
+      (x) => x.name === 'meeting-notes-format',
     )
     assert.ok(!poolHit, '配套技能不要进共享技能池')
-    assert.deepEqual(out.exclusiveSlugs, ['meeting-notes-format'], '响应要如实带独有技能 slug')
+    assert.deepEqual(out.exclusiveNames, ['meeting-notes-format'], '响应要如实带独有技能 name')
     const agentSkills = await json(`/api/agents/${out.agent.id}/skills`)
-    const exclusive = (agentSkills.body as { skills: Array<{ slug: string }> }).skills
-    assert.deepEqual(exclusive.map((x) => x.slug), ['meeting-notes-format'], '新智能体的独有技能 = 配套技能')
+    const exclusive = (agentSkills.body as { skills: Array<{ name: string }> }).skills
+    assert.deepEqual(exclusive.map((x) => x.name), ['meeting-notes-format'], '新智能体的独有技能 = 配套技能')
 
     // ★ D111（存储目录化）：生成的新智能体 = `agents/<id>/` 目录——详情接口要能
     //   从目录读回，且 `instructions` = 岗位卡正文（组装前，builtin=false 不再拼守则）
@@ -590,7 +587,7 @@ describe('生成智能体整链（2026-11 设计定稿 §3.5–§3.6）', () => 
      */
   })
 
-  test('★ 坏配套技能 ⇒ 400 agent_skill_invalid（缺正文 / slug 非法都拦在写之前）', async () => {
+  test('★ 坏配套技能 ⇒ 400 agent_skill_invalid（缺正文 / name 非法都拦在写之前）', async () => {
     const created = await postJson('/api/conversations', { agentId: makerId, text: '再问一个' })
     assert.equal(created.status, 201)
     const conversationId = (created.body as { conversation: { id: string } }).conversation.id
@@ -598,17 +595,17 @@ describe('生成智能体整链（2026-11 设计定稿 §3.5–§3.6）', () => 
 
     const noBody = await postJson(`/api/conversations/${conversationId}/agent-commit`, {
       agentDraft: '---\nname: 岗位二\nrole: executor\n---\n你是岗位二。',
-      skills: [{ slug: 'meeting-notes-format', body: '   ' }],
+      skills: [{ name: 'meeting-notes-format', body: '   ' }],
     })
     assert.equal(noBody.status, 400)
     assert.equal((noBody.body as { code?: string }).code, 'agent_skill_invalid')
 
-    const badSlug = await postJson(`/api/conversations/${conversationId}/agent-commit`, {
+    const badName = await postJson(`/api/conversations/${conversationId}/agent-commit`, {
       agentDraft: '---\nname: 岗位三\nrole: executor\n---\n你是岗位三。',
-      skills: [{ slug: '大 写 不 行', body: '---\nname: x\n---\n## When to Use\na\n## Procedure\nb\n' }],
+      skills: [{ name: '大 写 不 行', body: '---\nname: x\n---\n## When to Use\na\n## Procedure\nb\n' }],
     })
-    assert.equal(badSlug.status, 400)
-    assert.equal((badSlug.body as { code?: string }).code, 'agent_skill_invalid')
+    assert.equal(badName.status, 400)
+    assert.equal((badName.body as { code?: string }).code, 'agent_skill_invalid')
   })
 
   test('★ 生成者对话的 run 注入 3 条独有技能（source: agent）；技能页里一条都没有', async () => {
@@ -620,21 +617,21 @@ describe('生成智能体整链（2026-11 设计定稿 §3.5–§3.6）', () => 
 
     // ★ D111：独有技能走同一条注入通道——run.skillRefs 如实带来源 `agent`
     const run = await json(`/api/runs/${runId}`)
-    const skillRefs = (run.body as { skillRefs?: Array<{ id: string | null; slug: string; source: string }> }).skillRefs
+    const skillRefs = (run.body as { skillRefs?: Array<{ id: string | null; name: string; source: string }> }).skillRefs
     assert.ok(skillRefs, 'run 要有 skillRefs')
     const agentRefs = skillRefs!.filter((r) => r.source === 'agent')
     assert.equal(agentRefs.length, AGENT_MAKER_SKILL_SLUGS.length, '注入的独有技能要是那三条')
     assert.deepEqual(
-      [...agentRefs].map((r) => r.slug).sort(),
+      [...agentRefs].map((r) => r.name).sort(),
       [...AGENT_MAKER_SKILL_SLUGS].sort(),
     )
     assert.ok(agentRefs.every((r) => r.id === null), '独有技能没有库 id（id === null）')
 
     // ★ 不进技能库、不进技能页
     const all = await json('/api/skills')
-    const skills = (all.body as { skills: Array<{ slug: string }> }).skills
+    const skills = (all.body as { skills: Array<{ name: string }> }).skills
     assert.ok(
-      !skills.some((s) => (AGENT_MAKER_SKILL_SLUGS as readonly string[]).includes(s.slug)),
+      !skills.some((s) => (AGENT_MAKER_SKILL_SLUGS as readonly string[]).includes(s.name)),
       '技能页里不应该有那三条平台技能',
     )
   })

@@ -313,7 +313,7 @@ export async function reconcileStartup(deps: ReconcileDeps): Promise<ReconcileRe
             '在装好之前不能开始沉淀',
         )
       } else {
-        info(`起草者挂了：${mount.skillSlugs.join('、')}`)
+        info(`起草者挂了：${mount.skillNames.join('、')}`)
       }
     },
 

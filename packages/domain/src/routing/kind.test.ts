@@ -17,13 +17,13 @@ import { resolveSkillsForAgent } from './kind.ts'
 describe('agent 用哪些 skill', () => {
   test('按 skillIds 取，顺序保持一致', () => {
     const skills = [
-      makeSkill({ id: 'a', slug: 'a' }),
-      makeSkill({ id: 'b', slug: 'b' }),
-      makeSkill({ id: 'c', slug: 'c' }),
+      makeSkill({ id: 'a', name: 'a' }),
+      makeSkill({ id: 'b', name: 'b' }),
+      makeSkill({ id: 'c', name: 'c' }),
     ]
     const agent = makeAgent({ id: 'x', skillIds: [skillId('b'), skillId('a')] })
     assert.deepEqual(
-      resolveSkillsForAgent(agent, skills).map((s) => s.slug),
+      resolveSkillsForAgent(agent, skills).map((s) => s.name),
       ['b', 'a'],
     )
   })
@@ -36,12 +36,12 @@ describe('agent 用哪些 skill', () => {
   test('★ 一个 workspace 里有很多 skill，但 agent 只用它挂的那部分（FR-AGENT-03）', () => {
     // 这不是优化，是分工的本体——安全 agent 不该带着"文档校对"的标准去审代码
     const skills = [
-      makeSkill({ id: 'sec', slug: 'security' }),
-      makeSkill({ id: 'doc', slug: 'doc-proofread' }),
+      makeSkill({ id: 'sec', name: 'security' }),
+      makeSkill({ id: 'doc', name: 'doc-proofread' }),
     ]
     const agent = makeAgent({ id: 'x', skillIds: [skillId('sec')] })
     assert.deepEqual(
-      resolveSkillsForAgent(agent, skills).map((s) => s.slug),
+      resolveSkillsForAgent(agent, skills).map((s) => s.name),
       ['security'],
     )
   })

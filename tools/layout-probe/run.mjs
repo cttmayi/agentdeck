@@ -1931,7 +1931,7 @@ const CHECKS = [
   {
     view: '技能',
     key: 'skills.slugCellFlexWrap',
-    label: '★ 首格 `▸ slug` 是 flex 且不折行（D69.8：列一窄就换行的问题的根治）',
+    label: '★ 首格 `▸ 名字` 是 flex 且不折行（D69.8：列一窄就换行的问题的根治）',
     ok: (v) => v === 'nowrap',
   },
   {
@@ -6078,8 +6078,8 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.reviewInputCount',
     label:
-      '★★ 审阅屏**没有**输入框（slug 只在「确认入库」的确认框里）——四轮第 ④ 点：SKILL.md 里已经有 ' +
-      'name/description，不该再让人填空；第 196 批再进一步：连接库前那个 slug 也不常驻',
+      '★★ 审阅屏**没有**输入框（名字只在「确认入库」的确认框里）——四轮第 ④ 点：SKILL.md 里已经有 ' +
+      'name/description，不该再让人填空；第 196 批再进一步：连接库前那个名字也不常驻',
     ok: (v) => v === 0,
     show: (v) => `${v} 个`,
   },
@@ -6093,7 +6093,7 @@ const CHECKS = [
   {
     view: '沉淀',
     key: 'crystal.commitDialogSlugValue',
-    label: '★★★ 确认框里的 slug **预填好**（取 SKILL.md frontmatter 的 name）——空着等人填等于每次入库都要手打',
+    label: '★★★ 确认框里的名字 **预填好**（取 SKILL.md frontmatter 的 name）——空着等人填等于每次入库都要手打',
     ok: (v) => typeof v === 'string' && v.length > 0,
     show: (v) => JSON.stringify(v),
   },
@@ -6823,7 +6823,7 @@ try {
   //    不存在的界面服务的 POST。skills 的播种保留（下面技能页那一段要用）。
   // ⚠️ 这条 `POST /api/skills` 必须在**下面这次查找之前**执行：第一版把它写在文件
   //    后半（3800 行之外，第二次 daemon 起来之后），而迁移（D38）那一族在这里就
-  //    `skills.find(s => s.slug === 'probe-skill')` —— 找不到就只打一句 ⚠、整族
+  //    `skills.find(s => s.name === 'probe-skill')` —— 找不到就只打一句 ⚠、整族
   //    空过，于是判据量着空态还报绿（2026-10 掀出来的假绿，与 `issueFixtureId`
   //    那处 TDZ 同一类病：**夹具被用在它存在之前**）。
   try {
@@ -6833,8 +6833,7 @@ try {
       body: JSON.stringify({
         skills: [
           {
-            slug: 'probe-skill',
-            name: '探针技能',
+            name: 'probe-skill',
             // ★ 带 frontmatter 的 description：探针据此量"名称列有没有把作者
             //   写的说明显示出来"（正文仍是 `# 探针\n\n夹具。`——上面那条迁移
             //   断言认的是正文里那句）。
@@ -6885,14 +6884,14 @@ try {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         skills: [
-          { slug: 'chat-probe-skill', name: '聊天夹具技能', body: '# 聊天夹具\n', source: 'local' },
-          { slug: 'chat-orphan-skill', name: '没人挂的聊天夹具', body: '# 没人挂\n', source: 'local' },
+          { name: 'chat-probe-skill', body: '# 聊天夹具\n', source: 'local' },
+          { name: 'chat-orphan-skill', body: '# 没人挂\n', source: 'local' },
         ],
       }),
     })
     if (!res.ok) log(yellow(`⚠ 造聊天夹具 skill 失败（HTTP ${res.status}）——聊天那几条会空过`))
     const all = (await (await fetch(`${base}/api/skills`)).json()).skills ?? []
-    const owned = all.find((s) => s.slug === 'chat-probe-skill')
+    const owned = all.find((s) => s.name === 'chat-probe-skill')
     if (!owned) {
       log(yellow('⚠ 找不到聊天夹具 skill——聊天那几条会空过'))
     } else {
@@ -7221,7 +7220,7 @@ try {
          */
         const allSkillsForTargets = await store.listSkills(workspaceId)
         const fixtureSkillForTargets =
-          allSkillsForTargets.find((sk) => sk.slug === 'probe-skill') ?? allSkillsForTargets[0] ?? null
+          allSkillsForTargets.find((sk) => sk.name === 'probe-skill') ?? allSkillsForTargets[0] ?? null
         const skillOwnedExecutor = {
           id: ulid(),
           workspaceId,
@@ -7633,14 +7632,14 @@ try {
          *   会把这一屏挡在门外——这正是它的职责。
          */
         const allSkills = (await (await fetch(`${base}/api/skills`)).json()).skills ?? []
-        if (!allSkills.some((sk) => sk.slug === 'distilly')) {
+        if (!allSkills.some((sk) => sk.name === 'distilly')) {
           const installRes = await fetch(`${base}/api/skills/install`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
               source: {
                 kind: 'payload',
-                slug: 'distilly',
+                name: 'distilly',
                 body:
                   '---\nname: distilly\ndescription: 探针夹具：沉淀用技能\n---\n\n' +
                   '# 探针的起草规范\n\n## Procedure\n\n1. 先读素材索引。\n',
@@ -7732,7 +7731,7 @@ try {
       body: JSON.stringify({
         draftRunId: crystalFixture.mineDraftRunId,
         target: { kind: 'new' },
-        slug: 'probe-mine',
+        name: 'probe-mine',
         files: { 'SKILL.md': skillMd, 'references/notes.md': '# 说明\n\n第一版。\n' },
       }),
     })

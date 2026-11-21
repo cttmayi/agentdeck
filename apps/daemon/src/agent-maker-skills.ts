@@ -8,12 +8,12 @@
  * 使用者原话："智能体生成者可以包括几个你认为重要的市场技能……可以和沉淀起草者一样，
  * 动态安装。"——和起草者挂 `distilly` 同一套分工：**规范走技能不走指令**。
  *
- * ★ D111 之后：它们是生成者的**独有技能**（`agents/<id>/skills/<slug>/SKILL.md`
+ * ★ D111 之后：它们是生成者的**独有技能**（`agents/<id>/skills/<name>/SKILL.md`
  *   文件资产，设计定稿 `docs/design/agent-directory.md` §4）——**不再进技能库、
  *   不进技能页、不可卸载**。上一轮那个"库中永远没有 + 旧安装被清理 + 生成者 run
- *   注入 3 条内置技能"的目标，用统一机制达成，不需要 `builtinSkillSlugs` 特殊字段：
+ *   注入 3 条内置技能"的目标，用统一机制达成，不需要 `builtinSkillNames` 特殊字段：
  *
- *   · 播种：daemon 启动时把 `catalog/platform-skills/<slug>/SKILL.md` 写进生成者
+ *   · 播种：daemon 启动时把 `catalog/platform-skills/<name>/SKILL.md` 写进生成者
  *     目录（幂等：已在就一字不动；与安装接口同一关 `resolvePayloadEntry` 校验）；
  *   · 迁移：老工作区库里那三条 `sourceRef: 'platform:agent-maker'` 的**搬进**生成者
  *     目录、从库里删掉（一次性、幂等——库里没有就跳过）；
@@ -40,13 +40,13 @@ export const AGENT_MAKER_SKILL_SLUGS = [
 export const AGENT_MAKER_SKILL_SOURCE_REF = 'platform:agent-maker'
 
 /** 内置技能的内容路径（与 `skill-list.ts` 的 `defaultSkillListPath` 同一个惯例）。 */
-function skillMdPath(slug: string): string {
-  return fileURLToPath(new URL(`../catalog/platform-skills/${slug}/SKILL.md`, import.meta.url))
+function skillMdPath(name: string): string {
+  return fileURLToPath(new URL(`../catalog/platform-skills/${name}/SKILL.md`, import.meta.url))
 }
 
 /** 读一份内置技能的内容（读取失败即抛——平台技能随仓库分发，读不到是装坏了，不是没有）。 */
-async function readBundledSkillMd(slug: string): Promise<string> {
-  return await readFile(skillMdPath(slug), 'utf8')
+async function readBundledSkillMd(name: string): Promise<string> {
+  return await readFile(skillMdPath(name), 'utf8')
 }
 
 /**
@@ -70,19 +70,19 @@ export async function ensureBuiltinAgentMakerSkills(
   if (!maker) return { agentId: null, seeded: [], skipped: [] }
 
   const existing = new Set(
-    (await store.listExclusiveSkills(agentSkillOwner(maker.id))).map((s) => s.slug),
+    (await store.listExclusiveSkills(agentSkillOwner(maker.id))).map((s) => s.name),
   )
   const seeded: string[] = []
   const skipped: string[] = []
-  for (const slug of AGENT_MAKER_SKILL_SLUGS) {
-    if (existing.has(slug)) continue
+  for (const name of AGENT_MAKER_SKILL_SLUGS) {
+    if (existing.has(name)) continue
     try {
-      const body = await readBundledSkillMd(slug)
-      const validated = resolvePayloadEntry({ slug, body, sourceRef: AGENT_MAKER_SKILL_SOURCE_REF })
-      await store.writeExclusiveSkill(agentSkillOwner(maker.id), slug, validated.body)
-      seeded.push(slug)
+      const body = await readBundledSkillMd(name)
+      const validated = resolvePayloadEntry({ name, body, sourceRef: AGENT_MAKER_SKILL_SOURCE_REF })
+      await store.writeExclusiveSkill(agentSkillOwner(maker.id), name, validated.body)
+      seeded.push(name)
     } catch (err) {
-      skipped.push(`${slug}（${err instanceof Error ? err.message : String(err)}）`)
+      skipped.push(`${name}（${err instanceof Error ? err.message : String(err)}）`)
     }
   }
   return { agentId: maker.id as string, seeded, skipped }
@@ -114,12 +114,12 @@ export async function migratePlatformSkillsToExclusive(
 
   const moved: string[] = []
   for (const skill of platform) {
-    // 已有同 slug 的独有技能 ⇒ 不覆盖（老库那份先来，播种那份在后面补缺）
-    const existing = await store.getExclusiveSkill(agentSkillOwner(maker.id), skill.slug)
+    // 已有同 name 的独有技能 ⇒ 不覆盖（老库那份先来，播种那份在后面补缺）
+    const existing = await store.getExclusiveSkill(agentSkillOwner(maker.id), skill.name)
     if (existing === null) {
-      await store.writeExclusiveSkill(agentSkillOwner(maker.id), skill.slug, skill.body)
+      await store.writeExclusiveSkill(agentSkillOwner(maker.id), skill.name, skill.body)
     }
-    moved.push(skill.slug)
+    moved.push(skill.name)
     await store.deleteSkill(skill.id)
   }
 
