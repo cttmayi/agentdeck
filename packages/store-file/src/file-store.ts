@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from 'node:fs/promises'
+import { readFile, readdir, rename, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   ACTIVE_RUN_STATUSES,
@@ -67,7 +67,7 @@ import {
   writeExclusiveSkillBodyIn,
   writeLegacyAgentDir,
 } from './agent-dirs.ts'
-import { slugForAgentName, uniqueAgentDirName } from './agent-slug.ts'
+import { agentDirNameMatches, slugForAgentName, uniqueAgentDirName } from './agent-slug.ts'
 
 /**
  * 文件存储适配器 —— `Store` 端口的 v1 实现。
@@ -826,6 +826,8 @@ export class FileStore implements Store {
     }
     // 建 `id → 目录名` 索引（磁盘是真相；miss 时会重扫，见 `#dirNameOf`）
     await store.#refreshAgentDirIndex()
+    // 对账：目录名该是名字的 slug（D232）——**只报不改**
+    await store.#reconcileAgentDirNames()
 
     // ── D229：独有技能目录 `SKILL/` → `skills/`（大小写 + 幂等，见 agent-dirs.ts）──
     if (!ledger.has(MIGRATIONS.exclusiveSkillsDirCase)) {
@@ -1189,6 +1191,32 @@ export class FileStore implements Store {
   }
 
   /**
+   * **对账：目录名该是名字的 slug**（D232）。
+   *
+   * ⚠️ **只报不改**：改名目录会影响"正在跑的 agent 的工作路径"（`Run.workDir` 与
+   *   正在写的技能文件都在里面），开库时擅自搬动风险大于收益。发现不一致就点名，
+   *   下次这个智能体被保存时 `insertAgent` 会顺手把目录搬到正确的名字上。
+   *
+   * 允许唯一性后缀（`写作员-2`），见 `agentDirNameMatches`——否则"slug 撞过名的
+   * 那一条"会每次启动都报一遍假警报。
+   */
+  async #reconcileAgentDirNames(): Promise<void> {
+    const bad: string[] = []
+    for (const dirName of this.#agentDirOfId.values()) {
+      const agent = await readAgentDirIn(this.#dataDir, dirName)
+      if (agent === null) continue
+      if (!agentDirNameMatches(String(agent.name ?? ''), dirName)) {
+        bad.push(`${dirName}（名字是「${String(agent.name)}」）`)
+      }
+    }
+    if (bad.length > 0) {
+      this.#onInfo(
+        `⚠️ 智能体目录名与名字对不上（不自动改，下次保存那条智能体时会把目录搬回去）：${bad.join('、')}`,
+      )
+    }
+  }
+
+  /**
    * `id → 目录名`。**miss 时全量扫一次**再查（自愈路径）。
    *
    * 为什么允许 miss 重扫：目录可能被外部改名/被备份覆盖，而索引是启动时建的缓存。
@@ -1295,15 +1323,52 @@ export class FileStore implements Store {
     return all.filter((x) => x.agent.workspaceId === workspaceId).map((x) => x.agent)
   }
 
+  /**
+   * 写一条智能体（**新建与更新同一条路**）。
+   *
+   * ★★ D232：**名字变了，目录跟着搬**——这是方案 D 唯一的"要同时动两处"的操作。
+   *
+   *   顺序固定，任何一步失败都不要留下半路状态：
+   *     ① 目录名该是什么？`slug(name)`（与别的智能体撞了就用 `-2` / `-3`）；
+   *     ② 目录真的改（两步 rename：先 `.tmp-<随机>` 再目标名，大小写不敏感的文件系统也安全）；
+   *     ③ 把 `agent.json` / `instructions.md` 写进新目录；
+   *     ④ 更新索引。
+   *   ③ 失败就**把目录改回去**再抛错——"json 里是新名字、目录还是旧名字"是最难查的那种
+   *   半路状态（下一次读到的目录名与名字对不上，而两处看起来都正常）。
+   *
+   * ⚠️ 目录名是名字的**投影**，不是自由字段：使用者手动改目录名，下一次保存会被改回来
+   *   （对账只报不改，见 `#reconcileAgentDirNames`）。
+   */
   async insertAgent(agent: Agent): Promise<void> {
     await this.#agentsMutex.run(async () => {
       const id = String(agent.id)
-      // 已有目录（更新同一条）就沿用；否则按名字算一个没被占用的（`-2` / `-3` 后缀）
-      const dirName =
-        this.#agentDirOfId.get(id) ??
-        uniqueAgentDirName(String(agent.name ?? id), this.#takenDirNames(id))
-      await writeAgentDir(this.#dataDir, agent, dirName)
-      this.#agentDirOfId.set(id, dirName)
+      const current = this.#agentDirOfId.get(id) ?? null
+      const wanted = uniqueAgentDirName(String(agent.name ?? id), this.#takenDirNames(id))
+
+      if (current !== null && current === wanted) {
+        await writeAgentDir(this.#dataDir, agent, wanted)
+        return
+      }
+      if (current !== null) {
+        const from = agentDirPath(this.#dataDir, current)
+        const to = agentDirPath(this.#dataDir, wanted)
+        const tmp = `${to}.tmp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+        await rename(from, tmp)
+        await rename(tmp, to)
+        try {
+          await writeAgentDir(this.#dataDir, agent, wanted)
+        } catch (err) {
+          // 写不进去 ⇒ 把目录搬回去，别留下"目录新、json 旧"的半路状态
+          await rename(to, from).catch(() => {})
+          throw err
+        }
+        this.#agentDirOfId.set(id, wanted)
+        this.#onInfo(`智能体目录已跟着改名：${current}/ → ${wanted}/（引用一个没动）`)
+        return
+      }
+
+      await writeAgentDir(this.#dataDir, agent, wanted)
+      this.#agentDirOfId.set(id, wanted)
     })
   }
 

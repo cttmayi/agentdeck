@@ -83,3 +83,14 @@ export function uniqueAgentDirName(name: string, taken: ReadonlySet<string>): st
   // 极端情况（同一名字被建了上千次）：退化成随机后缀，仍然是安全的目录名
   return `${base}-${Math.random().toString(36).slice(2, 8)}`
 }
+
+/**
+ * 磁盘上的目录名**是不是**这个名字该有的样子（对账用）。
+ *
+ * 允许带唯一性后缀：`写作员` 与 `写作员-2` 都算"对"（后者是 slug 撞名时加的）。
+ * 反过来说，`外面改的名字` 这种就是**不对**——对账只报不改（D231）。
+ */
+export function agentDirNameMatches(name: string, dirName: string): boolean {
+  const base = slugForAgentName(name)
+  return dirName.toLowerCase() === base.toLowerCase() || dirName.toLowerCase().startsWith(`${base.toLowerCase()}-`)
+}

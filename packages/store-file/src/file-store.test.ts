@@ -508,6 +508,67 @@ describe('★ D231：目录名 = 名字的 slug（id 仍是身份）', () => {
     }
   })
 
+  test('★★ 改名 = 目录跟着搬（D232）：id 不变、旧目录没了、引用解析照旧', async () => {
+    const d = await makeTempDir('agent-rename')
+    try {
+      const infos: string[] = []
+      const s1 = await FileStore.open({ dataDir: d, fsync: false, onInfo: (m) => infos.push(m) })
+      await s1.insertAgent(makeAgent({ id: 'a-r' as never, workspaceId: WS, name: '甲' }))
+      const { readdir } = await import('node:fs/promises')
+      const dirs = async (): Promise<string[]> =>
+        (await readdir(join(d, 'agents'))).filter((n) => !n.startsWith('.'))
+      assert.deepEqual(await dirs(), ['甲'])
+
+      // 改名：同一条记录、只换 name
+      await s1.insertAgent(makeAgent({ id: 'a-r' as never, workspaceId: WS, name: '乙' }))
+      assert.deepEqual(await dirs(), ['乙'], '目录跟着名字搬')
+      assert.equal((await s1.getAgentById('a-r' as never))?.name, '乙')
+      assert.equal((await s1.getAgentByName('乙')).kind, 'found')
+      assert.equal((await s1.getAgentByName('甲')).kind, 'none', '旧名字不再能查到')
+      assert.ok(
+        infos.some((m) => m.includes('智能体目录已跟着改名')),
+        `改名要说出来：${infos.join(' / ')}`,
+      )
+
+      // 关掉重开：索引从磁盘重建，仍然对得上
+      await s1.close()
+      const s2 = await FileStore.open({ dataDir: d, fsync: false })
+      assert.equal((await s2.getAgentById('a-r' as never))?.name, '乙')
+      await s2.close()
+    } finally {
+      await cleanup(d)
+    }
+  })
+
+  test('★★ 对账：目录名与名字对不上 ⇒ **只报不改**（允许 -2 后缀）', async () => {
+    const d = await makeTempDir('agent-reconcile')
+    try {
+      const s1 = await FileStore.open({ dataDir: d, fsync: false })
+      await s1.insertAgent(makeAgent({ id: 'a-x' as never, workspaceId: WS, name: '甲' }))
+      await s1.close()
+
+      const { rename } = await import('node:fs/promises')
+      await rename(join(d, 'agents', '甲'), join(d, 'agents', '外面改的名字'))
+
+      const infos: string[] = []
+      const s2 = await FileStore.open({ dataDir: d, fsync: false, onInfo: (m) => infos.push(m) })
+      assert.ok(
+        infos.some((m) => m.includes('目录名与名字对不上')),
+        `要对账报出来：${infos.join(' / ')}`,
+      )
+      // 只报不改：目录名原样（数据照旧读得到）
+      const { readdir } = await import('node:fs/promises')
+      assert.deepEqual(
+        (await readdir(join(d, 'agents'))).filter((n) => !n.startsWith('.')),
+        ['外面改的名字'],
+      )
+      assert.equal((await s2.getAgentById('a-x' as never))?.name, '甲')
+      await s2.close()
+    } finally {
+      await cleanup(d)
+    }
+  })
+
   test('★ 索引 miss 时自愈：外部把目录改名，按 id 仍然找得到', async () => {
     const d = await makeTempDir('agent-dir-heal')
     try {
