@@ -4582,6 +4582,29 @@ const CHECKS = [
       `分段 ${String(v.section)}px · 小节 ${String(v.sub)}px`,
   },
   {
+    view: '设置页',
+    key: 'ctl.sweep',
+    /**
+     * ★★ D198：控件按**用途**认，不按类名认。
+     * 设置卡里能点且独占一行高度的东西（分段选择器 / input / select / .btn）必须都是
+     * `--ctl-h` = 30。这一条是扫描，不是抽样——正是它抓到 `.theme-picker button`
+     * 停在 28.8（裸 `<button>`，`padding: 4px 12px` + 行高 20.8 凑出来的）。
+     * 工具条里的标签胶囊（`.stage-chips` / `.view-switch`）是**另一档**（11px 字 + 小一圈），
+     * 它们的 24 / 22 是"有边框 / 无边框"差 2px，允许；但**不许出现第三种值**。
+     */
+    label: '★★ 设置卡里的控件（分段 / input / select / .btn）全是 30px；标签胶囊只许 24 与 22',
+    ok: (v) =>
+      !!v &&
+      v.controls >= 3 &&
+      v.controlHeights.length === 1 &&
+      v.controlHeights[0] === 30 &&
+      v.chipHeights.every((x) => x === 22 || x === 24) &&
+      v.rowAction.every((x) => x === 28),
+    show: (v) =>
+      `${String(v.controls)} 个控件高 ${JSON.stringify(v.controlHeights)} · ` +
+      `标签胶囊 ${JSON.stringify(v.chipHeights)} · 行内动作 ${JSON.stringify(v.rowAction)}`,
+  },
+  {
     view: '关于页',
     key: 'headings.aboutCards',
     /**

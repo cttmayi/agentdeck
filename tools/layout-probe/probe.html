@@ -5782,6 +5782,38 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               !!d().querySelector('.card-grid .main-panel-body h4'),
             10,
           )
+          /**
+           * ★★ D198：**控件高度扫描**（不是抽样）。
+           *
+           * 背景：D181/D182 把"按钮 / input / select 同一套 30px"钉住了，但那条判据是按
+           *   **类名（`.btn`）**找的——`设置页` 主题三档是裸 `<button>`（`.theme-picker button`），
+           *   没人扫到它，于是它靠自己 `padding: 4px 12px` + 行高 20.8 凑出 **28.8px**，
+           *   而同一张卡里的 `select` 是 30 ⇒ 差 1.2px，谁也说不清为什么。
+           * 现在这条判据按**用途**扫：设置卡里凡是"能点 + 独占一行高度"的东西（分段选择器、
+           *   `input`、`select`、非轨道里的 `.btn`）都必须是 `--ctl-h`；
+           *   另外把"工具条里的标签胶囊 / 行内动作 / 侧栏行"的高度一并报出来当事实——
+           *   它们是**别的档**，不必等于 30，但必须是**登记过的那几个值**（不许再冒出第三个）。
+           */
+          facts['ctl.sweep'] = (() => {
+            // ⚠️ 页面在 iframe 里跑：查询必须走 `d()`（裸 `document` 量到的是探针页 ⇒ 0 个控件）
+            const doc = d()
+            const styleOf = (el) => el.ownerDocument.defaultView.getComputedStyle(el)
+            const h = (el) => Math.round(el.getBoundingClientRect().height)
+            const visible = (el) => el.getBoundingClientRect().height > 0 && styleOf(el).visibility !== 'hidden'
+            const controls = [
+              ...doc.querySelectorAll('.card-grid .theme-picker button'),
+              ...doc.querySelectorAll('.card-grid input:not([type=checkbox]):not([type=radio])'),
+              ...doc.querySelectorAll('.card-grid select'),
+              ...doc.querySelectorAll('.card-grid .btn'),
+            ].filter(visible)
+            const chips = [...doc.querySelectorAll('.stage-chips button, .view-switch button')].filter(visible)
+            return {
+              controls: controls.length,
+              controlHeights: [...new Set(controls.map(h))].sort((a, b) => a - b),
+              chipHeights: [...new Set(chips.map(h))].sort((a, b) => a - b),
+              rowAction: [...new Set([...doc.querySelectorAll('.list-row-action')].filter(visible).map(h))],
+            }
+          })()
           facts['headings.levels'] = (() => {
             const px = (el) => (el ? Math.round(parseFloat(cs(el).fontSize)) : null)
             const h1 = d().querySelector('.topbar .page-name')

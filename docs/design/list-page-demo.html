@@ -2813,8 +2813,18 @@ tbody tr:last-child td,
   color: var(--text-dim);
 }
 
-/* ★ 主题三档分段控件（设置抽屉）。扁平软底：没选中的是 `surface-2`，
-   选中的是 `accent-dim`（实心），一眼看出当前是哪档。 */
+/*
+ * ★ 主题三档分段控件（设置抽屉）。扁平软底：没选中的是 `surface-2`，
+ *   选中的是 `accent-dim`（实心），一眼看出当前是哪档。
+ *
+ * ⚠️ 2026-11（D198）：**它是控件，不是标签胶囊** —— 和 `.stage-chips` 形状同族，
+ *   但角色不同，所以是两档：
+ *     · 这一档（**设置项**）：13px 字 + `--ctl-h`(30) 高，跟同卡片里的 `select` 一样高；
+ *     · `.stage-chips` / `.view-switch`（**列表工具条里的筛选**）：11px 字 + 小一圈。
+ *   原来这里只写了 `padding: 4px 12px`，靠"4+4 + 行高 20.8"凑出 **28.8px**——
+ *   于是同一张设置卡里，`select` 是 30、主题三档是 28.8，差 1.2px 谁也说不清为什么。
+ *   （量出来才发现：它不在 `.btn` 族里，D181/D182 那两批"控件 30px"根本没扫到它。）
+ */
 .theme-picker {
   display: inline-flex;
   padding: 2px;
@@ -2826,7 +2836,12 @@ tbody tr:last-child td,
   border: none;
   background: transparent;
   color: var(--text-dim);
-  padding: var(--sp-1) var(--sp-3);
+  /* 高度用 `min-height` 而不是写死 `height`：文字万一折行也不会被切掉（同 `.btn` 的道理） */
+  min-height: var(--ctl-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--sp-3);
   border-radius: calc(var(--radius) - 2px);
   font-size: var(--fs-sm);
   white-space: nowrap;
@@ -2838,8 +2853,10 @@ tbody tr:last-child td,
 }
 
 /*
- * ★ 状态筛选 chips（任务列表，2026-11）：一排小圆钮，与 theme-picker 同族
- *   （软底分段选择器），但允许换行（列表栏窄时 chips 折行）。
+ * ★ 状态筛选 chips（任务列表，2026-11）：一排小圆钮，与 `.theme-picker` **同形状、不同档**
+ *   ——这里是**工具条里的筛选**：11px 字 + 小一圈（24px），允许换行（列表栏窄时 chips 折行）；
+ *   `.theme-picker` 是**设置项**：13px 字 + `--ctl-h`(30)。两档的分界是"它是设置还是筛选"，
+ *   见 D198 的说明（`ui-style.md` §2.1.1）。
  */
 .stage-chips {
   display: flex;
