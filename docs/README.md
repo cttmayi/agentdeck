@@ -43,6 +43,7 @@
 | [`./srs/requirements.md`](./srs/requirements.md) | **需求说明书（SRS）** —— 定位、目标、非目标、场景、功能需求、不变量、状态机、验收标准、里程碑、决策记录 | v2.25 |
 | [`./design/architecture.md`](./design/architecture.md) | **架构文档（当前实现）** —— 运行时拓扑、依赖方向、八个包与五个 app 的结构、完整路由表、存储布局、扩展点、不变量→强制点、代码索引与测试对照。**结论都指到具体文件** | — |
 | [`./design/design.md`](./design/design.md) | **设计文档** —— 总体架构、包结构、存储端口、数据模型、接口、状态机、Verdict schema、本地 Daemon、Claude 适配层、审核流水线、动作与审计、远端能力与插件系统、安全边界。**2026-09 的第一句话三块组装见 §15.33** | v2.8 |
+| [`./design/agent-key-by-name.md`](./design/agent-key-by-name.md) | **智能体目录改用名字（方案 D，定稿）** —— 目录名 = 名字（slug）给人看、`agent.json` 里的 `id` 仍是身份；三种用途三套规矩（存=id / 查=名字+工作区 / 显示=快照）、slug 与同名冲突规则、索引自愈、改名事务、迁移、判据，以及**明确不做**的六件事与理由 | 定稿 |
 | [`./design/storage-layout.md`](./design/storage-layout.md) | **落盘格式（存储地图）** —— 五个根（数据目录 / 安装技能 / 提炼技能 / 语音 / 工作目录）各自放什么、**「一个实体 = 一个目录」的形状**（`agent.json` 不含指令、正文在 `instructions.md`、权威唯一）、记忆的权威与镜像、**编排的现状与目录化目标**、run 消息流、集合白名单与历史残留、写盘与迁移纪律、谁钉着这些形状 | — |
 | [`./runtime/pipeline.md`](./runtime/pipeline.md) | **一次 run 的完整流程**（⚠️ 2026-11 D125 之后只剩"执行"这一种 run，"审核"那几节已标过期）—— 参考手册：受理 → 准备 → 命令行 → 输入 → 收尾；失败原因码、去哪儿看全过程、已知的坑 | — |
 | [`./reference/skills.md`](./reference/skills.md) | **Skill 参考手册** —— 一个 skill 由什么构成、来源（本机目录 / GitHub / 推荐清单；界面另有「本地清单」「从本地安装」两个**入口**）、**装进来正文与支持文件落成真文件（`~/.agentdeck/skills/<slug>/`，磁盘为准）而 `log/skill.jsonl` 只留索引**（**没有例外**）、注入到工作目录的哪、frontmatter 会被怎么改写、限额与常见坑 | — |
