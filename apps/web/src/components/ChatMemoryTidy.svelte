@@ -580,7 +580,8 @@
     background: var(--surface);
   }
   .tidy-text:focus {
-    outline: none;
+    /* D202：原来这里写了 `outline: none` ⇒ 这个输入框没有焦点环（全站唯一几处之一）。
+       环由全局 `:focus-visible` 给，这里只保留边框变色。 */
     border-color: var(--accent);
   }
   /* 出处：**一行**，超出省略（全文在 title 里） */

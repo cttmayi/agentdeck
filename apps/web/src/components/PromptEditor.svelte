@@ -312,6 +312,13 @@
     position: relative;
     flex: 1;
     min-width: 0;
+    /* D202：里层 textarea 是透明文字叠在高亮层上（见 `.pe-textarea`），环画在它身上会横跨
+       在代码上 ⇒ 有焦点时环画在这块外层（与 `CodeEditor` 同一个做法）。 */
+    border-radius: var(--radius-sm);
+  }
+  .pe-code:focus-within {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
   }
   .pe-hl {
     position: absolute;

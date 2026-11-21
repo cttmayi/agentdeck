@@ -409,6 +409,18 @@ hr {
 ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
 ::-webkit-scrollbar-track { background: transparent; }
 
+/**
+ * ★★ D202：**键盘焦点全站只有一道环**（2px accent + 1px offset）。
+ *
+ * 量出来的现状（真按 Tab 走 22 个停靠点）：按钮都有环，**`input` / `textarea` 一个都没有**
+ * ——它们的规则写的是 `outline: none; border-color: var(--accent)`，只换了个 1px 边框色。
+ * 于是同一个页面里，键盘用户看到的焦点提示有两种长相：按钮一道环、输入框一条细边。
+ * 现在输入框也上环（边框色照旧变 accent，作为第二重提示）。
+ *
+ * ⚠️ `outline: none` 只允许出现在"焦点提示由外层承担"的地方（例如 `CodeEditor`
+ * 那层透明 textarea 叠在彩色代码上，环画在外层 `.editor` 上）——这种地方必须在
+ * `tests/ui-style.test.ts` 的登记表里写明理由。
+ */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
@@ -2193,7 +2205,8 @@ textarea:hover { border-color: var(--text-faint); }
 
 input:focus,
 textarea:focus {
-  outline: none;
+  /* D202：这里原来写 `outline: none`，于是输入框是全站唯一没有焦点环的控件。
+     现在保留全局的 2px 环，边框色同时变 accent（第二重提示）。 */
   border-color: var(--accent);
 }
 

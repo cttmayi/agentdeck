@@ -220,6 +220,98 @@
     }
 
       /**
+       * ★★ D202：**每个可聚焦元素在 `:focus-visible` 下都必须落到一条带 outline 的规则**。
+       *
+       * 为什么不用"真的聚焦再量"：探针里的 `element.focus()` 是**程序聚焦**，Chrome 不会
+       * 让它匹配 `:focus-visible`（模态判定要真实的键盘事件）——第一版就是这样量到"按钮全部
+       * 没有焦点环"的假结果。所以这里改成从 **CSSOM** 里查：所有选择器含 `:focus` 的规则，
+       * 把伪类剥掉后看这个元素是否命中；命中且最后一条（特异性的近似）把 outline 设成 none
+       * 的，算"环被吃掉"。
+       */
+      function sweepFocus(label) {
+        const doc = d()
+        const acc = facts['focus.rings'] ?? { pages: [], ringRules: 0, eaten: [], checked: 0 }
+        const focusRules = []
+        for (const sheet of doc.styleSheets) {
+          let rules
+          try {
+            rules = sheet.cssRules
+          } catch {
+            continue
+          }
+          for (const rule of rules) {
+            if (!rule.selectorText || !/:focus/.test(rule.selectorText)) continue
+            const cssText = rule.style.cssText
+            // 三种情况必须分开：给了环 / **明确**吃掉（outline: none 或 0）/ 压根没提 outline。
+            // 第三种（比如 `input:focus { border-color: accent }`）不该参与比较——它没有覆盖掉任何东西，
+            // 第一版把"命中但没给环"当成吃掉 ⇒ 输入框报了假红。
+            const mentions = /outline\s*:/.test(cssText)
+            const kills = /outline\s*:\s*(none|0\b|0px)/.test(cssText)
+            focusRules.push({
+              sel: rule.selectorText,
+              hasRing: mentions && !kills,
+              kills,
+              relevant: mentions,
+            })
+          }
+        }
+        acc.ringRules = focusRules.length
+        const focusable = [
+          ...doc.querySelectorAll(
+            'button, input:not([type=hidden]), select, textarea, a[href], summary, [tabindex]:not([tabindex="-1"])',
+          ),
+        ].filter((el) => {
+          const st = f.contentWindow.getComputedStyle(el)
+          return el.getBoundingClientRect().height > 0 && st.display !== 'none' && !el.disabled
+        })
+        const spec = (sel) => {
+          const ids = (sel.match(/#[\w-]+/g) ?? []).length
+          const cls = (sel.match(/\.[\w-]+|:\w[\w-]*|\[[^\]]*\]/g) ?? []).length
+          const tag = (sel.match(/(^|[\s>+~,(])([a-zA-Z][\w-]*)/g) ?? []).length
+          return ids * 10000 + cls * 100 + tag
+        }
+        for (const el of focusable) {
+          acc.checked += 1
+          /**
+           * ⚠️ 这里要模拟**一点点层叠**：只问"有没有某条规则给了 outline"会被蒙过去——
+           *   变异测试里挂在文件末尾的 `input:focus { outline: none }` 特异性比全局
+           *   `:focus-visible` 高，真实情况下环确实被吃掉，而"只要有一条给环就算有"会判它通过。
+           * 所以：在命中这个元素的规则里取**特异最高（同特异取靠后）**的那条，看它把 outline 设成了什么。
+           */
+          let best = null
+          for (const [i, r] of focusRules.entries()) {
+            for (const part of r.sel.split(',')) {
+              const base = part.replace(/:focus(-visible|\-within)?/g, '').trim()
+              // 全局那条 `:focus-visible` 去掉伪类后是空选择器（= 匹配所有元素）；空 ⇒ 命中一切
+              let hit = base === ''
+              if (!hit) {
+                try {
+                  hit = el.matches(base) || el.closest(base) !== null
+                } catch {
+                  hit = false
+                }
+              }
+              if (!hit || !r.relevant) continue
+              const cand = { spec: spec(part), order: i, hasRing: r.hasRing }
+              if (best === null || cand.spec > best.spec || (cand.spec === best.spec && cand.order > best.order)) {
+                best = cand
+              }
+            }
+          }
+          if (best !== null && best.hasRing) continue
+          const cls =
+            String(el.className || el.tagName)
+              .split(/\s+/)
+              .filter((c) => c !== '' && !c.startsWith('svelte-'))
+              .slice(0, 2)
+              .join('.') || el.tagName
+          acc.eaten.push(`${label}:${cls}`)
+        }
+        acc.pages.push(label)
+        facts['focus.rings'] = acc
+      }
+
+      /**
        * ★★ D201：**圆角只有五个值**（0 / 4 / 6 / 8 / 12 / 999），外加 `50%`（圆）。
        *
        * 令牌的名字原来还是反的（6px 叫 `--radius-xs`、4px 叫 `--radius-sm`），改的只是名字、
@@ -2111,6 +2203,7 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
         sweepCtl('任务页')
         sweepGap('任务页')
         sweepRadius('任务页')
+        sweepFocus('任务页')
         facts['tasks.rowHeights'] = need('各行高度', () =>
           rows.map((r) => Math.round(r.getBoundingClientRect().height)),
         )
@@ -2902,6 +2995,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         sweepCtl('技能页')
         sweepGap('技能页')
         sweepRadius('技能页')
+        sweepFocus('技能页')
         facts['skills.title'] = need('技能页标题', () => text(d().querySelector('.page-name')))
         // ⚠️ 两代老结构都不该再存在，各自是**不同**的一课：
         //   · `.install-panel`（最早那版"插在页头和列表之间的正文面板"）——它
@@ -6001,6 +6095,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           sweepCtl('设置页')
           sweepGap('设置页')
           sweepRadius('设置页')
+          sweepFocus('设置页')
           facts['headings.levels'] = (() => {
             const px = (el) => (el ? Math.round(parseFloat(cs(el).fontSize)) : null)
             const h1 = d().querySelector('.topbar .page-name')

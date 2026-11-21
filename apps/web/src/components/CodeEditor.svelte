@@ -107,6 +107,11 @@
     line-height: 1.5;
   }
   .editor:focus-within {
+    /* D202：里面那层 textarea 是**透明文字**叠在彩色代码上的（见 `.gutter` 与 `.input`
+       的注释），给它画 2px 环会横跨在代码上；所以环画在外层这块上（`outline-offset: -1px`
+       让它贴着内缘，不撑破布局）。里层的 `outline: none` 就是这么来的。 */
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
     border-color: var(--accent);
   }
   /* 行号列：与正文同色系的淡字，不抢视线 */

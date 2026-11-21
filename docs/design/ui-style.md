@@ -213,7 +213,40 @@
 
 判据：探针 `grid.pairField` —— 新建智能体表单的卡片必须**两等宽列 + gap 12 + 元素上真的带 `.pair-field`**（不是自己又写了一条栅格）。
 
-##### 2.1.1.4 圆角只有五个值 + 圆（D201）
+##### 2.1.2.1 键盘焦点全站只有一道环（D202）
+
+**2px accent + 1px offset，所有能被 Tab 停到的东西都一样。**
+
+量出来的现状（真按 Tab 走 22 个停靠点 × 3 页，`Input.dispatchKeyEvent` 发真的键盘事件）：
+按钮都有环，**`input` / `textarea` 一个都没有**——它们的规则写的是
+`outline: none; border-color: var(--accent)`，只把 1px 边框换了个色。于是同一个页面里键盘用户
+看到两种焦点提示：按钮一道环、输入框一条细边。
+
+现在：输入框也上环（边框色照旧变 accent，作为第二重提示）。**`outline: none` 只在"焦点提示由外层承担"的地方允许**：
+
+| 地方 | 为什么 |
+|---|---|
+| `CodeEditor` 里层 textarea | 那是**透明文字**叠在彩色代码上的（`color: transparent` + `caret-color`），给它画 2px 环会横跨在代码上 ⇒ 环画在外层 `.editor:focus-within`（`outline-offset: -1px` 贴内缘） |
+| `PromptEditor` 的 `.pe-textarea` | 同一个做法：环画在 `.pe-code:focus-within` |
+
+判据两条：
+1. **源码**（`tests/ui-style.test.ts`）：全局 `:focus-visible { outline: 2px solid var(--accent) }` 必须在；
+   任何 `<style>` 里的 `outline: none` 必须进登记表并写明理由。变异验证：随便加一条 `outline: none` 当场红。
+2. **探针**（`focus.rings`）：三页扫所有可聚焦元素，**按"命中的 :focus 规则里特异最高的那条"**判定
+   它最后把 outline 设成了什么（只说"有某条规则给环就算有"会被蒙——见下面那条坑）。
+   实测 `可聚焦 84 个 · 焦点规则 10 条`，零处被吃。变异验证：尾部挂一条 `input:focus { outline: none }`
+   ⇒ 当场红并点出 4 个 `INPUT`。
+
+> ⚠️ **三个踩过的坑**，都记在代码注释里：
+> 1. **程序聚焦量不出 `:focus-visible`**：第一版用 `el.focus()` 量，结论是"按钮全都没有焦点环"——
+>    假红。Chrome 的 `:focus-visible` 要真实的键盘事件才匹配（`focus({focusVisible:true})` 也不行）。
+>    真按 Tab 之后：66 个停靠点全部有环。
+> 2. **全局规则去掉伪类后是空选择器**：`:focus-visible` 剥掉伪类就什么都不剩，第一版把它 filter 掉了，
+>    于是"输入框只命中 `input:focus`"被判成没环——又一个假红。空 ⇒ 命中一切。
+> 3. **"没写 outline" ≠ "把环吃掉了"**：`input:focus { border-color: … }` 压根没提 outline，
+>    不该参与比较。只有**明确**写了 `outline: none/0` 的规则才算覆盖。分不清这三件事就测不准。
+
+#### 2.1.1.4 圆角只有五个值 + 圆（D201）
 
 | 令牌 | 值 | 用在哪 |
 |---|---|---|

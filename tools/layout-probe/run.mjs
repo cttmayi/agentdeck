@@ -4607,6 +4607,20 @@ const CHECKS = [
       (v.unexpected.length ? ` · ✗ 没归类 ${v.unexpected.join(' ')}` : ''),
   },
   {
+    key: 'focus.rings',
+    /**
+     * ★★ D202：**键盘焦点全站只有一道环**（2px accent）。三页扫所有可聚焦元素：
+     * 命中 `:focus` 规则但没有一条给 outline 的，算"环被吃掉"。
+     * ⚠️ 不能靠"程序聚焦再量"——`element.focus()` 不触发 `:focus-visible`，第一版就这么量出了假结果。
+     */
+    label: '★★ 每个可聚焦元素都有焦点环（没有一处只换边框色）',
+    ok: (v) =>
+      !!v && Array.isArray(v.eaten) && v.eaten.length === 0 && v.ringRules > 0 && v.checked >= 10,
+    show: (v) =>
+      `${v.pages.join(' ')} · 可聚焦 ${String(v.checked)} 个 · 焦点规则 ${String(v.ringRules)} 条` +
+      (v.eaten.length ? ` · ✗ 没环 ${v.eaten.slice(0, 6).join(' ')}` : ''),
+  },
+  {
     key: 'radius.values',
     /**
      * ★★ D201：**圆角只有五个值 + 圆**：0 / 4 / 6 / 8 / 12 / 999 / 50%。

@@ -394,6 +394,54 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
   })
 
   /**
+   * ★★★ D202：**键盘焦点全站只有一道环**（2px accent）。任何 `outline: none` 都必须登记理由。
+   *
+   * 量出来的现状（真按 Tab 走 22 个停靠点 × 3 页）：按钮都有环，**`input` / `textarea` 一个都没有**
+   *   ——它们的规则写的是 `outline: none; border-color: var(--accent)`，只把 1px 边框变了个色。
+   *   同一个页面里键盘用户看到两种焦点提示：按钮一道环、输入框一条细边。
+   * 现在：全局 `:focus-visible` 的环覆盖所有控件；少数"焦点提示由外层承担"的地方
+   *   （透明 textarea 叠在彩色代码上：`CodeEditor` / `PromptEditor`）把环画在外层，
+   *   里层 `outline: none` 进登记表并写明理由。
+   */
+  test('★★★ 焦点环只有一道（2px accent）；`outline: none` 必须在登记表里', async () => {
+    const files = await load()
+    const css = files.get('packages/ui/src/styles/app.css') ?? ''
+    // 全局必须有这道环
+    assert.match(
+      css,
+      /:focus-visible \{\s*outline: 2px solid var\(--accent\);/,
+      'app.css 里那条全局 `:focus-visible { outline: 2px solid var(--accent) }` 不见了——键盘焦点就没提示了',
+    )
+    /** 登记过的 `outline: none`：文件 → 一句"为什么焦点提示由外层承担" */
+    const ALLOW: Array<[string, string]> = [
+      [
+        'apps/web/src/components/CodeEditor.svelte',
+        '里层 textarea 是透明文字叠在彩色代码上，环画在外层 `.editor:focus-within`（那里有 2px 环），画在里层会横跨代码',
+      ],
+      [
+        'apps/web/src/components/PromptEditor.svelte',
+        '同上：`.pe-textarea` 透明文字叠在高亮层上，环画在外层 `.pe-code:focus-within`',
+      ],
+    ]
+    const offenders: string[] = []
+    for (const [rel, text] of files) {
+      if (!rel.endsWith('.svelte') && !rel.endsWith('.css')) continue
+      const at = rel.endsWith('.svelte') ? text.indexOf('<style') : 0
+      if (at < 0) continue
+      const style = text.slice(at).replace(/\/\*[^]*?\*\//g, '')
+      if (!/outline:\s*none/.test(style)) continue
+      if (ALLOW.some(([f]) => f === rel)) continue
+      offenders.push(rel)
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      '这些地方把焦点环吃掉了（`outline: none`）：要么删掉它，要么把"环由外层承担"登记进 ALLOW：\n' +
+        offenders.join('\n'),
+    )
+  })
+
+  /**
    * ★★★ D201：**圆角令牌"名字里的序"必须等于"数值的序"**，且组件里不许写裸 px 圆角。
    *
    * 查下来的一处真错：6px 那个叫 `--radius-xs`、4px 那个叫 `--radius-sm`——**名字是反的**
