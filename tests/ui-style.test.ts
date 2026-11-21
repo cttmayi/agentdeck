@@ -394,6 +394,90 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
   })
 
   /**
+   * ★★★ D205：**对比度是量出来的，不是"看着还行"**（WCAG 相对亮度，两套主题都算）。
+   *
+   * 为什么需要这条：主题切换那条判据只保证"令牌跟着变"，不保证"变得够不够"。
+   * 实测出来的坑：`--text-faint` 在亮色白面上只有 **3.10:1**、画在侧栏轨道上只有 **2.49:1**
+   * （比"大字号"门槛 3:1 还低）；状态色当文字用在白面上是 good 3.43 / warn 3.64 / bad 4.38；
+   * 暗色里 `--accent` 当底 + `--on-accent` 白字只有 **2.49:1**（而 `--accent-dim` 是 6.66:1）。
+   *
+   * 分两档判：
+   *   ① **必须 ≥4.5**（正文 / dim / on-accent 对实心底）——达不到就是真缺陷，改配置或改用法；
+   *   ② **登记在案的 AA 缺口**（faint 对 surface、状态色当文字用）——带数值棘轮：只许变好，
+   *      变差就红。这样"想再调低一点"必须先在表里改数字，改动是可见的。
+   */
+  test('★★★ 对比度：正文与 dim 必须 ≥4.5；faint 与状态色的 AA 缺口带数值棘轮', async () => {
+    const files = await load()
+    const css = files.get('packages/ui/src/styles/app.css') ?? ''
+    // ⚠️ 别用 `indexOf` 找暗色块：文件头注释里就提到过 `:root[data-theme='dark']` 这个字符串，
+    //    于是 `indexOf` 会把"亮色块"切成空的（踩过）。只认**行首的规则**。
+    const darkAt = css.search(/\n:root\[data-theme='dark'\]\s*\{/)
+    assert.ok(darkAt > 0, "app.css 里找不到暗色主题块（`:root[data-theme='dark'] {`）")
+    const lightBlock = css.slice(0, darkAt)
+    const darkBlock = css.slice(darkAt)
+    /**
+     * 取令牌值：先在本主题块里找，找不到再回落到全文件（暗色块只"覆盖"它要改的那些，
+     * `--on-accent` 这类两套主题同值的只写在 `:root` 里）。
+     */
+    const tok = (block: string, name: string): string => {
+      const re = new RegExp(`${name}:\\s*(#[0-9a-fA-F]{3,8})`)
+      const m = block.match(re) ?? css.match(re)
+      assert.ok(m, `app.css 里没有 ${name}`)
+      return String(m[1])
+    }
+    const chan = (v: number): number => {
+      const c = v / 255
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+    }
+    const lum = (hex: string): number => {
+      let h = hex.replace('#', '')
+      if (h.length === 3) h = [...h].map((c) => c + c).join('')
+      const n = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16))
+      const [r, g, b] = [n[0] ?? 0, n[1] ?? 0, n[2] ?? 0]
+      return 0.2126 * chan(r) + 0.7152 * chan(g) + 0.0722 * chan(b)
+    }
+    const ratio = (a: string, b: string): number => {
+      const la = lum(a)
+      const lb = lum(b)
+      return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
+    }
+
+    // ① 必须达标的一组（主题名, 前景, 背景）
+    const MUST: Array<[string, string, string, number]> = []
+    for (const [theme, block] of [['亮', lightBlock], ['暗', darkBlock]] as const) {
+      MUST.push(
+        [`${theme} 正文 / surface`, tok(block, '--text'), tok(block, '--surface'), 4.5],
+        [`${theme} 正文 / bg`, tok(block, '--text'), tok(block, '--bg'), 4.5],
+        [`${theme} dim / surface`, tok(block, '--text-dim'), tok(block, '--surface'), 4.5],
+        [`${theme} dim / rail`, tok(block, '--text-dim'), tok(block, '--rail'), 4.5],
+        [`${theme} on-accent / accent-dim`, tok(block, '--on-accent'), tok(block, '--accent-dim'), 4.5],
+      )
+    }
+    const broken = MUST.filter(([, fg, bg, need]) => ratio(fg, bg) < need).map(
+      ([name, fg, bg, need]) => `${name}：${String(Math.round(ratio(fg, bg) * 100) / 100)}:1（需 ${String(need)}）`,
+    )
+    assert.deepEqual(broken, [], `这些配色对低于 WCAG AA（4.5:1）：\n${broken.join('\n')}`)
+
+    /**
+     * ② 登记在案的 AA 缺口（**数值棘轮**）：只许变好。改小一个数就得先改这张表，
+     *    于是"又调低一点"这件事在 diff 里是可见的。
+     */
+    const FLOOR: Array<[string, string, string, number]> = [
+      ['亮 faint / surface', tok(lightBlock, '--text-faint'), tok(lightBlock, '--surface'), 3.1],
+      ['亮 faint / rail', tok(lightBlock, '--text-faint'), tok(lightBlock, '--rail'), 2.49],
+      ['亮 good 当文字 / surface', tok(lightBlock, '--good'), tok(lightBlock, '--surface'), 3.43],
+      ['亮 warn 当文字 / surface', tok(lightBlock, '--warn'), tok(lightBlock, '--surface'), 3.64],
+      ['亮 bad 当文字 / surface', tok(lightBlock, '--bad'), tok(lightBlock, '--surface'), 4.38],
+      ['暗 faint / surface', tok(darkBlock, '--text-faint'), tok(darkBlock, '--surface'), 3.84],
+    ]
+    const worse = FLOOR.filter(([, fg, bg, floor]) => ratio(fg, bg) < floor - 0.01).map(
+      ([name, fg, bg, floor]) =>
+        `${name}：${String(Math.round(ratio(fg, bg) * 100) / 100)}:1，低于登记的下限 ${String(floor)}`,
+    )
+    assert.deepEqual(worse, [], `这些对比度比登记的下限更差了（棘轮不许往回退）：\n${worse.join('\n')}`)
+  })
+
+  /**
    * ★★★ D204：**组件里不许出现裸色值**，`var()` 也不许带颜色兜底，引用的令牌必须真的声明过。
    *
    * 查出来的三件事：

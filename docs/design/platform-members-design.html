@@ -906,10 +906,16 @@ hr {
   white-space: nowrap;
 }
 
+/*
+ * ★★ D205：**轨道上的次要文字用 `--text-dim`，不是 `--text-faint`**。
+ * 侧栏底色 `--rail` 比白面深（亮色 #e2e7ee），`--text-faint` 画在上面只有 **2.49:1**——
+ * 低于 AA 的 4.5，也比"大字号"门槛 3:1 还低。换 `--text-dim` 后是 **4.83:1**（暗色 8.46:1）。
+ * 这不是换颜色，是**用错了一档**：faint 属于"在白面上退到很后面"的那种字。
+ */
 .nav-hint {
   display: block;
   font-size: var(--fs-xs);
-  color: var(--text-faint);
+  color: var(--text-dim);
   margin-top: 1px;
   /* ★ 2026-11：侧栏减半后宽度变窄——辅助文字**不许换行**，超了就省略。
      （文案本身也已精简到能放下，这一行是兜底，不是让文案偷懒的借口。） */
@@ -933,6 +939,8 @@ hr {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* D205：侧栏脚部同样在 `--rail` 底上 ⇒ 提高一档（`.faint` 类名不动，只改这里的字色）。 */
+.sidebar-foot .faint { color: var(--text-dim); }
 
 /* 侧栏底部的环境状态：一眼看出"这台机器的运行环境有没有问题" */
 .env {
