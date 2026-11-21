@@ -15,6 +15,7 @@ import type { TextCatalog } from '../text.ts'
  */
 export const commonText = {
   'common.save': { zh: '保存', en: 'Save' },
+  'common.edit': { zh: '编辑', en: 'Edit' },
   // 2026-11：PromptEditor 大编辑器（入口按钮 + 弹层内部）
   'editor.expand': { zh: '展开编辑', en: 'Expand editor' },
   'editor.count': { zh: '{n} 字', en: '{n} chars' },

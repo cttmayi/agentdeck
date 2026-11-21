@@ -12,13 +12,13 @@ import { CREATE_HASH, VIEWS, hashFor, parseHash } from './route.ts'
  */
 describe('parseHash', () => {
   it('★ `#/tasks/new` 是建任务那一栏的正规地址', () => {
-    assert.deepEqual(parseHash('#/tasks/new'), { view: 'tasks', creating: true, crystallize: null, workflowRun: null })
+    assert.deepEqual(parseHash('#/tasks/new'), { view: 'tasks', creating: true, crystallize: null, workflowRun: null, wfAgent: null })
   })
 
   it('★★ `#/new` 是老地址，仍然直达同一个状态（书签不作废）', () => {
     // D58 之前「新建任务」是一整页、侧栏一项，`#/new` 被写进了文档与探针。
     // 改地址时把它丢掉的表现是"那条链接落到列表上"，而没有人会收到任何提示。
-    assert.deepEqual(parseHash('#/new'), { view: 'tasks', creating: true, crystallize: null, workflowRun: null })
+    assert.deepEqual(parseHash('#/new'), { view: 'tasks', creating: true, crystallize: null, workflowRun: null, wfAgent: null })
   })
 
   it('★ 两个地址指向**同一个**状态（不是两个视图）', () => {
@@ -26,7 +26,7 @@ describe('parseHash', () => {
   })
 
   it('`#/tasks` 只是任务页，不带建模式（否则"看"和"建"永远说不清）', () => {
-    assert.deepEqual(parseHash('#/tasks'), { view: 'tasks', creating: false, crystallize: null, workflowRun: null })
+    assert.deepEqual(parseHash('#/tasks'), { view: 'tasks', creating: false, crystallize: null, workflowRun: null, wfAgent: null })
   })
 
   it('★ 沉淀页：`#/crystallize/<runId>` 落在沉淀视图、带 runId（三轮的正规地址）', () => {
@@ -35,6 +35,7 @@ describe('parseHash', () => {
       creating: false,
       crystallize: { runId: '01M57WHC' },
       workflowRun: null,
+      wfAgent: null,
     })
   })
 
@@ -44,12 +45,14 @@ describe('parseHash', () => {
       creating: false,
       crystallize: { runId: '01M57WHC' },
       workflowRun: null,
+      wfAgent: null,
     })
     assert.deepEqual(parseHash('#/tasks/crystallize/01M57WHC'), {
       view: 'crystallize',
       creating: false,
       crystallize: { runId: '01M57WHC' },
       workflowRun: null,
+      wfAgent: null,
     })
   })
 
@@ -59,12 +62,13 @@ describe('parseHash', () => {
       creating: false,
       crystallize: null,
       workflowRun: null,
+      wfAgent: null,
     })
   })
 
   it('★★ 未知地址回落「任务」（D58 改的方向：合并之后任务才是主场）', () => {
     for (const bogus of ['', '#', '#/', '#/nope', '#/newtask', '#/tasks/board']) {
-      assert.deepEqual(parseHash(bogus), { view: 'tasks', creating: false, crystallize: null, workflowRun: null }, bogus)
+      assert.deepEqual(parseHash(bogus), { view: 'tasks', creating: false, crystallize: null, workflowRun: null, wfAgent: null }, bogus)
     }
   })
 
@@ -81,13 +85,14 @@ describe('hashFor', () => {
   it('★ 与 parseHash 是一对：逐项来回都还原得回来', () => {
     for (const v of VIEWS) {
       const round = parseHash(hashFor(v))
-      assert.deepEqual(round, { view: v, creating: false, crystallize: null, workflowRun: null }, v)
+      assert.deepEqual(round, { view: v, creating: false, crystallize: null, workflowRun: null, wfAgent: null }, v)
     }
     assert.deepEqual(parseHash(hashFor('tasks', { creating: true })), {
       view: 'tasks',
       creating: true,
       crystallize: null,
       workflowRun: null,
+      wfAgent: null,
     })
   })
 
@@ -98,6 +103,7 @@ describe('hashFor', () => {
       creating: false,
       crystallize: { runId: '01M57WHC' },
       workflowRun: null,
+      wfAgent: null,
     })
   })
 
@@ -116,6 +122,7 @@ describe('hashFor', () => {
       creating: false,
       crystallize: null,
       workflowRun: { runId: '01M57WHC' },
+      wfAgent: null,
     })
   })
 
@@ -137,6 +144,7 @@ describe('hashFor', () => {
       creating: false,
       crystallize: null,
       workflowRun: { runId: '01M57WHC' },
+      wfAgent: null,
     })
     // 正规地址只有一种形态：`#/workflows/run/<id>`
     assert.equal(hashFor('workflows', { workflowRun: { runId: '01M57WHC' } }), '#/workflows/run/01M57WHC')
@@ -150,6 +158,7 @@ describe('hashFor', () => {
       creating: false,
       crystallize: null,
       workflowRun: null,
+      wfAgent: null,
     })
   })
 

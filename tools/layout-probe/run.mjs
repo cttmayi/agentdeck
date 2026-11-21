@@ -2401,6 +2401,75 @@ const CHECKS = [
   },
   {
     view: '编排',
+    key: 'workflows.agentsSection',
+    label:
+      '★★★ 编排详情右栏有「本编排的智能体」那一节：计数与行名来自接口，'
+      + '**与智能体页同名的那条带「遮蔽同名」徽标**（代码里写这个名字时用的是它），且有「新建智能体」入口',
+    ok: (v) =>
+      !!v &&
+      v['段'] === true &&
+      v['计数'] === '2' &&
+      Array.isArray(v['行']) &&
+      v['行'].includes('探针写作员') &&
+      v['行'].includes('短名') &&
+      v['遮蔽徽标'] === 1 &&
+      v['新建入口'] === true,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '编排',
+    key: 'workflows.agentsEditJump',
+    label:
+      '★★★ 点「编辑」⇒ **跳过去**（地址变成 `#/workflows/agents/<编排id>/<id>`，不是就地展开）：'
+      + '编辑页有名字/指令的值、入口**锁死只有「编排」**、没改动时「保存」置灰',
+    ok: (v) =>
+      !!v &&
+      v['打开'] === true &&
+      v['地址变了'] === true &&
+      v['地址'].includes('/agents/') &&
+      v['名字'] !== '' &&
+      v['指令'] !== '' &&
+      v['入口数'] === 1 &&
+      v['入口全是编排'] === true &&
+      v['入口文案'].includes('编排') &&
+      v['保存置灰'] === true &&
+      v['有删除'] === true &&
+      v['独有技能框'] === true,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '编排',
+    key: 'workflows.agentsBackReturns',
+    label:
+      '★★★ 点「← 返回编排」⇒ 回到**同一条**编排的详情（右栏还是它、左栏那一行还是选中态）——'
+      + '不是"回到列表第一条"',
+    ok: (v) =>
+      !!v &&
+      v['回到详情'] === true &&
+      v['地址回到编排'] === true &&
+      v['左栏选中'] !== '' &&
+      v['左栏选中'] === v['右栏标题'],
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '编排',
+    key: 'workflows.agentsDupError',
+    label:
+      '★★ 本编排内重名 ⇒ **服务端的原话**出现在编辑页（不跳走、不改写在别处）',
+    ok: (v) => !!v && v['出错了'] === true && typeof v['原话'] === 'string' && v['原话'].includes('已经有'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '编排',
+    key: 'workflows.agentsDeleteNamesCode',
+    label:
+      '★★ 删除确认框在**代码里还在用这个名字**时多说一句（"代码里还在用它——写这个名字的地方会失效"），'
+      + '扫不到就不说',
+    ok: (v) => !!v && v['弹框'] === true && v['点名了代码'] === true,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '编排',
     key: 'workflows.deleteDialog',
     label:
       '★★★ 删除弹的是**平台自己的居中对话框**（不是 `window.confirm`），而且点「取消」真的不删——'

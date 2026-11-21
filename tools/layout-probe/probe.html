@@ -4552,6 +4552,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         })()
 
         // ⑥ 造一条编排（真接口）→ 行结构（两行、单行省略、行高与其它页同一档）
+        facts['workflows.fixtureId'] = null
         facts['workflows.fixtureCreated'] = await f.contentWindow
           .fetch('/api/workflows', {
             method: 'POST',
@@ -4563,7 +4564,11 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               code: "await flow([agent('短名')], '{{task}}')",
             }),
           })
-          .then((r) => r.ok)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((body) => {
+            facts['workflows.fixtureId'] = body?.workflow?.id ?? null
+            return body !== null
+          })
           .catch(() => false)
         if (!facts['workflows.fixtureCreated']) {
           errors.push('造编排夹具失败（POST /api/workflows）——下面几条会量不到')
@@ -4647,6 +4652,156 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             有代码: (area?.value ?? '').length > 0,
             动作: labels,
           }
+        })()
+
+        /*
+         * ⑦b 编排内建智能体（D237）：右栏那一节 + 点「编辑」跳到独立页、返回回同一条编排。
+         *
+         * 夹具：真接口造两条内建智能体——`探针写作员` 与 **`短名`**（探针的自建智能体
+         * 也叫这个名 ⇒ 必须出现「遮蔽同名」徽标；工作流代码里正好引用了 `'短名'`，
+         * 所以删它时确认框要多说一句"代码里还在用它"）。
+         */
+        facts['workflows.agentsSection'] = await (async () => {
+          const wfId = facts['workflows.fixtureId'] ?? null
+          if (wfId === null) return null
+          const mk = (name) =>
+            f.contentWindow.fetch(`/api/workflows/${wfId}/agents`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ name, instructions: '探针夹具', skillIds: [] }),
+            })
+          await mk('探针写作员')
+          await mk('短名')
+          // 页面 store 是启动时拉的：点顶栏「刷新」让它重读（与 §⑥ 同一招）
+          const ref = [...d().querySelectorAll('.topbar .page-actions button')].find(
+            (b) => (text(b) ?? '').trim() === '刷新',
+          )
+          if (ref) click(ref)
+          await wait(300)
+          /*
+           * ⚠️ 按**标题**挑那一行，不是 `.wf-row` 的第一个：这段之前还有别的段落
+           *   造过编排（「AI 生成…」那一族会采纳一条），列表按更新时间倒序，第一条
+           *   不一定是我们的夹具。挑错人 ⇒ 计数恒 0，看着像功能没做。
+           */
+          const pickRow = () =>
+            [...d().querySelectorAll('.list-pane .wf-row')].find(
+              (r) => (text(r.querySelector('.wf-title')) ?? '').trim() === '探针编排（页面规范）',
+            ) ?? null
+          const row = pickRow()
+          if (row) click(row.querySelector('.list-row-main') ?? row)
+          const there = await until(() => !!d().querySelector('[data-wf-agents]'), 60)
+          if (!there) return { 段: false }
+          const sec = d().querySelector('[data-wf-agents]')
+          return {
+            段: true,
+            计数: (text(sec.querySelector('[data-wf-agents-count]')) ?? '').trim(),
+            行: [...sec.querySelectorAll('[data-wf-agent]')].map((r) =>
+              (r.getAttribute('data-wf-agent') ?? '').trim(),
+            ),
+            遮蔽徽标: sec.querySelectorAll('[data-wf-agent] .badge.warn').length,
+            新建入口: !!sec.querySelector('[data-wf-agent-new]'),
+          }
+        })()
+
+        // ⑦c 点「编辑」⇒ **地址变了**（跳过去，不是就地展开）+ 编辑页的骨架
+        facts['workflows.agentsEditJump'] = await (async () => {
+          const sec = d().querySelector('[data-wf-agents]')
+          if (!sec) return null
+          const edit = [...sec.querySelectorAll('[data-wf-agent] button')].find(
+            (b) => (text(b) ?? '').trim() === '编辑',
+          )
+          if (!edit) return null
+          const hash0 = f.contentWindow.location.hash
+          click(edit)
+          const ok = await until(() => !!d().querySelector('[data-wf-agent-editor]'), 60)
+          // 名字与指令**有值**（不是一张空表单）；入口锁死只有「编排」；进编辑页时保存置灰
+          const ed = d().querySelector('[data-wf-agent-editor]')
+          const entryInputs = [...(ed?.querySelectorAll('[data-wf-agent-entries] input') ?? [])]
+          return {
+            打开: ok,
+            地址变了: f.contentWindow.location.hash !== hash0,
+            地址: f.contentWindow.location.hash,
+            标题: (text(ed?.querySelector('[data-wf-agent-title]')) ?? '').trim(),
+            名字: ed?.querySelector('[data-wf-agent-name]')?.value ?? '',
+            指令: (ed?.querySelector('textarea')?.value ?? '').slice(0, 4),
+            入口数: entryInputs.length,
+            入口全是编排: entryInputs.every((i) => i.checked && i.disabled),
+            入口文案: [...(ed?.querySelectorAll('[data-wf-agent-entries] span') ?? [])]
+              .map((x) => (text(x) ?? '').trim())
+              .filter((x) => x !== '')
+              .join(','),
+            保存置灰: ed?.querySelector('[data-wf-agent-save]')?.disabled ?? null,
+            有删除: !!ed?.querySelector('[data-wf-agent-delete]'),
+            独有技能框: !!ed?.querySelector('[data-wf-agent-skills]'),
+          }
+        })()
+
+        // ⑦d 返回 ⇒ **回到同一条编排**（右栏还是它、左栏那一行还是选中态）
+        facts['workflows.agentsBackReturns'] = await (async () => {
+          const back = d().querySelector('[data-wf-agent-back]')
+          if (!back) return null
+          click(back)
+          const ok = await until(() => !!d().querySelector('[data-wf-agents]'), 60)
+          if (!ok) return { 回到详情: false }
+          return {
+            回到详情: true,
+            地址回到编排: !f.contentWindow.location.hash.includes('/agents/'),
+            左栏选中: (text(d().querySelector('.list-pane .list-row.active .wf-title')) ?? '').trim(),
+            右栏标题: (text(d().querySelector('.detail-head h2')) ?? '').trim(),
+          }
+        })()
+
+        // ⑦e 本编排内重名 ⇒ 服务端原话出现在编辑页，且**不跳走**
+        facts['workflows.agentsDupError'] = await (async () => {
+          const sec = d().querySelector('[data-wf-agents]')
+          if (!sec) return null
+          // 挑「探针写作员」那条进去改名成「短名」（本编排里已有一条叫这个）
+          const row = [...sec.querySelectorAll('[data-wf-agent]')].find(
+            (r) => (r.getAttribute('data-wf-agent') ?? '').trim() === '探针写作员',
+          )
+          if (!row) return null
+          click([...row.querySelectorAll('button')].find((b) => (text(b) ?? '').trim() === '编辑'))
+          await until(() => !!d().querySelector('[data-wf-agent-editor]'), 60)
+          const input = d().querySelector('[data-wf-agent-name]')
+          if (!input) return null
+          // 走原生的 value setter + input 事件（Svelte 的 bind:value 才认）
+          const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+          setter.call(input, '短名')
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+          await wait(150)
+          const save = d().querySelector('[data-wf-agent-save]')
+          if (save) click(save)
+          const shown = await until(() => !!d().querySelector('[data-wf-agent-error]'), 80)
+          const msg = shown ? (text(d().querySelector('[data-wf-agent-error]')) ?? '').trim() : ''
+          // 收尾：点返回，把页面还给后面的段落（它们假设停在编排详情）
+          const back = d().querySelector('[data-wf-agent-back]')
+          if (back) click(back)
+          await until(() => !!d().querySelector('[data-wf-agents]'), 60)
+          return { 出错了: shown, 原话: msg, 没跳走: f.contentWindow.location.hash.includes('/agents/') === false ? null : true }
+        })()
+
+        // ⑦f 删除确认框：代码里还在用这个名字 ⇒ 多一句"会失效"
+        facts['workflows.agentsDeleteNamesCode'] = await (async () => {
+          const sec = d().querySelector('[data-wf-agents]')
+          if (!sec) return null
+          const row = [...sec.querySelectorAll('[data-wf-agent]')].find(
+            (r) => (r.getAttribute('data-wf-agent') ?? '').trim() === '短名',
+          )
+          if (!row) return null
+          click([...row.querySelectorAll('button')].find((b) => (text(b) ?? '').trim() === '编辑'))
+          await until(() => !!d().querySelector('[data-wf-agent-editor]'), 60)
+          const del = d().querySelector('[data-wf-agent-delete]')
+          if (!del) return null
+          click(del)
+          const shown = await until(() => !!d().querySelector('.modal .confirm-message'), 60)
+          const msg = shown ? (text(d().querySelector('.modal .confirm-message')) ?? '').trim() : ''
+          const cancel = d().querySelector('.modal .modal-foot button.btn--secondary')
+          if (cancel) click(cancel)
+          await until(() => !d().querySelector('.modal .confirm-message'), 40)
+          const back = d().querySelector('[data-wf-agent-back]')
+          if (back) click(back)
+          await until(() => !!d().querySelector('[data-wf-agents]'), 60)
+          return { 弹框: shown, 文案: msg, 点名了代码: msg.includes('代码里还在用它') }
         })()
 
         // ⑧ 删除 ⇒ **平台自己的居中对话框**（不是 window.confirm），取消不删

@@ -94,6 +94,14 @@ export interface Route {
    * 非空 = 主区在运行画面；空 = 定义页。与 crystallize 同构。
    */
   workflowRun: { runId: string } | null
+  /**
+   * 编排内建智能体的编辑页（2026-11，D237）：`#/workflows/agents/<编排id>/<智能体id|new>`。
+   *
+   * 使用者拍板："编辑的时候，可以类似设置那样，直接跳转过去，然后可以返回回来"。
+   * 所以它是**地址**而不是组件里的开关（与 `workflowRun` / `crystallize` 同构）：
+   * 刷新还在、地址能分享、返回一步回到同一条编排的详情。
+   */
+  wfAgent: { workflowId: string; agentId: string } | null
 }
 
 /** 沉淀页选中某条的正规地址形态：`crystallize/<runId>`。 */
@@ -108,6 +116,9 @@ const CRYSTALLIZE_RE = /^crystallize\/([0-9A-Za-z]+)$/
  */
 export const LEGACY_CRYSTALLIZE_RE = /^(chat|tasks)\/crystallize\/([0-9A-Za-z]+)$/
 
+/** 编排内建智能体的编辑页：`workflows/agents/<编排id>/<智能体id|new>`。 */
+const WF_AGENT_RE = /^workflows\/agents\/([0-9A-Za-z]+)\/([0-9A-Za-z]+|new)$/
+
 /** 旧地址：`#/workflow-runs/<runId>`（「编排任务」页删掉之前，那一页里点一条的地址）。 */
 export const LEGACY_WORKFLOW_RUN_RE = /^workflow-runs\/([0-9A-Za-z]+)$/
 
@@ -118,7 +129,24 @@ export function parseHash(hash: string): Route {
   // 编排运行画面子路由：先于普通视图匹配（`workflows/run/…` 不是 VIEWS 里的一项）。
   const wfRun = /^workflows\/run\/([0-9A-Za-z]+)$/.exec(raw)
   if (wfRun) {
-    return { view: 'workflows', creating: false, crystallize: null, workflowRun: { runId: wfRun[1]! } }
+    return {
+      view: 'workflows',
+      creating: false,
+      crystallize: null,
+      workflowRun: { runId: wfRun[1]! },
+      wfAgent: null,
+    }
+  }
+  // 编排内建智能体的编辑页：同样先于普通视图匹配（`workflows/agents/…` 不是 VIEWS 的一项）。
+  const wfAgent = WF_AGENT_RE.exec(raw)
+  if (wfAgent) {
+    return {
+      view: 'workflows',
+      creating: false,
+      crystallize: null,
+      workflowRun: null,
+      wfAgent: { workflowId: wfAgent[1]!, agentId: wfAgent[2]! },
+    }
   }
   /**
    * ⚠️ 2026-11（D132）：`#/workflow-runs/<runId>` 是「编排任务」页时代的地址。那一页
@@ -134,24 +162,41 @@ export function parseHash(hash: string): Route {
       creating: false,
       crystallize: null,
       workflowRun: { runId: wfRunLegacy[1]! },
+      wfAgent: null,
     }
   }
   const crystal = CRYSTALLIZE_RE.exec(raw)
   if (crystal) {
-    return { view: 'crystallize', creating: false, crystallize: { runId: crystal[1]! }, workflowRun: null }
+    return {
+      view: 'crystallize',
+      creating: false,
+      crystallize: { runId: crystal[1]! },
+      workflowRun: null,
+      wfAgent: null,
+    }
   }
   // 旧子路由（聊天/任务右栏的流程页）：同样解析成沉淀视图，地址由 syncRoute 重定向。
   const legacy = LEGACY_CRYSTALLIZE_RE.exec(raw)
   if (legacy) {
-    return { view: 'crystallize', creating: false, crystallize: { runId: legacy[2]! }, workflowRun: null }
+    return {
+      view: 'crystallize',
+      creating: false,
+      crystallize: { runId: legacy[2]! },
+      workflowRun: null,
+      wfAgent: null,
+    }
   }
   // ⚠️ 两个地址都指向同一个状态：`tasks/new` 是正规写法，`new` 是 D58 之前那个
   //    「新建任务」整页的地址（当时它还是侧栏一项）。同义地址写两处会不会分叉？
   //    不会——它们在这里**就是同一行**，而 `hashFor()` 只吐正规那个。
-  if (raw === 'tasks/new' || raw === 'new') return { view: 'tasks', creating: true, crystallize: null, workflowRun: null }
+  if (raw === 'tasks/new' || raw === 'new') {
+    return { view: 'tasks', creating: true, crystallize: null, workflowRun: null, wfAgent: null }
+  }
   // 未知地址回落 `tasks`（D58 改的：原来回落到那个表单，而合并之后"任务"才是主场）
-  if (!(VIEWS as readonly string[]).includes(raw)) return { view: 'tasks', creating: false, crystallize: null, workflowRun: null }
-  return { view: raw as ViewName, creating: false, crystallize: null, workflowRun: null }
+  if (!(VIEWS as readonly string[]).includes(raw)) {
+    return { view: 'tasks', creating: false, crystallize: null, workflowRun: null, wfAgent: null }
+  }
+  return { view: raw as ViewName, creating: false, crystallize: null, workflowRun: null, wfAgent: null }
 }
 
 /**
@@ -161,8 +206,17 @@ export function parseHash(hash: string): Route {
  */
 export function hashFor(
   view: ViewName,
-  opts: { creating?: boolean; crystallize?: { runId: string }; workflowRun?: { runId: string } } = {},
+  opts: {
+    creating?: boolean
+    crystallize?: { runId: string }
+    workflowRun?: { runId: string }
+    wfAgent?: { workflowId: string; agentId: string }
+  } = {},
 ): string {
+  // ⚠️ 编排的两条子路由都与 view 绑定（`workflows`），传进来别的视图就当没传。
+  if (opts.wfAgent && view === 'workflows') {
+    return `#/workflows/agents/${opts.wfAgent.workflowId}/${opts.wfAgent.agentId}`
+  }
   // ⚠️ `crystallize` 只对沉淀视图成立：别的视图没有这个状态，传进来就当没传
   //    （与 `creating` 同一个处方，见下）。
   if (opts.workflowRun && view === 'workflows') {

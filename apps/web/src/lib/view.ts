@@ -125,6 +125,27 @@ export const crystallize = writable<{ runId: string } | null>(parseHash(location
  */
 export const workflowRun = writable<{ runId: string } | null>(parseHash(location.hash).workflowRun)
 
+/**
+ * 编排**内建智能体的编辑页**（2026-11，D237）。
+ *
+ * 使用者拍板："编辑的时候，可以类似设置那样，直接跳转过去，然后可以返回回来"。
+ * 与 `workflowRun` 同构：它是**地址**（`#/workflows/agents/<编排id>/<智能体id|new>`），
+ * 所以刷新还在、地址能分享；返回一步回到**同一条**编排的详情（见 `wfAgentReturn`）。
+ */
+export const wfAgent = writable<{ workflowId: string; agentId: string } | null>(
+  parseHash(location.hash).wfAgent,
+)
+
+/**
+ * 从编辑页返回时，编排页该选中哪一条（**一次性意图**，读一次就清）。
+ *
+ * ★ 为什么需要它：编排页的"选中哪一条"是组件状态，不从地址来（D132 之后没动过）。
+ *   编辑页一返回，组件重新挂载 ⇒ 选中态会丢，使用者看到的是"回到列表第一页"，
+ *   而不是"回到我刚在配的那条编排"。这个 store 就是那一句"回到这条"。
+ *   ⚠️ 与 `pickChatAgentIntent` 同一个规格：**读一次就清**，不是持久设置。
+ */
+export const wfAgentReturn = writable<string | null>(null)
+
 /*
  * ⚠️ 2026-11（D132）：这里原来有一个 `wfReturn` store——运行画面那个「返回」按钮
  *   要回**来处**（定义页 / 「编排任务」页），而"来处"不在地址里，所以用 store 记。
@@ -167,6 +188,7 @@ function syncRoute(): void {
   creating.set(route.creating)
   crystallize.set(route.crystallize)
   workflowRun.set(route.workflowRun)
+  wfAgent.set(route.wfAgent)
 }
 
 // 浏览器前进/后退要跟着走——否则后退键看起来"没反应"

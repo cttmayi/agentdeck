@@ -37,6 +37,7 @@
   import type { WebTextId } from '@agentdeck/i18n'
   import { api, type Workflow, type WorkflowRun, type WorkflowTemplate } from '../lib/api.ts'
   import {
+    agents,
     workflows,
     workflowRuns,
     loading,
@@ -45,7 +46,7 @@
     loadWorkflows,
     loadWorkflowRuns,
   } from '../lib/stores.ts'
-  import { pickChatAgentIntent, workflowRun, toast } from '../lib/view.ts'
+  import { pickChatAgentIntent, wfAgent, wfAgentReturn, workflowRun, toast } from '../lib/view.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { Modal } from '@agentdeck/ui/components'
@@ -55,6 +56,8 @@
   import MainArea from '../components/MainArea.svelte'
   import DirPicker from '../components/DirPicker.svelte'
   import WorkflowRunView from '../components/WorkflowRunView.svelte'
+  import WorkflowAgents from '../components/WorkflowAgents.svelte'
+  import WorkflowAgentEditor from '../components/WorkflowAgentEditor.svelte'
   import { relativeTime } from '../lib/time.ts'
 
   /**
@@ -89,6 +92,16 @@
   })
 
   let selectedId: string | null = null
+  /**
+   * 从内建智能体编辑页返回时，要回到**同一条**编排（D237）：读一次性意图并清掉。
+   * 放在 `$:` 里而不是 `onMount`：编辑页刚关掉那一刻列表已经在了，选中就直接生效。
+   */
+  $: if ($wfAgentReturn !== null) {
+    const want = $wfAgentReturn
+    wfAgentReturn.set(null)
+    const hit = $workflows.find((w) => w.id === want) ?? null
+    if (hit) selectOne(hit)
+  }
   /** 搜索词（与任务 / 智能体 / 聊天同一套：栏头带里的那个框）。 */
   let filter = ''
 
@@ -168,6 +181,26 @@
     formTemplateKey = w.templateKey
     formError = ''
     runOpen = false
+  }
+
+  /**
+   * 打开内建智能体的编辑页（D237）：**切地址**，不是组件开关——刷新还在、能分享。
+   * `agentId === 'new'` 表示新建。
+   */
+  function editAgent(workflowId: string, agentId: string): void {
+    location.hash = `#/workflows/agents/${workflowId}/${agentId}`
+  }
+
+  /**
+   * 从编辑页回来：地址回 `#/workflows`，并把"回到哪条编排"记成一次性意图。
+   *
+   * ⚠️ 顺序要紧：先置意图再改 hash——`syncRoute` 会把 `$wfAgent` 清掉，
+   *   而编排详情重新挂载时靠这个意图决定"选中哪一条"（否则回到列表第一条，
+   *   使用者会以为"我刚配的那条不见了"）。
+   */
+  function leaveAgentEditor(): void {
+    wfAgentReturn.set(selectedId ?? $wfAgent?.workflowId ?? null)
+    location.hash = '#/workflows'
   }
 
   /** 左栏的「新建」：右栏切成空白表单（主操作在顶栏，这里由它调）。 */
@@ -302,7 +335,17 @@
   }
 </script>
 
-{#if $workflowRun}
+{#if $wfAgent}
+  <!--
+    ★ D237：内建智能体的编辑页。它是**地址**（`#/workflows/agents/<编排id>/<id|new>`），
+    与运行画面同构：切走还能回来、刷新还在、能分享。
+  -->
+  <WorkflowAgentEditor
+    workflowId={$wfAgent.workflowId}
+    agentId={$wfAgent.agentId}
+    ondone={leaveAgentEditor}
+  />
+{:else if $workflowRun}
   <WorkflowRunView runId={$workflowRun.runId} />
 {:else}
   <div
@@ -433,6 +476,21 @@
           </div>
           {#if formError}
             <div class="notice bad">{formError}</div>
+          {/if}
+
+          <!--
+            ★ D237：本编排的内建智能体（列表 + 入口）。点「新建 / 编辑」跳到编辑页
+            （地址 `#/workflows/agents/<编排id>/<id|new>`）——编辑要整栏放指令与技能，
+            所以它是**一页**，不是就地展开。这一节回答的是另一个问题：
+            "这条编排里有哪几个人、代码里能写谁"。
+          -->
+          {#if selected && !creating}
+            <WorkflowAgents
+              workflowId={selected.id}
+              agents={selected.inlineAgents ?? []}
+              globalNames={new Set($agents.map((a) => a.name))}
+              onedit={(agentId) => editAgent(selected.id, agentId)}
+            />
           {/if}
 
           <!--

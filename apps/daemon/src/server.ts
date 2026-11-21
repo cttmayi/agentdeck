@@ -5417,6 +5417,41 @@ async function injectedSkillsOf(
       sendJson(res, 201, { agent, workflow: wf })
       return
     }
+    /*
+     * 内建智能体的**独有技能**（只读，D237）：`workflows/<wid>/agents/<名字>/skills/`。
+     *
+     * 一期只读（写入口与技能页的独有技能同款，二期接）：编辑页要如实显示"它自己
+     * 带着哪几份文件资产"——不显示的话，那几份注入进它的 run 里，而界面上一个字
+     * 都没有（"盘上有、界面上没有落点"）。
+     */
+    const wfAgentSkillsMatch = /^\/api\/workflows\/([^/]+)\/agents\/([^/]+)\/skills$/.exec(path)
+    if (wfAgentSkillsMatch && req.method === 'GET') {
+      const wf = workflowById(wfAgentSkillsMatch[1]!)
+      if (!wf) {
+        sendJson(res, 404, { error: '编排不存在', code: 'workflow_not_found' })
+        return
+      }
+      const target = (wf.inlineAgents ?? []).find((a) => a.id === wfAgentSkillsMatch[2])
+      if (!target) {
+        sendJson(res, 404, { error: '内建智能体不存在', code: 'wf_agent_not_found' })
+        return
+      }
+      const rows = await store.listExclusiveSkills({
+        kind: 'workflow-agent',
+        workflowId: wf.id,
+        agentId: target.id,
+      })
+      sendJson(res, 200, {
+        skills: rows.map((row) => ({
+          name: row.name,
+          ...(extractSkillMeta(row.body).description
+            ? { description: extractSkillMeta(row.body).description }
+            : {}),
+        })),
+      })
+      return
+    }
+
     if (wfAgentMatch && (req.method === 'PATCH' || req.method === 'DELETE')) {
       const wf = workflowById(wfAgentMatch[1]!)
       if (!wf) {
