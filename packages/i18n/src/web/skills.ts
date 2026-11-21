@@ -24,22 +24,15 @@ export const skillsText = {
    *    同一次删掉的还有主区里那行重复的 `<h2>Skills</h2>`。
    */
   /**
-   * ⚠️ 这句原本列的是 skill 的"三要素"（审核标准 + 判决结构引用 + 允许执行的
-   *    动作子集）。D37 把标准搬走、D40 收口又把动作权限搬走之后，那三样里有两样
-   *    **根本不在 skill 上了**——句子留着就会对使用者说反话（他会去 skill 里找
-   *    权限，而那里没有）。所以它改成如实描述：skill 是**资料包**（正文 + 支持
-   *    文件），并明说另外两样住在审核者身上。
-   */
-  'skills.headIntro': {
-    zh: '技能是执行者干活时参考的资料包：',
-    en: 'A skill is a reference pack the executor consults: ',
-  },
-  'skills.headStrongBody': { zh: '正文（SKILL.md）', en: 'the body (SKILL.md)' },
-  'skills.headStrongFiles': { zh: '支持文件', en: 'support files' },
-  'skills.headOutro': {
-    zh: '。它不决定审核者的判断依据（那在审核者的「指令」里；智能体页 → 点开审核者），也不决定「判完允许动什么」（那是智能体组的事；智能体组页 → ③ 行动）。',
-    en: '. It decides neither the reviewer’s judging criteria (that lives in the reviewer’s Instructions; Agents page → open the reviewer) nor what a verdict may trigger (that belongs to the agent group; Groups page → 3 Act).',
-  },
+   * ★★ D222（使用者要求删掉技能页那段导语）：`skills.headIntro` / `headStrongBody` /
+   *    `headStrongFiles` / `headOutro` **四条一起删了**。
+   *
+   * 那段话的历史：它原本列的是 skill 的"三要素"（审核标准 + 判决结构引用 + 允许执行的
+   *   动作子集）；D37 / D40 把后两样搬走之后，它改成"skill 是资料包（正文 + 支持文件），
+   *   另外两样住在审核者 / 智能体组身上"。而**那两样到 2026-11 也退场了**
+   *   （D122–D129：审核、判决、动作、智能体组全下线）⇒ 这段文字在指不存在的东西。
+   * 现在页面**直接从面板头开始**（「已安装的技能 · N 个」，D219 加的那行头），
+   *   那行头已经说清"这块是什么"。词条没人用就一起删，不留死接口。 */
   'skills.install': { zh: '安装技能', en: 'Install skill' },
   /*
    * ★ 2026-10：安装面板从右侧抽屉改成主区的就地面板，于是需要一句"怎么回去"。

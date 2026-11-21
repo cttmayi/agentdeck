@@ -3093,6 +3093,13 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         sweepFocus('技能页')
         sweepIcons('技能页')
         facts['skills.title'] = need('技能页标题', () => text(d().querySelector('.page-name')))
+        // ★ D222（使用者点名删掉）：技能页文首那段 `.view-intro` 导语整块删除。
+        //   理由与 D63（智能体页导语）同一课，但这条更硬：那段话在讲"审核者的指令"
+        //   "智能体组的 ③ 行动"——**那两个东西 D122–D129 已经退场**，所以它不是
+        //   "多一句解释"，而是把使用者指向不存在的地方。谁把导语加回来就红。
+        facts['skills.noPageIntro'] = need('技能页没有页头导语', () =>
+          !d().querySelector('.view-intro'),
+        )
         // ⚠️ 两代老结构都不该再存在，各自是**不同**的一课：
         //   · `.install-panel`（最早那版"插在页头和列表之间的正文面板"）——它
         //     会把列表推到看不见的地方，所以被换成了抽屉；

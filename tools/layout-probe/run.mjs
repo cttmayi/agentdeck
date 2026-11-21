@@ -1812,6 +1812,7 @@ const CHECKS = [
     show: (v) => `${v}（如实报，不假装通过）`,
   },
   { view: '技能', key: 'skills.title', label: '技能页渲染（中文页名）', ok: (v) => v === '技能' },
+  { view: '技能', key: 'skills.noPageIntro', label: '技能页没有页头导语（D222：那段讲的是已退场的审核者/智能体组）', ok: (v) => v === true },
   { view: '技能', key: 'skills.oldInlinePanel', label: '正文里不再有旧的内嵌安装面板（`.install-panel`）', ok: (v) => v === false },
   {
     view: '技能',
