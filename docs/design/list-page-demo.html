@@ -3100,6 +3100,17 @@ a > button { width: 100%; }
       /* 速查块里的静态浮层：不要阴影/遮罩，它只是"一块有头体脚的东西" */
       .demo-rule .modal { box-shadow: none; }
       .demo-rule-weights { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
+      /* ── 设置页层级对比（D193/D195）：同一张设置卡片渲染两遍，只差 h3 的取值 ── */
+      .demo-rule-settings { display: flex; gap: var(--sp-4); align-items: flex-start; flex-wrap: wrap; }
+      .demo-rule-settings > * { flex: 1 1 22rem; min-width: 0; }
+      .demo-setting-tag {
+        display: inline-block; margin-bottom: var(--sp-2);
+        font-size: var(--fs-2xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+        color: var(--text-dim);
+      }
+      /* ⚠️ 这个宽度是**演示用的一档覆盖**，不是产品的样式：产品里 h3 只有一个值（在 app.css）。
+         改这一条就等于在演示里试另一个取值——看完再决定要不要动 app.css。 */
+      .demo-h3-15 .drawer-section h3 { font-size: var(--fs-md); }
       .demo-rule .field { margin-bottom: 0; }
       .demo-toolbar {
         display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center;
@@ -3691,6 +3702,72 @@ a > button { width: 100%; }
             <button type="button" class="btn btn--link">撤销</button>
           </div>
         </section>
+
+        <!-- ══════════ 设置页层级：同一张卡片，h3 两个取值 ══════════ -->
+        <section class="demo-rule" id="demo-rule-settings">
+          <h3>⑦ 设置页的标题层级：h2 与 h3 现在完全同值</h3>
+          <p class="demo-rule-note">
+            左：**现状**——h2「通用」17/600、h3「界面主题」17/600，一模一样。设置页里它们是
+            <strong>上下相邻</strong>的（h3 就挂在 h2 底下），所以这两档在视觉上分不开。
+            右：**候选**——h3 压到 15（<code>--fs-md</code>），与 h2 拉开一档。
+            两边的 h2 都是 17，只有 h3 差 2px。
+          </p>
+          <div class="demo-rule-settings">
+            <div id="demo-setting-a" class="demo-setting-a">
+              <span class="demo-setting-tag">A · 现状（h3 = 17）</span>
+              <section class="main-panel">
+                <header class="main-panel-head">
+                  <h2>通用</h2>
+                </header>
+                <div class="main-panel-body">
+                  <section class="drawer-section">
+                    <h3>界面主题</h3>
+                    <div class="theme-picker" role="radiogroup" aria-label="界面主题">
+                      <button type="button" class="active" role="radio" aria-checked="true">跟随系统</button>
+                      <button type="button" role="radio" aria-checked="false">浅色</button>
+                      <button type="button" role="radio" aria-checked="false">深色</button>
+                    </div>
+                  </section>
+                  <section class="drawer-section">
+                    <h3>界面语言</h3>
+                    <div class="workdir-row">
+                      <select aria-label="界面语言">
+                        <option>跟随浏览器</option>
+                      </select>
+                    </div>
+                  </section>
+                </div>
+              </section>
+            </div>
+            <div id="demo-setting-b" class="demo-setting-b demo-h3-15">
+              <span class="demo-setting-tag">B · 候选（h3 = 15）</span>
+              <section class="main-panel">
+                <header class="main-panel-head">
+                  <h2>通用</h2>
+                </header>
+                <div class="main-panel-body">
+                  <section class="drawer-section">
+                    <h3>界面主题</h3>
+                    <div class="theme-picker" role="radiogroup" aria-label="界面主题">
+                      <button type="button" class="active" role="radio" aria-checked="true">跟随系统</button>
+                      <button type="button" role="radio" aria-checked="false">浅色</button>
+                      <button type="button" role="radio" aria-checked="false">深色</button>
+                    </div>
+                  </section>
+                  <section class="drawer-section">
+                    <h3>界面语言</h3>
+                    <div class="workdir-row">
+                      <select aria-label="界面语言">
+                        <option>跟随浏览器</option>
+                      </select>
+                    </div>
+                  </section>
+                </div>
+              </section>
+            </div>
+          </div>
+          <p class="demo-rule-note" id="demo-setting-delta">正在量…</p>
+        </section>
       </div>
 
       <div id="demo-rules-selfcheck" class="notice" role="status" aria-live="polite">正在自检排版七条…</div>
@@ -4029,6 +4106,51 @@ a > button { width: 100%; }
             })(),
           ],
         ]
+
+        /**
+         * ★ D195：**设置页层级对比**（第 ⑦ 项）单独量——它不是"七条尺寸"里的任何一条，
+         * 而是"h3 该不该压一档"这个还没拍板的问题的**现场证据**。
+         *
+         * 量的三件事：
+         *   ① 左（现状）h3 与 h2 是同一个值（这就是"两档分不开"的原始事实）；
+         *   ② 右（候选）h3 比左小 2px，而两边的 h2 一样大（只动了 h3 这一处）；
+         *   ③ 代价可数：候选的每张卡片矮 2px，且没有字被挤换行（换行会让"矮 2px"变成"高 8px"）。
+         */
+        {
+          const a = q('#demo-setting-a')
+          const b = q('#demo-setting-b')
+          const delta = q('#demo-setting-delta')
+          if (a && b) {
+            const aH2 = a.querySelector('h2')
+            const aH3 = a.querySelector('h3')
+            const bH2 = b.querySelector('h2')
+            const bH3 = b.querySelector('h3')
+            const aCard = a.querySelector('.main-panel')
+            const bCard = b.querySelector('.main-panel')
+            const fs = (el) => parseFloat(C(el).fontSize)
+            const fw = (el) => C(el).fontWeight
+            const hgt = (el) => Math.round(R(el).height)
+            ruleChecks.push([
+              '⑦ 设置页：左 h3 与 h2 同值（现状），右 h3 小 2px 且 h2 不变（候选）',
+              (() => {
+                if (!aH2 || !aH3 || !bH2 || !bH3) return false
+                const sameNow = fs(aH2) === fs(aH3) && fw(aH2) === fw(aH3)
+                const splitBy = fs(aH3) - fs(bH3)
+                const h2Same = fs(aH2) === fs(bH2)
+                const noWrap = [aH3, bH3].every((el) => hgt(el) <= Math.ceil(fs(el) * 1.6))
+                return sameNow && splitBy === 2 && h2Same && noWrap
+              })(),
+            ])
+            if (delta) {
+              const dCard = hgt(aCard) - hgt(bCard)
+              delta.innerHTML =
+                '实测：左 h3 <strong>' + C(aH3).fontSize + ' / ' + fw(aH3) + '</strong>、h2 ' +
+                C(aH2).fontSize + '（同值）；右 h3 <strong>' + C(bH3).fontSize + ' / ' + fw(bH3) +
+                '</strong>、h2 ' + C(bH2).fontSize + '。整张卡片左 ' + hgt(aCard) + 'px、右 ' +
+                hgt(bCard) + 'px（差 ' + dCard + 'px），两个 h3 都仍是单行。'
+            }
+          }
+        }
         const ruleBad = ruleChecks.filter(([, ok]) => !ok).map(([name]) => name)
         const ruleBox = q('#demo-rules-selfcheck')
         if (ruleBox) {
@@ -4037,7 +4159,7 @@ a > button { width: 100%; }
             ruleBad.length === 0
               ? '<b>排版七条自检通过 ' + ruleChecks.length + '/' + ruleChecks.length + '</b>：' +
                 '控件同高、面板与浮层内距逐条相等、表格紧凑档、并排两列一条规则、' +
-                '正文档 14px + 行宽 640px、主操作一个长相。'
+                '正文档 14px + 行宽 640px、主操作一个长相、设置页层级两档（现状同值 / 候选差 2px）。'
               : '<b>排版七条自检未通过（' + ruleBad.length + ' 项）</b>：' + ruleBad.join('、')
         }
         const bad = checks.filter(([, ok]) => !ok).map(([name]) => name)
