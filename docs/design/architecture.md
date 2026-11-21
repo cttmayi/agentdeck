@@ -459,7 +459,7 @@ proposed ──┬──▶ auto_approved ──▶ executing ──┬──▶
 ├── memory/<agentId>/MEMORY.md  记忆的**人可读镜像**（`memory/` 整个根是 git 仓库；权威仍是 store）
 ├── workflows/<workflowId>/ ★ 一条编排 = 一个目录（D224）：workflow.json + main.js
 ├── workflow-runs/<runId>.json  编排运行记录（一条运行一个文件）
-├── schedules.json          定时任务
+├── schedules/<scheduleId>/ ★ 一条定时任务 = 一个目录（D225）：schedule.json + task.md + records.jsonl
 ├── claude-config/          claude 的受管配置目录（D78：`CLAUDE_CONFIG_DIR` 指过来）
 ├── codex-config/           codex 的受管 `CODEX_HOME`
 ├── tool-tmp/               脚本动作的临时目录（每次执行一个子目录，跑完即删）

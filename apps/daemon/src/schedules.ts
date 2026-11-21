@@ -9,19 +9,29 @@
  * 它要调 `submitRunRequest`（server 内部函数，组展开/校验/起进程都在那里），
  * 本模块保持纯逻辑、可单测。
  *
- * 存储是**独立 JSON 文件**（`<dataDir>/schedules.json`），不进 domain 的 store：
- * 定时任务是 daemon 的"外挂功能"——触发的 run 全部走既有链路（issue/run/审核），
+ * 存储是**自己的目录**（`<dataDir>/schedules/<id>/`：`schedule.json` 配置 +
+ * `task.md` 任务正文 + `records.jsonl` 触发记录），不进 domain 的 store：
+ * 定时任务是 daemon 的"外挂功能"——触发的 run 全部走既有链路（issue/run），
  * 它自己只是"到点的任务生成器"，不值得为此动 protocol/domain/store 协议层
  * （那是另一级回归面）。判据与 D34 同一句：能不动的层就不动。
+ * ⚠️ 2026-11（D225）：原来是一个 `schedules.json` 大数组（真机 3 条 / 64 KB），
+ * 现在一实体一目录——形状见 `schedules-dirs.ts` 头注释。
  *
- * 触发记录内嵌在 schedule 里（`records`，保留最近 `MAX_RECORDS` 条）——
- * 它是"这个定时任务干过什么"的索引，每次触发一条，点开跳任务页那次 run。
+ * 触发记录是"这个定时任务干过什么"的索引（保留最近 `MAX_RECORDS` 条），每次触发一条，
+ * 点开跳任务页那次 run。它落成 `records.jsonl`（配置与历史分开）。
  */
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
 import { Cron } from 'croner'
 import type { RunId, WorkspaceId } from '@agentdeck/protocol'
+import {
+  legacySchedulesPath,
+  listScheduleDirs,
+  migrateLegacySchedules,
+  removeScheduleDir,
+  schedulesRoot,
+  scheduleDirPath,
+  writeScheduleDir,
+} from './schedules-dirs.ts'
 
 /** 一次触发的记录（"这个定时任务干过什么"的索引，对应任务页里那次 run）。 */
 export interface ScheduleRecord {
@@ -84,39 +94,37 @@ export interface Schedule {
 /** 触发记录保留条数（无限增长会拖垮启动读盘）。 */
 export const MAX_RECORDS = 50
 
-/** 定时任务的存储文件（与 skills-mine 同父目录：dataDir 下平铺）。 */
-export function schedulesFile(dataDir: string): string {
-  return join(dataDir, 'schedules.json')
+/*
+ * 读写的**门面**：server 只认这三个名字，形状全在 `schedules-dirs.ts`。
+ *
+ * 为什么读要返回 `{ schedules, errors }`：旧实现是 `catch { return [] }`——
+ * 文件坏了就表现为"一条定时任务都没有"，而**定时任务没了 = 到点什么都不再发生**，
+ * 这是最坏的一种静默（不是"少显示一行"，是"该做的事不再做"）。
+ */
+
+/** 读全部定时任务（顺带把老的 `schedules.json` 迁成目录，幂等）。 */
+export async function loadSchedules(dataDir: string): Promise<{
+  schedules: Schedule[]
+  errors: string[]
+  migrated: { migrated: number; skipped: number; errors: string[] } | null
+}> {
+  const migrated = await migrateLegacySchedules(dataDir)
+  const { schedules, errors } = await listScheduleDirs(dataDir)
+  return { schedules, errors, migrated }
 }
 
-/** 读全部定时任务。没有文件（从没建过）= 空数组，不抛。 */
-export async function loadSchedules(dataDir: string): Promise<Schedule[]> {
-  try {
-    const raw = await readFile(schedulesFile(dataDir), 'utf8')
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return []
-    // 只留形状对的条目：盘上被改坏的一行不该让整个功能崩掉
-    return parsed.filter(
-      (s): s is Schedule =>
-        typeof s === 'object' &&
-        s !== null &&
-        typeof (s as Schedule).id === 'string' &&
-        typeof (s as Schedule).cron === 'string' &&
-        typeof (s as Schedule).taskText === 'string',
-    )
-  } catch {
-    return []
-  }
+/** 写**一条**定时任务（配置 + 正文 + 记录，三份都原子写）。 */
+export async function saveSchedule(dataDir: string, schedule: Schedule): Promise<void> {
+  await writeScheduleDir(dataDir, schedule)
 }
 
-/** 原子落盘（先写临时文件再 rename，避免写一半断电留下半个 JSON）。 */
-export async function saveSchedules(dataDir: string, schedules: Schedule[]): Promise<void> {
-  const file = schedulesFile(dataDir)
-  await mkdir(dirname(file), { recursive: true })
-  const tmp = `${file}.tmp`
-  await writeFile(tmp, JSON.stringify(schedules, null, 2), 'utf8')
-  await rename(tmp, file)
+/** 删一条定时任务 = 删它自己的目录（配置 / 正文 / 记录一起走）。 */
+export async function removeSchedule(dataDir: string, id: string): Promise<void> {
+  await removeScheduleDir(dataDir, id)
 }
+
+/** 落盘路径（给启动日志与测试用；别在别处自己拼路径）。 */
+export { legacySchedulesPath, schedulesRoot, scheduleDirPath }
 
 // ══════════════════════════════════════════════════════════════════
 // 模板变量（触发时快照）

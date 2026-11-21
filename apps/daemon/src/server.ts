@@ -78,9 +78,11 @@ import {
   loadSchedules,
   MAX_RECORDS,
   nextRunAt,
+  removeSchedule,
   renderScheduleTask,
-  saveSchedules,
+  saveSchedule,
   scheduleVarsFor,
+  schedulesRoot,
   validateCron,
   type Schedule,
   type ScheduleRecord,
@@ -1358,10 +1360,27 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   // 渲染模板 → 建 issue → 提交执行 run（`submitRunRequest`，组展开/校验/起进程
   // 全部复用）→ 记一条触发记录。触发的 run 是**普通任务**，在任务页看。
   //
-  // 存储是独立 JSON（`<dataDir>/schedules.json`），不进 domain store——判据
-  // 写在 `schedules.ts` 顶部。内存数组是唯一权威（routes 与 fire 都改它，
-  // 每次变更落盘一次）。
-  const schedules: Schedule[] = await loadSchedules(options.dataDir)
+  // ★ 2026-11（D225）：存储改成**一实体一目录**（`<dataDir>/schedules/<id>/`：
+  //   `schedule.json` 配置 + `task.md` 任务正文 + `records.jsonl` 触发记录），
+  //   形状见 `schedules-dirs.ts`；不进 domain store——判据写在 `schedules.ts` 顶部。
+  //   内存数组仍是运行期权威（routes 与 fire 都改它），落盘是**逐条**写。
+  const schLoaded = await loadSchedules(options.dataDir)
+  const schedules: Schedule[] = schLoaded.schedules
+  /*
+   * 迁移与读盘的问题要说出来。旧实现是 `catch { return [] }`——文件坏了就表现为
+   * "一条定时任务都没有"，而**定时任务没了 = 到点什么都不再发生**：
+   * 那种静默比"少显示一行"严重得多，所以这里逐条报。
+   */
+  if (schLoaded.migrated) {
+    const m = schLoaded.migrated
+    info(
+      `定时任务存储已迁移到目录形状：${m.migrated} 条迁入 ${schedulesRoot(options.dataDir)}` +
+        (m.skipped > 0 ? `，${m.skipped} 条目录里已有（跳过）` : '') +
+        '；老文件改名为 `.migrated` 留档',
+    )
+    for (const e of m.errors) warn(`定时任务迁移：${e}`)
+  }
+  for (const e of schLoaded.errors) warn(`定时任务读取：${e}`)
 
   // ══════════════════════════════════════════════════════════════════
   // ── 编排（2026-11，使用者立项）──
@@ -5137,7 +5156,8 @@ async function injectedSkillsOf(
       }
       schedules.push(schedule)
       syncScheduleJob(schedule)
-      await saveSchedules(options.dataDir, schedules)
+      // ★ D225：落盘是**这一条**（`schedules/<id>/`：配置 + task.md + 记录）
+      await saveSchedule(options.dataDir, schedule)
       sendJson(res, 201, scheduleView(schedule))
       return
     }
@@ -5209,7 +5229,7 @@ async function injectedSkillsOf(
       }
       s.updatedAt = Date.now()
       syncScheduleJob(s)
-      await saveSchedules(options.dataDir, schedules)
+      await saveSchedule(options.dataDir, s)
       sendJson(res, 200, scheduleView(s))
       return
     }
@@ -5226,7 +5246,8 @@ async function injectedSkillsOf(
         scheduleJobs.delete(removed.id)
       }
       schedules.splice(idx, 1)
-      await saveSchedules(options.dataDir, schedules)
+      // 删的是它自己的整个目录（配置 + 任务正文 + 触发记录一起走——它们都属于这条）
+      await removeSchedule(options.dataDir, removed.id)
       sendJson(res, 200, { ok: true })
       return
     }
@@ -8833,7 +8854,7 @@ async function injectedSkillsOf(
           note: '上次触发仍在进行，本次跳过',
         })
         s.updatedAt = now
-        await saveSchedules(options.dataDir, schedules)
+        await saveSchedule(options.dataDir, s)
         return
       }
     }
@@ -8865,7 +8886,7 @@ async function injectedSkillsOf(
                 : '执行智能体不存在或已被删除',
           })
           s.updatedAt = now
-          await saveSchedules(options.dataDir, schedules)
+          await saveSchedule(options.dataDir, s)
           return
         }
         agentRef = { id: agent.id, name: agent.name, instructions: agent.instructions }
@@ -8932,7 +8953,7 @@ async function injectedSkillsOf(
       if (accepted) s.lastRunId = runId
       s.lastTriggerAt = now
       s.updatedAt = now
-      await saveSchedules(options.dataDir, schedules)
+      await saveSchedule(options.dataDir, s)
     } catch (err) {
       pushScheduleRecord(s, {
         triggeredAt: now,
@@ -8942,7 +8963,7 @@ async function injectedSkillsOf(
         note: String(err instanceof Error ? err.message : err),
       })
       s.updatedAt = now
-      await saveSchedules(options.dataDir, schedules)
+      await saveSchedule(options.dataDir, s)
     }
   }
   fireScheduleRef = fireSchedule

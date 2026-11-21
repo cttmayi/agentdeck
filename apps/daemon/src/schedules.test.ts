@@ -21,9 +21,12 @@ import {
 import { startDaemon, type DaemonHandle } from './server.ts'
 import {
   describeCron,
+  legacySchedulesPath,
   loadSchedules,
+  removeSchedule,
   renderScheduleTask,
-  saveSchedules,
+  saveSchedule,
+  scheduleDirPath,
   scheduleVarsFor,
   validateCron,
   nextRunAt,
@@ -103,46 +106,184 @@ describe('定时任务 cron 工具', () => {
 // 单元：存储往返 + 任务文本切分
 // ────────────────────────────────────────────────────────────────
 
+/** 一条定时任务夹具（字段与 `Schedule` 一致；正文里带变量，便于断言落点）。 */
+function sampleSchedule(): Schedule {
+  return {
+    id: 'sched-1',
+    workspaceId: 'ws' as Schedule['workspaceId'],
+    name: '竞品周报',
+    enabled: true,
+    cron: '0 9 * * 1',
+    executorType: 'agent',
+    executorId: 'a-1',
+    taskText: '{{date}} 竞品周报',
+    workDir: null,
+    resumeMode: 'fresh',
+    createdAt: 1,
+    updatedAt: 1,
+    triggerCount: 3,
+    lastRunId: 'run-9' as Schedule['lastRunId'],
+    lastTriggerAt: 2,
+    records: [
+      { triggeredAt: 2, runId: 'run-9' as Schedule['records'][number]['runId'], issueId: 'i-9', status: 'triggered', note: null },
+    ],
+  }
+}
+
 describe('定时任务存储与切分', () => {
-  test('★ saveSchedules/loadSchedules 往返（原子写 + 读回）', async () => {
+  test('★★ 落成目录：配置进 schedule.json（**不含正文**）、正文进 task.md、记录进 records.jsonl', async () => {
     const dir = await makeTempDir('schedules-store')
     try {
-      const s: Schedule = {
-        id: 'sched-1',
-        workspaceId: 'ws' as Schedule['workspaceId'],
-        name: '竞品周报',
-        enabled: true,
-        cron: '0 9 * * 1',
-        executorType: 'agent',
-        executorId: 'a-1',
-        taskText: '{{date}} 竞品周报',
-        workDir: null,
-        resumeMode: 'fresh',
-        createdAt: 1,
-        updatedAt: 1,
-        triggerCount: 3,
-        lastRunId: 'run-9' as Schedule['lastRunId'],
-        lastTriggerAt: 2,
-        records: [{ triggeredAt: 2, runId: 'run-9' as Schedule['records'][number]['runId'], issueId: 'i-9', status: 'triggered', note: null }],
-      }
-      await saveSchedules(dir, [s])
+      await saveSchedule(dir, sampleSchedule())
+      const { readFile } = await import('node:fs/promises')
+      const base = scheduleDirPath(dir, 'sched-1')
+
+      const json = JSON.parse(await readFile(join(base, 'schedule.json'), 'utf8')) as Record<string, unknown>
+      assert.equal(json['name'], '竞品周报')
+      assert.equal(json['triggerCount'], 3)
+      // ★ 这两条是本次改存储的核心：正文与历史都不在 json 里
+      assert.equal('taskText' in json, false, 'schedule.json 里不许出现 taskText')
+      assert.equal('records' in json, false, 'schedule.json 里不许出现 records')
+
+      assert.equal(await readFile(join(base, 'task.md'), 'utf8'), '{{date}} 竞品周报')
+      // 记录一行一条、最老在前
+      const lines = (await readFile(join(base, 'records.jsonl'), 'utf8')).trim().split('\n')
+      assert.equal(lines.length, 1)
+      assert.equal((JSON.parse(lines[0]!) as { status: string }).status, 'triggered')
+
+      // 读回：三份拼成一条完整记录
       const loaded = await loadSchedules(dir)
-      assert.equal(loaded.length, 1)
-      assert.equal(loaded[0]!.name, '竞品周报')
-      assert.equal(loaded[0]!.triggerCount, 3)
-      assert.equal(loaded[0]!.records[0]!.status, 'triggered')
+      assert.equal(loaded.errors.length, 0)
+      assert.equal(loaded.schedules.length, 1)
+      const back = loaded.schedules[0]!
+      assert.equal(back.name, '竞品周报')
+      assert.equal(back.triggerCount, 3)
+      assert.equal(back.taskText, '{{date}} 竞品周报')
+      assert.equal(back.records[0]!.status, 'triggered')
     } finally {
       await cleanup(dir)
     }
   })
 
-  test('★ loadSchedules：没有文件（从没建过）= 空数组；坏 JSON = 空数组', async () => {
+  test('★ 记录顺序：盘上最老在前、读回最新的在前（界面/接口顺序不变）', async () => {
+    const dir = await makeTempDir('schedules-records')
+    try {
+      // 内存里新的在前（既有约定）；落盘时反着写
+      await saveSchedule(dir, {
+        ...sampleSchedule(),
+        records: [
+          { triggeredAt: 3, runId: 'r3' as never, issueId: 'i3', status: 'triggered', note: null },
+          { triggeredAt: 2, runId: 'r2' as never, issueId: 'i2', status: 'triggered', note: null },
+        ],
+      })
+      const loaded = await loadSchedules(dir)
+      assert.deepEqual(
+        loaded.schedules[0]!.records.map((r) => r.triggeredAt),
+        [3, 2],
+        '读回来仍是"新的在前"',
+      )
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
+  test('★★ 一条坏掉不毁全部，而且要报出来（旧的"读成空数组"已删）', async () => {
+    const dir = await makeTempDir('schedules-bad')
+    try {
+      await saveSchedule(dir, sampleSchedule())
+      const { mkdir, writeFile } = await import('node:fs/promises')
+      const bad = scheduleDirPath(dir, 'sched-bad')
+      await mkdir(bad, { recursive: true })
+      await writeFile(join(bad, 'schedule.json'), '{坏', 'utf8')
+
+      const loaded = await loadSchedules(dir)
+      assert.deepEqual(
+        loaded.schedules.map((x) => x.id),
+        ['sched-1'],
+        '好的那条照常读出来',
+      )
+      assert.equal(loaded.errors.length, 1)
+      assert.match(loaded.errors[0]!, /sched-bad/)
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
+  test('★ 缺 task.md：这条**照样列出**（正文空）但要说出来；记录坏一行不牵连其余', async () => {
+    const dir = await makeTempDir('schedules-partial')
+    try {
+      await saveSchedule(dir, sampleSchedule())
+      const { readFile, rm, writeFile } = await import('node:fs/promises')
+      const base = scheduleDirPath(dir, 'sched-1')
+      await rm(join(base, 'task.md'))
+      // 再往记录里掺一行坏的
+      const good = await readFile(join(base, 'records.jsonl'), 'utf8')
+      await writeFile(join(base, 'records.jsonl'), `${good}{坏行\n`, 'utf8')
+
+      const loaded = await loadSchedules(dir)
+      assert.equal(loaded.schedules.length, 1, '照样列出（不然使用者会以为它没了）')
+      assert.equal(loaded.schedules[0]!.taskText, '')
+      assert.equal(loaded.schedules[0]!.records.length, 1, '好的那行照读')
+      assert.equal(loaded.errors.length, 2, '缺正文 + 坏一行各报一条')
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
+  test('★ 删一条 = 删它自己的目录（不牵连别的）', async () => {
+    const dir = await makeTempDir('schedules-remove')
+    try {
+      await saveSchedule(dir, sampleSchedule())
+      await saveSchedule(dir, { ...sampleSchedule(), id: 'sched-2', name: '第二条', createdAt: 2 })
+      await removeSchedule(dir, 'sched-1')
+      const loaded = await loadSchedules(dir)
+      assert.deepEqual(
+        loaded.schedules.map((x) => x.id),
+        ['sched-2'],
+      )
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
+  test('★★ 老的 schedules.json 一次迁进目录；老文件改名留档、幂等', async () => {
+    const dir = await makeTempDir('schedules-migrate')
+    try {
+      const { readFile, writeFile } = await import('node:fs/promises')
+      await writeFile(legacySchedulesPath(dir), JSON.stringify([sampleSchedule()]), 'utf8')
+
+      const first = await loadSchedules(dir)
+      assert.equal(first.migrated?.migrated, 1)
+      assert.equal(first.schedules.length, 1)
+      assert.equal(first.schedules[0]!.taskText, '{{date}} 竞品周报')
+      assert.equal(first.schedules[0]!.records.length, 1)
+
+      // 原名文件不再存在，留档在 `.migrated`
+      await assert.rejects(() => readFile(legacySchedulesPath(dir), 'utf8'))
+      assert.match(await readFile(`${legacySchedulesPath(dir)}.migrated`, 'utf8'), /竞品周报/)
+
+      const second = await loadSchedules(dir)
+      assert.equal(second.migrated, null, '已归档 ⇒ 不再迁')
+      assert.equal(second.schedules.length, 1)
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
+  test('★ 没有文件（从没建过）= 空；老文件是坏 JSON ⇒ 报错且不改名不删', async () => {
     const dir = await makeTempDir('schedules-empty')
     try {
-      assert.deepEqual(await loadSchedules(dir), [])
-      const { writeFile } = await import('node:fs/promises')
-      await writeFile(join(dir, 'schedules.json'), 'not json{{{', 'utf8')
-      assert.deepEqual(await loadSchedules(dir), [])
+      const empty = await loadSchedules(dir)
+      assert.deepEqual(empty.schedules, [])
+      assert.deepEqual(empty.errors, [])
+
+      const { readFile, writeFile } = await import('node:fs/promises')
+      await writeFile(legacySchedulesPath(dir), 'not json{{{', 'utf8')
+      const loaded = await loadSchedules(dir)
+      assert.deepEqual(loaded.schedules, [])
+      assert.equal(loaded.migrated?.errors.length, 1)
+      // 迁移不许掩盖坏数据：原文件原样还在
+      assert.equal(await readFile(legacySchedulesPath(dir), 'utf8'), 'not json{{{')
     } finally {
       await cleanup(dir)
     }

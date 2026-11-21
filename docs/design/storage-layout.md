@@ -18,7 +18,8 @@
    能 diff）。`agent.json` 里**没有** `instructions`，正文在 `instructions.md`——
    这是同一个决定的两半。
 2. **一个实体 = 一个目录**（而不是"一堆实体挤一个 JSON 文件"）。
-   智能体已经是 `agents/<id>/`；技能是 `<root>/<slug>/`；编排按同一形状定为目标（§6）。
+   智能体是 `agents/<id>/`、技能是 `<root>/<slug>/`、编排是 `workflows/<id>/`（§6）、
+   定时任务是 `schedules/<id>/`（§7）——都是「一个实体一个目录」。
    目录化换来三件好事：人能直接打开、删一个不影响别的、坏一个不会毁掉全部。
 3. **权威只有一个。** 正文文件（`.md` / `.js`）是权威，索引记录里只留元数据；
    镜像文件的第一句必须写明"改它不生效"。
@@ -57,7 +58,7 @@
 ├── memory/<agentId>/MEMORY.md    记忆的**人可读镜像**；`memory/` 整个根是一个 git 仓库
 ├── workflows/<workflowId>/       ★ 一条编排 = 一个目录（§6）：workflow.json + main.js
 ├── workflow-runs/<runId>.json    编排运行记录：一条运行一个文件
-├── schedules.json                定时任务
+├── schedules/<scheduleId>/        ★ 一条定时任务 = 一个目录（§7）：schedule.json + task.md + records.jsonl
 ├── claude-config/                claude 的受管配置目录（D78，§9）
 ├── codex-config/                 codex 的受管 CODEX_HOME（§9）
 ├── tool-tmp/                     脚本临时目录（跑完即删）
@@ -224,7 +225,45 @@
 `agents/<id>/` 的形状在编排目录里加 `agents/<agentId>/{agent.json,instructions.md}`——
 **现在不建空目录**（那叫造死结构）。
 
-## 7. run、消息流、会话
+## 7. 定时任务 —— `schedules/<id>/`（D225，2026-11 已落地）
+
+```
+~/.agentdeck/data/schedules/<scheduleId>/
+├── schedule.json     结构化配置（cron / 执行者 / 启动方式 / 计数 / 上次触发）——**不含任务正文**
+├── task.md           任务模板正文（`{{date}}` 这些变量的宿主）
+└── records.jsonl     触发记录，一行一条（**最老在前**），最多 50 行
+```
+
+**改了之前是什么**：一个 `schedules.json` 大数组（真机 3 条 / 64 KB，其中三条任务正文分别是
+**6564 / 6628 / 11150 字**，全塞在 json 字符串里）；读失败是 `catch { return [] }`——
+文件一坏就表现为「一条定时任务都没有」，而**定时任务没了 = 到点什么都不再发生**。
+这比「少显示一行」严重得多，所以这一轮的重点有一半在「读账要说话」。
+
+| 文件 | 角色 |
+|---|---|
+| `schedule.json` | 配置（你在界面上改的东西）：`id / name / enabled / cron / executorType / executorId / workDir / resumeMode / triggerCount / lastRunId / lastTriggerAt / 时间` |
+| `task.md` | 任务模板正文——与 `instructions.md`、`main.js` 同一个角色（人写的 prompt 不进 json） |
+| `records.jsonl` | 「它干过什么」：一行一条 `{ triggeredAt, runId, issueId, status, note }`；界面上仍是「新的在前」（读回时反转） |
+
+三条随之而来的行为（`apps/daemon/src/schedules-dirs.ts`）：
+
+1. **写**：`saveSchedule()` 写这一条的三份文件（都原子写），**最后**写 `schedule.json`
+   ——它是这个目录的「存在证明」（列表只认它）。触发一次 = 更新计数 + 一条记录，同样只写这一条。
+2. **读**：**逐条读、逐条报**。配置坏 ⇒ 跳过那条 + 报错误；`task.md` 缺 ⇒ **照样列出**
+   （正文空）+ 报错误；`records.jsonl` 里**坏一行只跳过那一行**（一行一条换来的好处）。
+3. **删**：删整条目录（配置 + 正文 + 记录一起走）。这里与编排刻意不同——编排的运行记录
+   挂在任务页那条 issue 上，所以删定义不删历史；而定时任务的记录**只属于它自己**，
+   连它一起删是对的。
+
+**迁移**（`migrateLegacySchedules`，启动时自动跑一次）：口径与编排那次逐条相同——
+目录已存在就跳过；迁完 `schedules.json` 改名 `.migrated` **留档不删**；老文件是坏 JSON ⇒
+报错且**不改名不删**；幂等（跑完再跑返回 `null`）。
+
+> 实测（真数据的一份拷贝）：3 条 → 3 个目录（`schedule.json` 的键里没有 `taskText` / `records`），
+> 老文件变 `schedules.json.migrated`，第二次跑 `migrated: null`。新建 / 改正文 / 删除走 HTTP
+> 也各验过一遍（改的是 `task.md`，删的是整个目录）。
+
+## 8. run、消息流、会话
 
 | 位置 | 内容 | 权威 |
 |---|---|---|
@@ -243,7 +282,7 @@
 
 ---
 
-## 8. 集合白名单与历史残留
+## 9. 集合白名单与历史残留
 
 `packages/store-file/src/file-store.ts` 的 `COLLECTIONS` 是**读哪些集合**的白名单，今天 12 项：
 
@@ -266,7 +305,7 @@
 
 ---
 
-## 9. 运行时受管配置与临时目录
+## 10. 运行时受管配置与临时目录
 
 | 位置 | 是什么 | 硬约束 |
 |---|---|---|
@@ -280,7 +319,7 @@ skill、`~/.claude.json` 的 `mcpServers` 会拉起 npx/浏览器，天然在任
 
 ---
 
-## 10. 工作目录（不隐藏，agent 的产出在这里）
+## 11. 工作目录（不隐藏，agent 的产出在这里）
 
 ```
 ~/agentdeck-workspace/<类型>-<id>/            类型 = chat / issue / crystal …；id = 对应实体的 ULID
@@ -297,7 +336,7 @@ skill、`~/.claude.json` 的 `mcpServers` 会拉起 npx/浏览器，天然在任
 
 ---
 
-## 11. 写盘纪律（所有落点共用）
+## 12. 写盘纪律（所有落点共用）
 
 1. **整文件写 = 原子替换**：`atomicWrite()` 先写 `path.tmp-<pid>-<时间戳>`，`fsync`，
    再 `rename`（Windows 有重试）。所以任何时刻读到的都是**完整**的旧文件或新文件。
@@ -312,7 +351,7 @@ skill、`~/.claude.json` 的 `mcpServers` 会拉起 npx/浏览器，天然在任
 
 ---
 
-## 12. 迁移纪律
+## 13. 迁移纪律
 
 - **幂等**：再跑一次不重复做。现存的三个启动迁移都在 `FileStore.open()` 里按序跑一次：
   `#migrateAgentsToDirs`（老 `log/agent.jsonl` → 目录）、`#migrateMemoryToAgentDirs`
@@ -327,13 +366,14 @@ skill、`~/.claude.json` 的 `mcpServers` 会拉起 npx/浏览器，天然在任
 
 ---
 
-## 13. 谁钉着这些形状
+## 14. 谁钉着这些形状
 
 | 形状 | 判据 |
 |---|---|
 | `agent.json` 不含指令、`instructions.md` 存组装前正文、缺文件不炸 | `packages/store-file/src/agent-dirs.test.ts` |
 | 技能正文落盘、`skillsRoot` 落点、覆盖安装清空旧支持文件、拒绝越界路径 | `packages/store-file/src/file-store.test.ts`、`apps/daemon/src/skills-install.test.ts`、`apps/daemon/src/skill-exec-check.test.ts` |
 | 日志 append-only、patch 绝对赋值、compact 顺序 | `packages/store-file/src/file-store.test.ts` |
+| 定时任务的目录形状、记录一行一条与顺序、坏条 / 缺 `task.md` 报错、迁移与幂等 | `apps/daemon/src/schedules.test.ts`（存储 7 条 + 整链 3 条） |
 | 编排的目录形状、逐条报错、缺 `main.js` 仍列出、老文件迁移与幂等、删除只删定义 | `apps/daemon/src/workflows.test.ts`；端上另有 `template-e2e.test.ts`、`startup-reconcile.test.ts` |
 | 记忆目录化与镜像 | `apps/daemon/src/{memory,memory-files}.test.ts` |
 | 注入的归属清单（`.agentdeck-managed.json`） | `packages/agent-core/src/skill-injection.test.ts` |
