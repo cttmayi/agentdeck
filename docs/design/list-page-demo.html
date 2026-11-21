@@ -358,7 +358,11 @@ h1, h2, h3, h4 {
  * 各写了一遍——同一个值写四遍，就是"层级没定义、各拼各的"。
  */
 h2 { font-size: var(--fs-lg); }
-h3 { font-size: var(--fs-lg); }
+/* ★ D197：h3 是 15px（`--fs-md`），**不是**跟 h2 一样的 17。原来 h2 与 h3 同值，
+   而设置页里 h3 就挂在 h2 底下（「通用」→「界面主题」）⇒ 这两档在视觉上分不开，
+   分开它们的只有卡片与间距。使用者看过演示页第 ⑦ 块的对比（同一张卡片，h3 = 17 / 15）
+   之后拍板取 15：整张卡片矮约 2px，没有一处文字被挤换行。 */
+h3 { font-size: var(--fs-md); }
 h4 { font-size: var(--fs-sm); color: var(--text-dim); }
 
 p { margin: 0 0 var(--sp-3); }
@@ -3127,9 +3131,9 @@ a > button { width: 100%; }
         font-size: var(--fs-2xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
         color: var(--text-dim);
       }
-      /* ⚠️ 这个宽度是**演示用的一档覆盖**，不是产品的样式：产品里 h3 只有一个值（在 app.css）。
-         改这一条就等于在演示里试另一个取值——看完再决定要不要动 app.css。 */
-      .demo-h3-15 .drawer-section h3 { font-size: var(--fs-md); }
+      /* ⚠️ 原来这里有一条 `.demo-h3-15 .drawer-section h3 { font-size: var(--fs-md) }`——
+         D195 用它演示"h3 压到 15 是什么样"。使用者拍板取 15 之后（D197），
+         这个取值已经进了 `app.css`（h3 就是 15）⇒ 替身覆盖删掉，演示量的是**真样式**。 */
       .demo-rule .field { margin-bottom: 0; }
       .demo-toolbar {
         display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center;
@@ -3722,18 +3726,17 @@ a > button { width: 100%; }
           </div>
         </section>
 
-        <!-- ══════════ 设置页层级：同一张卡片，h3 两个取值 ══════════ -->
+        <!-- ══════════ 设置页的标题层级：h2 17 / h3 15 / h4 13 ══════════ -->
         <section class="demo-rule" id="demo-rule-settings">
-          <h3>⑦ 设置页的标题层级：h2 与 h3 现在完全同值</h3>
+          <h3>⑦ 标题三档：h2 17 / h3 15 / h4 13</h3>
           <p class="demo-rule-note">
-            左：**现状**——h2「通用」17/600、h3「界面主题」17/600，一模一样。设置页里它们是
-            <strong>上下相邻</strong>的（h3 就挂在 h2 底下），所以这两档在视觉上分不开。
-            右：**候选**——h3 压到 15（<code>--fs-md</code>），与 h2 拉开一档。
-            两边的 h2 都是 17，只有 h3 差 2px。
+            设置页里三档**同屏上下相邻**（h4 挂在 h3 下面）：卡片标题 <code>h2</code>、
+            小节标题 <code>h3</code>、段内小节 <code>h4</code>。
+            h3 原来也是 17（与 h2 同值，两档分不开）——使用者看过这一块的对比之后拍的板：压到 15（D197）。
           </p>
           <div class="demo-rule-settings">
-            <div id="demo-setting-a" class="demo-setting-a">
-              <span class="demo-setting-tag">A · 现状（h3 = 17）</span>
+            <div id="demo-setting-final">
+              <span class="demo-setting-tag">现状：h2 17 · h3 15 · h4 13</span>
               <section class="main-panel">
                 <header class="main-panel-head">
                   <h2>通用</h2>
@@ -3746,32 +3749,8 @@ a > button { width: 100%; }
                       <button type="button" role="radio" aria-checked="false">浅色</button>
                       <button type="button" role="radio" aria-checked="false">深色</button>
                     </div>
-                  </section>
-                  <section class="drawer-section">
-                    <h3>界面语言</h3>
-                    <div class="workdir-row">
-                      <select aria-label="界面语言">
-                        <option>跟随浏览器</option>
-                      </select>
-                    </div>
-                  </section>
-                </div>
-              </section>
-            </div>
-            <div id="demo-setting-b" class="demo-setting-b demo-h3-15">
-              <span class="demo-setting-tag">B · 候选（h3 = 15）</span>
-              <section class="main-panel">
-                <header class="main-panel-head">
-                  <h2>通用</h2>
-                </header>
-                <div class="main-panel-body">
-                  <section class="drawer-section">
-                    <h3>界面主题</h3>
-                    <div class="theme-picker" role="radiogroup" aria-label="界面主题">
-                      <button type="button" class="active" role="radio" aria-checked="true">跟随系统</button>
-                      <button type="button" role="radio" aria-checked="false">浅色</button>
-                      <button type="button" role="radio" aria-checked="false">深色</button>
-                    </div>
+                    <h4>深色什么时候生效</h4>
+                    <p class="hint">跟随系统时，系统切换主题的当下就跟着换。</p>
                   </section>
                   <section class="drawer-section">
                     <h3>界面语言</h3>
@@ -4137,46 +4116,43 @@ a > button { width: 100%; }
         ]
 
         /**
-         * ★ D195：**设置页层级对比**（第 ⑦ 项）单独量——它不是"七条尺寸"里的任何一条，
-         * 而是"h3 该不该压一档"这个还没拍板的问题的**现场证据**。
+         * ★ D197：**设置页的标题三档**（第 ⑦ 项）——量的是"层级有没有真的拉开"。
          *
-         * 量的三件事：
-         *   ① 左（现状）h3 与 h2 是同一个值（这就是"两档分不开"的原始事实）；
-         *   ② 右（候选）h3 比左小 2px，而两边的 h2 一样大（只动了 h3 这一处）；
-         *   ③ 代价可数：候选的每张卡片矮 2px，且没有字被挤换行（换行会让"矮 2px"变成"高 8px"）。
+         * 这一块原来（D195）是**两案对比**：同一张卡片渲染两遍，左边 h3 = 17、右边 h3 = 15，
+         * 旁边打印实测值，用来看"要不要压一档"。使用者选了 15，取值进了 `app.css`，
+         * 于是这里改成**终态**：一张卡里 h2 / h3 / h4 同屏，量的就是三档各自的真值。
+         *
+         * 量三件事：① 三档字号**互不相同**（17 / 15 / 13，两两差 2px——"拉开一档"就是这个意思）；
+         * ② 字重都是 600（标题族一律 600，变的只有字号）；
+         * ③ 都还是单行（换行会让"矮 2px"变成"高 8px"，那就不是同一档了）。
          */
         {
-          const a = q('#demo-setting-a')
-          const b = q('#demo-setting-b')
+          const host = q('#demo-setting-final')
           const delta = q('#demo-setting-delta')
-          if (a && b) {
-            const aH2 = a.querySelector('h2')
-            const aH3 = a.querySelector('h3')
-            const bH2 = b.querySelector('h2')
-            const bH3 = b.querySelector('h3')
-            const aCard = a.querySelector('.main-panel')
-            const bCard = b.querySelector('.main-panel')
+          if (host) {
+            const h2 = host.querySelector('h2')
+            const h3 = host.querySelector('h3')
+            const h4 = host.querySelector('h4')
             const fs = (el) => parseFloat(C(el).fontSize)
-            const fw = (el) => C(el).fontWeight
-            const hgt = (el) => Math.round(R(el).height)
+            const single = (el) => Math.round(R(el).height) <= Math.ceil(fs(el) * 1.6)
             ruleChecks.push([
-              '⑦ 设置页：左 h3 与 h2 同值（现状），右 h3 小 2px 且 h2 不变（候选）',
+              '⑦ 标题三档互不相同：h2 17 / h3 15 / h4 13（都 600、都单行）',
               (() => {
-                if (!aH2 || !aH3 || !bH2 || !bH3) return false
-                const sameNow = fs(aH2) === fs(aH3) && fw(aH2) === fw(aH3)
-                const splitBy = fs(aH3) - fs(bH3)
-                const h2Same = fs(aH2) === fs(bH2)
-                const noWrap = [aH3, bH3].every((el) => hgt(el) <= Math.ceil(fs(el) * 1.6))
-                return sameNow && splitBy === 2 && h2Same && noWrap
+                if (!h2 || !h3 || !h4) return false
+                const sizes = [fs(h2), fs(h3), fs(h4)]
+                const distinct = new Set(sizes).size === 3
+                const spaced = sizes[0] - sizes[1] === 2 && sizes[1] - sizes[2] === 2
+                const weights = [h2, h3, h4].every((el) => C(el).fontWeight === '600')
+                const ones = [h2, h3, h4].every(single)
+                return distinct && spaced && weights && ones
               })(),
             ])
             if (delta) {
-              const dCard = hgt(aCard) - hgt(bCard)
               delta.innerHTML =
-                '实测：左 h3 <strong>' + C(aH3).fontSize + ' / ' + fw(aH3) + '</strong>、h2 ' +
-                C(aH2).fontSize + '（同值）；右 h3 <strong>' + C(bH3).fontSize + ' / ' + fw(bH3) +
-                '</strong>、h2 ' + C(bH2).fontSize + '。整张卡片左 ' + hgt(aCard) + 'px、右 ' +
-                hgt(bCard) + 'px（差 ' + dCard + 'px），两个 h3 都仍是单行。'
+                '实测：h2 <strong>' + C(h2).fontSize + '</strong>、h3 <strong>' + C(h3).fontSize +
+                '</strong>、h4 <strong>' + C(h4).fontSize + '</strong>（三档两两差 2px，字重都是 ' +
+                C(h2).fontWeight + '）；三行高度 ' + [h2, h3, h4].map((el) => Math.round(R(el).height)).join(' / ') +
+                'px，都没有换行。'
             }
           }
         }

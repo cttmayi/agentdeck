@@ -74,11 +74,12 @@ test('★ 页名唯一：`<h1>` 只许出现在顶栏（一页一个）', () => 
 
 test('★★ 字号只在 app.css 一处定义：组件里不许给 h2/h3/h4 写 `font-size`', () => {
   /**
-   * 白名单只有一处：**浮层工具条的标题**（`PromptEditor` 的 `.pe-head h3`）。
-   * 浮层不属于页面层级（它盖在页面上、14px 是"模态头"那一档），且那里还兼着省略号，
-   * 所以它自带字号是合理的——但必须写在这份白名单里，不能悄悄变成第二套层级。
+   * 白名单原来是 `PromptEditor`（浮层工具条的标题自带 14px）。
+   * ★ D194 把那个 `<h3>` 换成了非标题元素（`<span class="pe-head-name">`，
+   *   14/600 一字不改），于是这里**没有例外了**——真出现第二个要自带字号的标题，
+   *   得先说明它为什么不属页面层级，再加进这张表。
    */
-  const ALLOW = new Set(['apps/web/src/components/PromptEditor.svelte'])
+  const ALLOW = new Set<string>([])
   const offenders: string[] = []
   for (const { rel, text } of sources) {
     if (ALLOW.has(rel)) continue
@@ -95,9 +96,10 @@ test('★★ 字号只在 app.css 一处定义：组件里不许给 h2/h3/h4 写
     const m = css.match(new RegExp(`(?:^|\\n)${tag} \\{ font-size: var\\(--fs-(\\w+)\\)`))
     return m ? m[1] : null
   })
+  // ★ D197：h3 从 `lg`(17) 压到 `md`(15)——三档 17 / 15 / 13，两两差 2px。
   assert.deepEqual(
     ladder.slice(1),
-    ['lg', 'lg', 'sm'],
+    ['lg', 'md', 'sm'],
     `四级梯子被改了（现在：${ladder.join(' / ')}）——改层级必须同一批改 ui-style.md §2.9 与探针 headings.*`,
   )
 })

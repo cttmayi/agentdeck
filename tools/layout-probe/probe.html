@@ -5808,10 +5808,11 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
            * 把四级都量一遍——设置页同时有四样东西在屏上：
            *   · 顶栏页名（`h1.page-name`）＝ 15px / 500 / `--text-dim`；
            *   · 卡片头（`.main-panel-head h2`）＝ 17px / 600 / 正文色；
-           *   · 分段（`.drawer-section h3`）＝ 17px / 600；
+           *   · 分段（`.drawer-section h3`）＝ **15px** / 600（D197 从 17 压到 15）；
            *   · 段内小节（`.drawer-section h4`）＝ 13px / 600 / `--text-dim`。
-           * 外加两条关系：**页名比卡片头小**（顶栏退后一层）、**h2 与 h3 同字号**
-           * （"这一块的名字"与"分段名"差的是位置不是字号，见 §2.9 的理由）。
+           * 外加两条关系：**页名比卡片头小**（顶栏退后一层）；三档两两差 2px
+           * （17 / 15 / 13）——D179 时 h2 与 h3 同字号（差的是位置不是字号），
+           * **D197 改掉了**：设置页里 h3 就挂在 h2 底下，同值时两档在视觉上分不开。
            */
           const langSelectZh = langSelectOf()
           if (!langSelectZh) errors.push('语言组：切回中文时抽屉里的语言 select 不见了')
