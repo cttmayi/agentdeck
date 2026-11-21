@@ -102,7 +102,7 @@ function makeFakes(opts: FakeOptions = {}) {
       return { ...conversation, ...patch } as Conversation
     },
     listSkills: async () => opts.skills ?? [],
-    // ★ 2026-11（D111）：独有技能（agents/<id>/SKILL/ 文件）。聊天路径（注入）会读它，
+    // ★ 2026-11（D111）：独有技能（agents/<id>/skills/ 文件）。聊天路径（注入）会读它，
     //   这里默认空（夹具不造独有技能——共享 ∪ 独有那条线由 agent-maker 的整链测试钉住）。
     listExclusiveSkills: async () => [],
     getExclusiveSkill: async () => null,

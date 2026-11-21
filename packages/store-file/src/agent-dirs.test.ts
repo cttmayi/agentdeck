@@ -1,10 +1,10 @@
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { appendFile, mkdir, readFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { exists } from './fs-utils.ts'
 import { join } from 'node:path'
 import { agentSkillOwner } from '@agentdeck/domain'
-import { makeAgent, wsId } from '@agentdeck/domain/testing'
+import { agentId, makeAgent, wsId } from '@agentdeck/domain/testing'
 import type { Agent, MemoryEntry, Workspace } from '@agentdeck/protocol'
 import { FileStore } from './file-store.ts'
 import { agentsRoot } from './agent-dirs.ts'
@@ -15,7 +15,7 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
  *
  * 钉的是这几件事（设计定稿 `docs/design/agent-directory.md`）：
  *   · 目录形态：agent.json（结构化，**不含指令正文**）+ instructions.md（组装前）；
- *   · 独有技能 = 目录里的文件（SKILL/<slug>/SKILL.md），不进技能库；
+ *   · 独有技能 = 目录里的文件（skills/<slug>/SKILL.md），不进技能库；
  *   · 老 JSONL 的一次性迁移：幂等、内置带 `instructionsAssembled: true`（老记录存的是
  *     组装后全文）；迁移完成后老 jsonl **删掉**（使用者确认），`.migrated` 标记
  *     留着——备份把 jsonl 放回来也不许重迁复活。
@@ -96,7 +96,7 @@ describe('一个智能体 = 一个目录（D111）', () => {
     assert.equal(await store.getAgent('nope' as Agent['id']), null)
   })
 
-  test('★ 独有技能：写 / 列 / 读 / 删（SKILL/<slug>/SKILL.md，不进技能库）', async () => {
+  test('★ 独有技能：写 / 列 / 读 / 删（skills/<slug>/SKILL.md，不进技能库）', async () => {
     const id = 'a-exclusive' as Agent['id']
     await store.insertAgent(mk(id))
     const body = '---\nname: 私有笔记格式\ndescription: 三段式\n---\n## When to Use\n私有笔记\n## Procedure\n写三段。'
@@ -119,15 +119,82 @@ describe('一个智能体 = 一个目录（D111）', () => {
     assert.deepEqual(await store.listSkills(WS), [])
   })
 
+  test('★★ 老盘上的 `SKILL/`（大写）⇒ 开库时改成 `skills/`（D229；两步改名，大小写不敏感的文件系统也不炸）', async () => {
+    const dir = await makeTempDir('agent-skills-case')
+    try {
+      const id = agentId('legacy-case')
+      // 手工造"改之前"的形状：agents/<id>/SKILL/<slug>/SKILL.md（大写目录名）
+      await mkdir(join(agentsRoot(dir), String(id), 'SKILL', 'old-one'), { recursive: true })
+      await writeFile(
+        join(agentsRoot(dir), String(id), 'SKILL', 'old-one', 'SKILL.md'),
+        '# 老的那一条\n\n## When to Use\n\n在大写目录里。\n',
+        'utf8',
+      )
+      await writeFile(
+        join(agentsRoot(dir), String(id), 'agent.json'),
+        JSON.stringify({ id, workspaceId: String(WS), name: '老智能体', skillIds: [], env: {}, createdAt: 1, updatedAt: 1 }),
+        'utf8',
+      )
+
+      const infos: string[] = []
+      const store = await FileStore.open({
+        dataDir: dir,
+        fsync: false,
+        onInfo: (m) => infos.push(m),
+      })
+      // 读得到（说明文件夹已经在小写目录下了）
+      const listed = await store.listExclusiveSkills(agentSkillOwner(id))
+      assert.deepEqual(listed.map((x) => x.slug), ['old-one'])
+      assert.match(listed[0]!.body, /在大写目录里/)
+      // 大写目录没了、小写目录在
+      assert.equal(await exists(join(agentsRoot(dir), String(id), 'SKILL')).catch(() => false), false)
+      assert.equal(
+        await readFile(join(agentsRoot(dir), String(id), 'skills', 'old-one', 'SKILL.md'), 'utf8').then(
+          () => true,
+        ),
+        true,
+      )
+      assert.ok(infos.some((m) => m.includes('独有技能目录已改为小写')), `要打日志：${infos.join(' / ')}`)
+      await store.close()
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
+  test('★ 两个目录都在（SKILL/ 与 skills/）⇒ **不合并**，报出来让人处理', async () => {
+    const dir = await makeTempDir('agent-skills-conflict')
+    try {
+      const id = agentId('conflicted')
+      for (const name of ['SKILL', 'skills']) {
+        await mkdir(join(agentsRoot(dir), String(id), name, 'dup'), { recursive: true })
+        await writeFile(join(agentsRoot(dir), String(id), name, 'dup', 'SKILL.md'), '# dup\n', 'utf8')
+      }
+      await writeFile(
+        join(agentsRoot(dir), String(id), 'agent.json'),
+        JSON.stringify({ id, workspaceId: String(WS), name: '冲突', skillIds: [], env: {}, createdAt: 1, updatedAt: 1 }),
+        'utf8',
+      )
+      const infos: string[] = []
+      const store = await FileStore.open({ dataDir: dir, fsync: false, onInfo: (m) => infos.push(m) })
+      assert.ok(
+        infos.some((m) => m.includes('同时有')),
+        `冲突要说出来（合并就是猜哪份对）：${infos.join(' / ')}`,
+      )
+      await store.close()
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
   test('★ 删智能体 = 删整个目录（连独有技能文件一起）', async () => {
     const id = 'a-remove' as Agent['id']
     await store.insertAgent(mk(id))
     await store.writeExclusiveSkill(agentSkillOwner(id), 'gone-with-me', '# 陪葬技能')
     assert.equal(await store.deleteAgent(id), true)
     assert.equal(await store.getAgent(id), null)
-    // 目录真的没了（连 SKILL/ 一起）
+    // 目录真的没了（连 skills/ 一起）
     assert.equal(
-      await readFile(join(agentsRoot(dir), id, 'SKILL', 'gone-with-me', 'SKILL.md'), 'utf8').then(
+      await readFile(join(agentsRoot(dir), id, 'skills', 'gone-with-me', 'SKILL.md'), 'utf8').then(
         () => true,
         () => false,
       ),

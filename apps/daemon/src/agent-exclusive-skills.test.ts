@@ -4,7 +4,7 @@ import { startDaemon } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
- * 智能体的**独有技能** API（2026-11，D111）——`agents/<id>/SKILL/<slug>/SKILL.md`
+ * 智能体的**独有技能** API（2026-11，D111）——`agents/<id>/skills/<slug>/SKILL.md`
  * 文件资产。与技能库两码事：不进技能页、不可卸载、删智能体连目录一起删。
  *
  * ══════════════════════════════════════════════════════════════════

@@ -93,7 +93,7 @@ export interface ChatTurnOutcome {
  */
 /**
  * 这个对话这一轮注入的技能 = 共享（`agent.skillIds` ∪ 对话自己选的
- * `conversation.skillIds`，按 id 去重）∪ 独有（`agents/<id>/SKILL/` 文件）。
+ * `conversation.skillIds`，按 id 去重）∪ 独有（`agents/<id>/skills/` 文件）。
  *
  * ★ 2026-11（D111）不再自己拼一遍库技能——共享 ∪ 独有的拼接只在
  *   `agent-injectable-skills.ts` 一处（聊天、任务、审核、返工都走那里），

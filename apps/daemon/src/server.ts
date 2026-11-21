@@ -1354,8 +1354,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     skillsMineRoot,
     /*
      * ★ D228：**独有技能"在哪"的解析**——两种来源各归自己的拥有者：
-     *   · `agent` → `agents/<id>/SKILL/`（形状归 store-file 的 `agent-dirs.ts`）；
-     *   · `workflow-agent` → `workflows/<wid>/agents/<aid>/SKILL/`（形状归
+     *   · `agent` → `agents/<id>/skills/`（形状归 store-file 的 `agent-dirs.ts`）；
+     *   · `workflow-agent` → `workflows/<wid>/agents/<aid>/skills/`（形状归
      *     `workflows-dirs.ts`，也就是这个 daemon 自己）。
      *   注入这一层因此只需要一个目录，不需要知道有两类来源（同一份注入实现）。
      */
@@ -4054,7 +4054,7 @@ async function injectedSkillsOf(
       }
     }
 
-    // ── 智能体的独有技能（D111：`agents/<id>/SKILL/<slug>/SKILL.md` 文件资产）──
+    // ── 智能体的独有技能（D111：`agents/<id>/skills/<slug>/SKILL.md` 文件资产）──
     //
     // 两类技能的分界（设计定稿 `docs/design/agent-directory.md` §4）：
     //   · **独有** = 这个智能体目录里的文件——不进技能库、不进技能页、不可卸载。
@@ -7469,7 +7469,7 @@ async function injectedSkillsOf(
        * 这里只是提前让守卫看不到它），然后照常走下面那套危险检查。
        *
        * ★ 2026-11（D111）：生成者的那 3 条平台技能不再是库技能（是它的**独有技能**，
-       *    在 `agents/<id>/SKILL/` 目录里、不可卸载）——所以这里只剩 distilly 这一条
+       *    在 `agents/<id>/skills/` 目录里、不可卸载）——所以这里只剩 distilly 这一条
        *    要提前摘挂；生成者的分支整个删掉（上一版那个"允许卸载、下次启动再装回来"
        *    的特殊处理被统一机制取代了）。
        */
@@ -8358,7 +8358,7 @@ async function injectedSkillsOf(
       //
       // ★ 2026-11（使用者拍板："生成的 SKILL 被放进了共享技能池，应该作为智能体的
       //    内置技能"）：配套技能是**这个新智能体自己的**——落成它的**独有技能**
-      //    （`agents/<id>/SKILL/<slug>/SKILL.md`），**不进共享技能池**（skills-mine、
+      //    （`agents/<id>/skills/<slug>/SKILL.md`），**不进共享技能池**（skills-mine、
       //    无 git）。配套技能给这个岗位用，就是 D111"智能体自己的东西住进它的目录"
       //    的同一句语义；共享沉淀（mine）是使用者主动提炼的动作，生成流程不替
       //    使用者往共享池写。独有技能随智能体删除而删除（文件资产语义）。

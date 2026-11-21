@@ -27,14 +27,14 @@
         ↓ 栏头出现「确认生成智能体」按钮
   审阅面板（岗位卡 + 配套技能，边界必审，人可改）→ 确认
         ↓
-  创建智能体，配套技能落成**它的独有技能**（agents/<id>/SKILL/，不进共享技能池）
+  创建智能体，配套技能落成**它的独有技能**（agents/<id>/skills/，不进共享技能池）
   （2026-11 使用者拍板：生成的 SKILL 应该作为智能体的内置技能）
 ```
 
 - **规则由生成者描述**：边界、输出格式、职责……是它提出、你确认，不是你在表单
   或目录里写——这最贴文章"招聘官"的形态（它挖，你答）。
 - **生成者挂技能**：几个我推荐的平台技能（§4），**生成者的独有技能**（D111：
-  启动对账播种进 `agents/<id>/SKILL/`，不进技能库；§3.3 有修订说明）。
+  启动对账播种进 `agents/<id>/skills/`，不进技能库；§3.3 有修订说明）。
 - **取代两个内置**：「访谈官」（只问不干）与「岗位卡起草者」（只写岗位卡）被
   **智能体生成者**吸收合并——它既问又起草，一个内置、一个角色、一个入口。
 - **配套技能与岗位卡同一场确认**：生成者按 skill-eligibility 判定、在聊天里起草
@@ -93,7 +93,7 @@
 ### 3.3 挂载技能（D111 起：平台的独有技能，不再"动态安装进技能库"）
 
 智能体生成者挂 **3 个平台内置技能**（§4 推荐），由 `ensureBuiltinAgentMakerSkills`
-启动对账时**播种成生成者的独有技能**——`agents/<id>/SKILL/<slug>/SKILL.md`
+启动对账时**播种成生成者的独有技能**——`agents/<id>/skills/<slug>/SKILL.md`
 （内容从仓库 `catalog/platform-skills/<slug>/SKILL.md` 复制，幂等）。
 
 > ⚠️ **D111 修订**：早前这节写的是"动态安装进 `skillsRoot`（与 distilly 同一机制）"。
@@ -154,7 +154,7 @@ conversation-<id>/
   1. 配套技能逐条过 `resolvePayloadEntry` 同一关（缺正文 / slug 非法 ⇒ 400
      `agent_skill_invalid`，拦在写之前）；
   2. 创建智能体：name/role/instructions（岗位卡 frontmatter + 正文，`skillIds`
-     = 空）；配套技能写进它的**独有技能**目录（`agents/<id>/SKILL/<slug>/SKILL.md`）。
+     = 空）；配套技能写进它的**独有技能**目录（`agents/<id>/skills/<slug>/SKILL.md`）。
      ★ 2026-11（使用者拍板）：配套技能**不进共享技能池**（skills-mine / 无 git）——
      它是"这个岗位自己"的技能，是 D111"智能体自己的东西住进它的目录"的同一句语义；
      共享沉淀是使用者主动提炼的动作，生成流程不替使用者往共享池写。独有技能随
@@ -171,7 +171,7 @@ conversation-<id>/
 
 v1 定的是"共享资产"（mine + git、任何智能体可挂）；使用者实操后拍板推翻：
 "智能体生成的 SKILL 被放在了共享技能池中了，应该作为智能体的内置技能"。
-配套技能是**这个新智能体自己的**——落成独有技能（`agents/<id>/SKILL/`，文件资产
+配套技能是**这个新智能体自己的**——落成独有技能（`agents/<id>/skills/`，文件资产
 语义，随智能体删除），不进共享技能池、无 git 镜像。这与 D111"智能体自己的东西
 住进它的目录"是同一句语义；共享沉淀（mine）是使用者主动提炼的动作，生成流程
 不替使用者往共享池写。
@@ -234,7 +234,7 @@ v1 定的是"共享资产"（mine + git、任何智能体可挂）；使用者�
 |---|---|
 | `GET /api/conversations/:id` | 详情带 `hasAgentDraft`（agent-draft/ 目录里有 agent-draft.md 的侦测） |
 | `GET /api/conversations/:id/agent-draft` | 生成产物：`{agentDraft: string|null, skills: [{slug,name,description,body}]}`（agent-draft/agent-draft.md + `agent-draft/skill/<slug>/SKILL.md` 解析） |
-| `POST /api/conversations/:id/agent-commit` `{agentDraft, skills:[{slug,body}]}` | 人确认：岗位卡重解析校验 → 配套技能逐条 `resolvePayloadEntry` 校验（缺正文/slug 非法 ⇒ 400 `agent_skill_invalid`）→ 创建智能体 → 配套技能写进它的独有技能目录（`agents/<id>/SKILL/`；不进共享池）。非 `agent-maker` 对话 ⇒ 400 `agent_commit_not_maker` |
+| `POST /api/conversations/:id/agent-commit` `{agentDraft, skills:[{slug,body}]}` | 人确认：岗位卡重解析校验 → 配套技能逐条 `resolvePayloadEntry` 校验（缺正文/slug 非法 ⇒ 400 `agent_skill_invalid`）→ 创建智能体 → 配套技能写进它的独有技能目录（`agents/<id>/skills/`；不进共享池）。非 `agent-maker` 对话 ⇒ 400 `agent_commit_not_maker` |
 
 创建动作仍走现有端点（智能体 `POST /api/agents` 同批字段、技能沉淀 commit 同
 `resolvePayloadEntry`），新接口只负责"岗位卡 → 配套技能 → 确认"这一段，不复制

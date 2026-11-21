@@ -526,7 +526,7 @@ describe('生成智能体整链（2026-11 设计定稿 §3.5–§3.6）', () => 
      */
 
     // ★ 2026-11（使用者拍板）：配套技能**不进共享技能池**（skills-mine 里没有它），
-    //   落成**新智能体的独有技能**（`agents/<id>/SKILL/`）——响应带 exclusiveSlugs。
+    //   落成**新智能体的独有技能**（`agents/<id>/skills/`）——响应带 exclusiveSlugs。
     const skills = await json('/api/skills')
     const poolHit = (skills.body as { skills: Array<{ slug: string; source: string }> }).skills.find(
       (x) => x.slug === 'meeting-notes-format',

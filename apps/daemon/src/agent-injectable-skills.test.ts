@@ -69,7 +69,7 @@ describe('★ D228：独有技能按"来源"定位，两种来源同一份实现
     try {
       const store = await seed(dir)
 
-      // ① 账号智能体那条：agents/<id>/SKILL/<slug>/SKILL.md
+      // ① 账号智能体那条：agents/<id>/skills/<slug>/SKILL.md
       await store.writeExclusiveSkill({ kind: 'agent', agentId: 'a-1' as never }, 'private-notes', BODY)
       const agentSources: SkillSources = {
         workspaceId: WS as never,
@@ -78,7 +78,7 @@ describe('★ D228：独有技能按"来源"定位，两种来源同一份实现
       }
       const fromAgent = await loadInjectableSkills(store, agentSources)
 
-      // ② 编排内建智能体那条：workflows/<wid>/agents/<aid>/SKILL/<slug>/SKILL.md
+      // ② 编排内建智能体那条：workflows/<wid>/agents/<aid>/skills/<slug>/SKILL.md
       await store.writeExclusiveSkill(
         { kind: 'workflow-agent', workflowId: 'wf-1', agentId: 'wa-1' },
         'private-notes',
@@ -110,11 +110,11 @@ describe('★ D228：独有技能按"来源"定位，两种来源同一份实现
       // ③ 两边落在**不同目录**（真实落盘位置不能撞）
       assert.match(
         agentExclusiveSkillsDir(dir, 'a-1'),
-        /agents[/\\]a-1[/\\]SKILL$/,
+        /agents[/\\]a-1[/\\]skills$/,
       )
       assert.match(
         workflowAgentExclusiveSkillsDir(dir, 'wf-1', 'wa-1'),
-        /workflows[/\\]wf-1[/\\]agents[/\\]wa-1[/\\]SKILL$/,
+        /workflows[/\\]wf-1[/\\]agents[/\\]wa-1[/\\]skills$/,
       )
       await store.close()
     } finally {

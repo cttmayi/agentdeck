@@ -167,8 +167,8 @@ export const ACTIVE_RUN_STATUSES = [
  * 其它实现（SQLite）可以如实拒绝（独有技能本来就是文件资产）。
  *
  * 两种来源今天都真实存在：
- *   · `agent` —— 智能体页里那条记录（`agents/<id>/SKILL/`）；
- *   · `workflow-agent` —— 编排内建智能体（`workflows/<wid>/agents/<aid>/SKILL/`），
+ *   · `agent` —— 智能体页里那条记录（`agents/<id>/skills/`）；
+ *   · `workflow-agent` —— 编排内建智能体（`workflows/<wid>/agents/<aid>/skills/`），
  *     它**不在智能体库里**，所以没有 `AgentId` 可用——这正是这一层存在的理由。
  */
 export type ExclusiveSkillOwner =
@@ -233,7 +233,7 @@ export interface Store {
    */
   deleteAgent(id: AgentId): Promise<boolean>
 
-  // ── 独有技能（D111：`agents/<id>/SKILL/<slug>/SKILL.md` 这类文件资产）──
+  // ── 独有技能（D111：`agents/<id>/skills/<slug>/SKILL.md` 这类文件资产）──
 
   // 两类技能的分界（设计定稿 `docs/design/agent-directory.md` §4）：
   //   · **独有** = 跟着某个实体目录走的文件——不进技能库、不进技能页、不可卸载，

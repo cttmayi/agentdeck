@@ -1032,7 +1032,7 @@ export class SqliteStore implements Store {
 
   // ── Agent 的独有技能（D111）──
 
-  // ⚠️ 独有技能是**文件资产**（`agents/<id>/SKILL/`），v2 SQLite 没接线（见
+  // ⚠️ 独有技能是**文件资产**（`agents/<id>/skills/`），v2 SQLite 没接线（见
   //    docs/README.md「store-sqlite 已实现但没有接线」），这里如实**不支持**：
   //    daemon 用的是 store-file，独有技能只会落到文件上。写死返回/抛错，比
   //    假装能存更诚实——真接线时（SQLite 管文件路径？）再重新设计。

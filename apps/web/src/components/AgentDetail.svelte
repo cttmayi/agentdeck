@@ -80,7 +80,7 @@
   let installingSkill = false
 
   // ── 独有技能（2026-11，D111）──
-  // 只属于这个智能体的技能文件（agents/<id>/SKILL/<slug>/SKILL.md）。与上面那格
+  // 只属于这个智能体的技能文件（agents/<id>/skills/<slug>/SKILL.md）。与上面那格
   // 「挂载的技能」（技能库引用）两码事：不进技能库、不进技能页、不可卸载。
   let exclusiveSkills: AgentExclusiveSkill[] = []
   let exclusiveLoading = false
@@ -1297,7 +1297,7 @@
               ——**与共享技能共用一个框**（`.skill-box`），框内横线
               （`.exclusive-cell` 的 `border-top`）隔开）。上一段 = **共享**技能
               （`skillIds` 引用技能库，全工作区看得到）；下一段 = **独有**技能
-              （`agents/<id>/SKILL/` 文件，只属于它，勾选锁着）。编辑/删除悬停
+              （`agents/<id>/skills/` 文件，只属于它，勾选锁着）。编辑/删除悬停
               出现，内置只读（平台播种，服务端同样拒）。没有标题/条数/新增按钮
               （独有技能当前靠平台播种/文件/API 添加，界面不提供新增入口）。
           -->

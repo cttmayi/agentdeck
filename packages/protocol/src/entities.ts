@@ -1124,7 +1124,7 @@ export const SkillRef = z.object({
   /**
    * 技能库里的 id。
    *
-   * ★ 2026-11（D111）**允许为空**：智能体的**独有技能**（`agents/<id>/SKILL/`
+   * ★ 2026-11（D111）**允许为空**：智能体的**独有技能**（`agents/<id>/skills/`
    *   里的文件）不在技能库里，没有库 id——ref 只留 slug + `source: 'agent'`。
    *   老数据全是库技能（id 非空），所以可空不会破坏任何既有读路径。
    */

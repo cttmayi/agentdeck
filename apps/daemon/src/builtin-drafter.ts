@@ -402,7 +402,7 @@ export const WORKFLOW_MAKER_INSTRUCTIONS_HISTORY: readonly string[] = [
  *    配套技能判定从技能注入，这里只立"是谁、怎么问、产出什么"。技能装不上时指令
  *    本身仍含五字段与边界要点（技能是强化不是唯一来源）。
  *
- * ★ 2026-11（D111）：这三份平台技能是智能体生成者的**独有技能**（`agents/<id>/SKILL/`
+ * ★ 2026-11（D111）：这三份平台技能是智能体生成者的**独有技能**（`agents/<id>/skills/`
  *   下的文件资产）——不再进技能库、不进技能页、不可卸载；这里只存**组装前**正文
  *   （`_BODY`），平台守则运行时拼（`effectiveInstructions`）。
  */
@@ -1370,7 +1370,7 @@ async function ensureBuiltinAgentMakerInner(
       runtimeKey: 'default',
       workDir: null,
       // ★ 2026-11（D111）：它不再挂**库**技能——那 3 份平台技能是它的**独有技能**
-      //   （`agents/<id>/SKILL/` 文件，由 `ensureBuiltinAgentMakerSkills` 播种）。
+      //   （`agents/<id>/skills/` 文件，由 `ensureBuiltinAgentMakerSkills` 播种）。
       skillIds: [],
       env: {},
       /*

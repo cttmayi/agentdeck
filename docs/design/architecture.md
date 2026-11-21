@@ -456,7 +456,7 @@ proposed ──┬──▶ auto_approved ──▶ executing ──┬──▶
 ├── device.json             本机 device 标识
 ├── workspaces.json         workspace 记录（普通 JSON 数组，不是日志——D226）
 ├── agents/<agentId>/       ★ 一个智能体 = 一个目录（D111）：agent.json（不含指令）+ instructions.md
-│                           + memory.jsonl + SKILL/<slug>/SKILL.md（它**独有**的技能）
+│                           + memory.jsonl + skills/<slug>/SKILL.md（它**独有**的技能）
 ├── memory/<agentId>/MEMORY.md  记忆的**人可读镜像**（`memory/` 整个根是 git 仓库；权威仍是 store）
 ├── workflows/<workflowId>/ ★ 一条编排 = 一个目录（D224）：workflow.json（不含代码）+ main.js
 │                           + agents/<agentId>/（**编排内建智能体**，与 agents/<id>/ 同形；

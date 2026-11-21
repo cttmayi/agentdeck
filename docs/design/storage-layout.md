@@ -59,7 +59,7 @@
 │   ├── agent.json                结构化（**不含指令正文**）
 │   ├── instructions.md           指令正文（**组装前**：内置 = 身份块，自建 = 全文）
 │   ├── memory.jsonl              它自己的记忆（权威；§5）
-│   └── SKILL/<slug>/SKILL.md     它**独有**的技能（文件资产：不进技能库、不进技能页、不可卸载）
+│   └── skills/<slug>/SKILL.md     它**独有**的技能（文件资产：不进技能库、不进技能页、不可卸载）
 │
 ├── memory/<agentId>/MEMORY.md    记忆的**人可读镜像**（`memory/` 整个根是一个 git 仓库）
 │
@@ -69,7 +69,7 @@
 │   └── agents/<agentId>/         **编排内建智能体**（只在编排里有效）——与 agents/<id>/ 同形：
 │       ├── agent.json            name / runtimeKey / skillIds …（不含指令）
 │       ├── instructions.md       它的话
-│       └── SKILL/<slug>/SKILL.md 它的独有技能（D228：注入通道按**来源**取目录，
+│       └── skills/<slug>/SKILL.md 它的独有技能（D228：注入通道按**来源**取目录，
 │                                  不再要求"这个智能体在库里有一条 AgentId"）
 │       ⚠️ 这一层**功能尚未落地**（`Workflow.inlineAgents` 字段已在、原语没接）；
 │          落地的位置就是这里，别在别处再造一套"编排专用智能体"的存法
@@ -105,7 +105,7 @@
 ├── agent.json          结构化（**不含指令正文**）
 ├── instructions.md     指令正文（**组装前**：内置 = 身份块，自建 = 全文）
 ├── memory.jsonl        这个智能体自己的记忆（逐条 op 日志，§5）
-└── SKILL/<slug>/SKILL.md   它**独有**的技能（文件资产，不进技能库、不进技能页、不可卸载）
+└── skills/<slug>/SKILL.md   它**独有**的技能（文件资产，不进技能库、不进技能页、不可卸载）
 ```
 
 **`agent.json` 里有什么**（一条真实记录，字段顺序为落盘顺序）：
@@ -142,14 +142,20 @@
 | `agent.json` | `writeAgentDir()`（`packages/store-file/src/agent-dirs.ts`） | `readAgentDir()` | 结构化信息；**永远不含 `instructions`** |
 | `instructions.md` | 同上 | 同上（读回时拼成一条 `Agent.instructions`） | 组装**前**正文 |
 | `memory.jsonl` | store 端口 `insertMemoryEntry` | `listMemoryEntries` | 记忆的**权威** |
-| `SKILL/<slug>/SKILL.md` | store 端口 `writeExclusiveSkill(owner, …)` | `listExclusiveSkills(owner)` | 这个智能体独有的技能（**按来源定位**，见下） |
+| `skills/<slug>/SKILL.md` | store 端口 `writeExclusiveSkill(owner, …)` | `listExclusiveSkills(owner)` | 这个智能体独有的技能（**按来源定位**，见下） |
 
 **独有技能按「来源」定位，不按 `agentId`**（D228，2026-11）：
 
 | 来源 | 目录 | 谁能用 |
 |---|---|---|
-| `{ kind: 'agent' }` | `agents/<id>/SKILL/` | 智能体页里的那条记录 |
-| `{ kind: 'workflow-agent' }` | `workflows/<wid>/agents/<aid>/SKILL/` | **编排内建智能体**（不在库里、没有 AgentId） |
+| `{ kind: 'agent' }` | `agents/<id>/skills/` | 智能体页里的那条记录 |
+| `{ kind: 'workflow-agent' }` | `workflows/<wid>/agents/<aid>/skills/` | **编排内建智能体**（不在库里、没有 AgentId） |
+
+> ⚠️ **目录名是小写 `skills/`**（D229，2026-11 使用者定的）。文件名仍然是 `SKILL.md`
+> ——那是技能规范约定的**文件**名，与目录名无关，别跟着改。
+> 老盘上的 `SKILL/`（大写）在开库时**自动改名**：两步 rename（先 `skills.tmp-<随机>` 再
+> `skills`）——大小写不敏感的文件系统（macOS 默认 APFS）直接改大小写会报 `EEXIST`；
+> 两个目录同时存在时**不合并**，只在启动日志里点名叫人处理（合并技能目录等于猜哪一份对）。
 
 改之前端口上那四个方法第一个参数就是 `agentId`——于是"独有技能放在哪"被硬绑在
 "这个智能体在库里有一条记录"上，编排内建智能体就无法带独有技能（而它恰恰最需要）。
@@ -312,13 +318,13 @@ append-only 日志。真机上量到的样子：**一个**工作区、**87 行**
 （§2 的全图里已经把这一层画进去了，并标了"功能尚未落地"）——
 **现在不建空目录**（那叫造死结构）。
 
-**它要不要也带 `SKILL/<slug>/`（文件资产）？形状上可以，但第一版刻意不做。**
+**它要不要也带 `skills/<slug>/`（文件资产）？形状上可以，但第一版刻意不做。**
 判断依据是"有没有第二个真相 / 有没有编辑落点"：
 
 | 方案 | 代价 | 结论 |
 |---|---|---|
 | 只带 `skillIds`（**引用技能库**里的技能） | 零：`loadAgentInjectableSkills` 已经在做"库 id → 注入"，inline agent 只是多传一份 id | ✅ **第一版就这个**，覆盖"这一步的人该带哪几份参考资料" |
-| 带 `SKILL/<slug>/SKILL.md`（**该编排独有**的文件资产） | 注入通道现在只从 `agents/<id>/SKILL/` 读（`store.listExclusiveSkills(agent.id)`，而 inline agent 没有库 id）；更要紧的是**编排页只有代码编辑器**，加了就是"盘上有文件、界面上没有落点"的死接口 | ⛔ 先不做；真要做，形状是 `workflows/<id>/agents/<agentId>/SKILL/<slug>/SKILL.md`（与 `agents/<id>/` 逐字同形），并且**必须同时**给编排页一个"内建智能体 → 它带的技能"面板 |
+| 带 `skills/<slug>/SKILL.md`（**该编排独有**的文件资产） | 注入通道现在只从 `agents/<id>/skills/` 读（`store.listExclusiveSkills(agent.id)`，而 inline agent 没有库 id）；更要紧的是**编排页只有代码编辑器**，加了就是"盘上有文件、界面上没有落点"的死接口 | ⛔ 先不做；真要做，形状是 `workflows/<id>/agents/<agentId>/skills/<slug>/SKILL.md`（与 `agents/<id>/` 逐字同形），并且**必须同时**给编排页一个"内建智能体 → 它带的技能"面板 |
 
 > 口径一句话：**能引用就别复制。** 库技能是共享的（`skillIds` 引用，改一处全生效）；
 > 只有"这条编排专属、且使用者真会去编辑"的东西才值得落成文件资产——而"真会去编辑"

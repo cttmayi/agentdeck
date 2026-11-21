@@ -56,6 +56,7 @@ import {
   agentDirPath,
   agentsRoot,
   agentExclusiveSkillsDir,
+  migrateExclusiveSkillsDirCase,
   getExclusiveSkillBodyIn,
   listAgentDirs,
   listExclusiveSkillBodiesIn,
@@ -80,7 +81,7 @@ import {
  *   ├── agents/<agentId>/              ★ 智能体目录（D111，2026-11）——
  *   │   ├── agent.json               结构化资讯（不含指令正文）
  *   │   ├── instructions.md          指令**组装前**正文（内置 = 身份块；自建 = 全文）
- *   │   └── SKILL/<slug>/SKILL.md    这个智能体**独有**的技能（文件资产，不进技能库）
+ *   │   └── skills/<slug>/SKILL.md    这个智能体**独有**的技能（文件资产，不进技能库）
  *   └── workspaces/<wsId>/
  *       ├── log/<collection>.jsonl    append-only，权威记录
  *       ├── log/<collection>.jsonl.snapshot   压缩后的物化快照
@@ -176,7 +177,7 @@ export interface FileStoreOptions {
   /**
    * **独有技能的目录解析**（D228）——`owner → 目录`。
    *
-   * 缺省只认 `kind: 'agent'`（`agents/<id>/SKILL/`，形状归 `agent-dirs.ts`）。
+   * 缺省只认 `kind: 'agent'`（`agents/<id>/skills/`，形状归 `agent-dirs.ts`）。
    * 另一种来源（编排内建智能体）的目录形状归 daemon 的 `workflows-dirs.ts`，
    * 所以由 daemon 在装配时把整张解析函数注入进来（与 `skillsRoot` 同一个套路）：
    * **谁拥有路径，谁提供解析**——而不是让两个包各拼一遍、迟早分叉。
@@ -779,6 +780,23 @@ export class FileStore implements Store {
     // 技能内容从"记录里"搬到"磁盘上"的一次性迁移（2026-10）。必须在预加载
     // 之后——它要遍历 `#stores` 里的记录。
     await store.#migrateSkillsToDisk()
+
+    // ── D229：独有技能目录 `SKILL/` → `skills/`（大小写 + 幂等，见 agent-dirs.ts）──
+    {
+      const { renamed, conflicts } = await store.#agentsMutex.run(() =>
+        migrateExclusiveSkillsDirCase(dataDir),
+      )
+      if (renamed.length > 0) {
+        store.#onInfo(
+          `独有技能目录已改为小写：${renamed.length} 个智能体的 SKILL/ → skills/`,
+        )
+      }
+      for (const id of conflicts) {
+        store.#onInfo(
+          `⚠️ 智能体 ${id} 同时有 SKILL/ 与 skills/ 两个目录——不合并（猜哪份对是另一种坏），请人工确认后删掉多余的`,
+        )
+      }
+    }
 
     // ── D227：日志的回收（`compact()` 以前**没有任何调用点**，所以只增不减）──
     await store.#compactIfNeeded()

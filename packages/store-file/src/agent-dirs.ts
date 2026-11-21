@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import type { Agent, AgentId } from '@agentdeck/protocol'
 import { atomicWrite, ensureDir, exists, readJsonOrNull, removeQuietly } from './fs-utils.ts'
 
@@ -11,7 +11,7 @@ import { atomicWrite, ensureDir, exists, readJsonOrNull, removeQuietly } from '.
  *
  *   agents/<id>/agent.json          ← 结构化资讯（不含指令正文）
  *   agents/<id>/instructions.md     ← 指令**组装前**正文（内置 = 身份块；自建 = 全文）
- *   agents/<id>/SKILL/<slug>/SKILL.md ← 这个智能体**独有的**技能（文件资产，不进技能库）
+ *   agents/<id>/skills/<slug>/SKILL.md ← 这个智能体**独有的**技能（文件资产，不进技能库）
  *
  * 为什么目录而不是 JSONL（使用者的决定，逐条记在这里，防倒退）：
  *
@@ -47,12 +47,12 @@ function instructionsMdPath(dataDir: string, id: AgentId | string): string {
  * 独有技能根（这个智能体自己的技能文件）。
  *
  * ★ D228：`agent` 这一种来源的路径由**本文件**负责（它拥有智能体目录的形状）；
- *   另一种来源（编排内建智能体，`workflows/<wid>/agents/<aid>/SKILL/`）的形状归
+ *   另一种来源（编排内建智能体，`workflows/<wid>/agents/<aid>/skills/`）的形状归
  *   `apps/daemon/src/workflows-dirs.ts`，由 daemon 在装配时把解析函数注入进来
  *   （`FileStoreOptions.exclusiveSkillsDir`）。这样"谁知道路径"仍然只有一处。
  */
 function skillsDir(dataDir: string, id: AgentId | string): string {
-  return join(agentDirPath(dataDir, id), 'SKILL')
+  return join(agentDirPath(dataDir, id), 'skills')
 }
 
 /** 导出给 `FileStore` 拼 `owner.kind === 'agent'` 的目录（别的包别自己拼）。 */
@@ -118,7 +118,67 @@ export async function removeAgentDir(dataDir: string, id: AgentId | string): Pro
   return had
 }
 
-// ── 独有技能（Agent SKILL/ 下的文件资产，不进技能库）──
+// ── 独有技能（Agent skills/ 下的文件资产，不进技能库）──
+
+/** 目录在不在（`exists()` 走的是 `readFile`，对目录恒 false，见下面那条注释）。 */
+async function dirExists(path: string): Promise<boolean> {
+  try {
+    const info = await stat(path)
+    return info.isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * **把老的 `SKILL/` 目录名改成小写 `skills/`**（D229，2026-11 使用者："SKILL 目录名改小写
+ * skills 吧"）。
+ *
+ * 两件事要一起做对：
+ *
+ *   ① **大小写只差一个字母的重命名在 macOS 上会踩坑**：APFS 默认大小写不敏感，
+ *      `rename('SKILL','skills')` 在那边可能报 `EEXIST` / `ENOTEMPTY`（目标"已存在"——
+ *      其实就是它自己）。所以走**两步**：先改成 `skills.tmp-<随机>`，再改成 `skills`。
+ *      两步都在同一个父目录里，任何一步失败都不会丢数据（最多留下一个 `.tmp-` 目录，
+ *      下次启动会再试）。
+ *
+ *   ② **幂等 + 不猜**：`skills/` 已经在了就跳过（已经是新名字，或手工建过）；两个都在
+ *      （比如从备份里拷回来一份）**不合并、不动手**，把 id 报给调用方去喊人——
+ *      合并技能目录是"猜哪一份对"，本仓库不做这种事。
+ *
+ * @returns 改名的智能体 id（调用方拿去打日志）；需要人看的冲突也在这份里
+ */
+export async function migrateExclusiveSkillsDirCase(
+  dataDir: string,
+): Promise<{ renamed: string[]; conflicts: string[] }> {
+  const renamed: string[] = []
+  const conflicts: string[] = []
+  let ids: string[]
+  try {
+    ids = await readdir(agentsRoot(dataDir))
+  } catch {
+    return { renamed, conflicts } // 还没有 agents/ ⇒ 没什么可迁
+  }
+  for (const id of ids) {
+    if (id.startsWith('.')) continue
+    const upper = join(agentDirPath(dataDir, id), 'SKILL')
+    const lower = join(agentDirPath(dataDir, id), 'skills')
+    // ⚠️ 这里必须用 `stat`，不能用本包的 `exists()`——那个是 `readFile` 实现的，
+    //    对**目录**恒返回 false（读目录会 EISDIR）。这个坑当场踩过：迁移"成功"了
+    //    但一条都没改，测试里表现为 listExclusiveSkills 读不到任何技能。
+    const hasUpper = await dirExists(upper)
+    if (!hasUpper) continue // 没有老目录（新库/已迁过）
+    if (await dirExists(lower)) {
+      conflicts.push(id) // 两个都在 ⇒ 不合并，喊人
+      continue
+    }
+    const tmp = `${lower}.tmp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+    await rename(upper, tmp)
+    await rename(tmp, lower)
+    renamed.push(id)
+  }
+  return { renamed, conflicts }
+}
 
 /** 列出这个目录下的独有技能（slug + 正文）。目录由调用方按来源解析（D228）。 */
 export async function listExclusiveSkillBodiesIn(
@@ -148,8 +208,8 @@ export async function listExclusiveSkillBodiesIn(
  *
  * 原先是 `(dataDir, agentId, slug)`——路径在里面拼死。改成吃目录之后，
  * "这份技能文件属于谁、它的目录在哪"由调用方（`FileStore`）按
- * `ExclusiveSkillOwner` 解析：账号智能体走 `agents/<id>/SKILL/`，
- * 编排内建智能体走 `workflows/<wid>/agents/<aid>/SKILL/`——**同一份实现**
+ * `ExclusiveSkillOwner` 解析：账号智能体走 `agents/<id>/skills/`，
+ * 编排内建智能体走 `workflows/<wid>/agents/<aid>/skills/`——**同一份实现**
  * 服务两种来源，路径形状仍然只有各自的拥有者知道。
  */
 export async function getExclusiveSkillBodyIn(

@@ -26,7 +26,7 @@ JSONL 记录（`workspaces/<wsId>/log/agent.jsonl`）做智能体的载体有两
   agent.json          结构化资讯（不含指令正文；builtin / role / skillIds / env / …）
   instructions.md     指令**组装前**正文
   memory.jsonl        这个智能体的**记忆**（D112：记忆 = 智能体自己的）
-  SKILL/<slug>/SKILL.md  这个智能体**独有的**技能（文件资产）
+  skills/<slug>/SKILL.md  这个智能体**独有的**技能（文件资产）
 ```
 
 - `agent.json` **不含 `instructions`**（指令在 md 里；`readAgentDir` 读回时把两者拼回
@@ -64,7 +64,7 @@ JSONL 记录（`workspaces/<wsId>/log/agent.jsonl`）做智能体的载体有两
 
 | | 独有技能 | 共享技能 |
 |---|---|---|
-| 载体 | `agents/<id>/SKILL/<slug>/SKILL.md` | 技能库（`skills/<slug>/` + `skillIds` 引用） |
+| 载体 | `agents/<id>/skills/<slug>/SKILL.md` | 技能库（`skills/<slug>/` + `skillIds` 引用） |
 | 谁看得到 | 只有这个智能体 | 全工作区（技能页） |
 | 卸载 | 无此概念（随智能体删除） | 技能页可卸载 |
 | 注入 | 与共享走**同一条通道**（`loadAgentInjectableSkills`），同 slug 时**独有盖过共享** | 同左 |
