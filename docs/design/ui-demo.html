@@ -3362,7 +3362,7 @@ a > button { width: 100%; }
         margin: 0; font-size: var(--fs-2xs); line-height: 1.5;
         color: var(--text-faint); font-family: var(--font-mono);
       }
-      /* ── 页面类型标准（讨论稿）：一张总表 + 两处待拍板的对比 ── */
+      /* ── 页面类型标准：五格真骨架（已定，不是讨论稿）── */
       .demo-types {
         width: 100%;
         border-collapse: collapse;
@@ -4078,9 +4078,9 @@ a > button { width: 100%; }
           </div>
           <p class="demo-rule-note" id="demo-faint-delta">正在量…</p>
         </section>
-        <!-- ══════════ 页面类型标准（讨论稿 v2：**画出来**，不是只描述）══════════ -->
+        <!-- ══════════ 页面类型标准（**已定**：画出来，不是只描述）══════════ -->
         <section class="demo-rule" id="demo-page-types">
-          <h3>⑨ 五类页面的标准骨架（画出来的，下沿实时标注实测内距）</h3>
+          <h3>⑨ 五类页面的标准骨架（已定 · 画出来的 · 下沿实时标注实测内距）</h3>
           <p class="demo-rule-note">
             每一格都是**用真实类名拼出来的**（<code>.pane-head</code> /
             <code>.detail-head</code> / <code>.main-panel-*</code> / <code>.card-grid</code> …），不是画图。
@@ -4142,23 +4142,9 @@ a > button { width: 100%; }
             <!-- ② 表格页：现状 vs 建议 -->
             <figure class="demo-skeleton" data-skel="table" data-head=".main-panel-head" data-body=".main-panel-body">
               <figcaption><b>② 表格页</b>　技能　<span class="warn">（右边是建议：给表格一个头）</span></figcaption>
-              <div class="demo-skel-pair">
+              <div>
                 <div>
-                  <p class="demo-opt-tag">A · 现状：裸表格，没有头</p>
-                  <div class="demo-skel-box" style="height: 150px; padding: var(--sp-3)">
-                    <div class="table-wrap">
-                      <table class="table">
-                        <thead><tr><th>slug</th><th>名字</th><th>来源</th></tr></thead>
-                        <tbody>
-                          <tr><td class="mono fs-xs">weekly-report</td><td>周报</td><td class="faint fs-xs">内置</td></tr>
-                          <tr><td class="mono fs-xs">media-outline</td><td>提纲</td><td class="faint fs-xs">远端</td></tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-                <div>
-                  <p class="demo-opt-tag">B · 建议：套 <code>.main-panel</code>，头里放标题 + 计数</p>
+                  <p class="demo-opt-tag">已定：套 <code>.main-panel</code>，头里放标题 + 计数（D219）</p>
                   <div class="demo-skel-box" style="height: 150px">
                     <section class="main-panel" style="height: 100%">
                       <header class="main-panel-head">
@@ -4201,10 +4187,10 @@ a > button { width: 100%; }
 
             <!-- ④ 新建视图：两档主操作 -->
             <figure class="demo-skeleton" data-skel="create" data-head=".detail-head" data-body=".detail-pane .pane-body">
-              <figcaption><b>④ 新建视图</b>　新建任务 / 定时任务 / 编排　<span class="warn">（主操作只有两档）</span></figcaption>
+              <figcaption><b>④ 新建视图</b>　定时任务 / 编排 / 新建任务　<span class="ok">（已定：主操作在栏头；长表单是已定的例外）</span></figcaption>
               <div class="demo-skel-pair">
                 <div>
-                  <p class="demo-opt-tag">档 1 · 短表单 ⇒ 主操作在<b>栏头</b>（定时任务 / 编排）</p>
+                  <p class="demo-opt-tag">已定标准 · 主操作在<b>栏头</b>（定时任务 / 编排 / 聊天「创建对话」）</p>
                   <div class="demo-skel-box" style="height: 170px">
                     <section class="pane detail-pane" style="height: 100%">
                       <header class="detail-head">
@@ -4221,7 +4207,7 @@ a > button { width: 100%; }
                   </div>
                 </div>
                 <div>
-                  <p class="demo-opt-tag">档 2 · 长表单 ⇒ 主操作在<b>吸底脚</b>（新建任务）</p>
+                  <p class="demo-opt-tag">已定例外 · <b>长表单</b>主操作吸底（新建任务：一个字都不用滚到底就能提交）</p>
                   <div class="demo-skel-box" style="height: 170px">
                     <section class="pane detail-pane" style="height: 100%; position: relative">
                       <header class="detail-head">
@@ -4265,9 +4251,21 @@ a > button { width: 100%; }
           </div>
           <p class="demo-rule-note" id="demo-skel-verdict">正在量五格的内距…</p>
           <p class="demo-rule-note">
-            需要你拍板：<b>② 技能页</b>用 A（无头）还是 B（加面板头）；<b>④ 新建视图</b>认不认"短表单→栏头 /
-            长表单→吸底脚"这两档（现在是四种写法：任务=吸底脚、定时任务+编排=栏头、聊天=输入区、智能体=面板底栏）。
+            <b>已定（使用者拍板）</b>：<b>② 表格页</b> = 面板头（<code>.main-panel</code> + <code>h2</code> + 计数，
+            体里放表格）；<b>④ 新建视图</b> = 主操作在<b>栏头</b>（短表单那条路是标准），
+            <b>长表单（新建任务）保留吸底脚</b>——它是这一条标准的**例外**，不是第二套标准。
           </p>
+          <table class="demo-types">
+            <thead>
+              <tr><th>「新建」入口</th><th>主操作放在哪</th><th>按上面哪一条</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>新建定时任务 / 新建编排</td><td><b>栏头</b> <code>.detail-actions</code></td><td>④ 标准</td></tr>
+              <tr><td>新建对话（D220 起）</td><td><b>栏头</b> <code>[data-chat-create]</code></td><td>④ 标准</td></tr>
+              <tr><td>新建任务</td><td>吸底脚 <code>.form-foot</code></td><td>④ <b>已定例外</b>（长表单）</td></tr>
+              <tr><td>新建智能体</td><td>面板底栏 <code>.main-panel-foot</code></td><td>⑤ 设置面板（不是"新建视图"）</td></tr>
+            </tbody>
+          </table>
         </section>
       </div>
 
