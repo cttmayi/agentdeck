@@ -495,18 +495,20 @@
    * ⚠️ 卸载时收回来（登记里存的是抓着这一页状态的闭包）。
    */
   $: setPageActions('chat', [
-    // 起草时顶栏不给「新对话」：那一刻右侧已经在填新对话了，再给一个只会让人多点一下
-    ...(drafting
-      ? []
-      : [
-          {
-            id: 'new',
-            label: $t('chat.newConversation'),
-            kind: 'primary' as const,
-            icon: 'plus' as const,
-            onActivate: startDrafting,
-          },
-        ]),
+    /**
+     * ★★ D214：起草时顶栏那颗**禁用**（原来是"整颗拿掉"）。
+     * 拿掉的代价是**顶栏格子会挪位**，而且与另外四个页面（任务 / 智能体 / 定时任务 / 编排）
+     * 的做法不一致——它们都是禁用。现在统一成禁用：位置不动、语义明确（"你已经在这一步了"）。
+     * 它仍然不是 `active`：`active` 在这排里专指"现在是哪种呈现方式"。
+     */
+    {
+      id: 'new',
+      label: $t('chat.newConversation'),
+      kind: 'primary' as const,
+      icon: 'plus' as const,
+      disabled: drafting,
+      onActivate: startDrafting,
+    },
     /**
      * ★ 分批第 262 批（使用者："把『整理成记忆』的按钮移动到『沉淀技能』的左侧"）：
      *   「整理成记忆…」**从顶栏挪到对话头那一排**（`.pane-actions`），紧挨在

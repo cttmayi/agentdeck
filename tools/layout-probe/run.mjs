@@ -4639,6 +4639,17 @@ const CHECKS = [
       (v.unexpected.length ? ` · ✗ 不统一 ${v.unexpected.slice(0, 5).join(' ')}` : ''),
   },
   {
+    key: 'btn.primaryCount',
+    /**
+     * ★★ D214：**一屏只许有一颗"可用"的主操作**（顶栏轨道 + 右栏面板）。
+     * 进入"新建/起草"视图后，顶栏那颗必须 `disabled`——否则一屏两颗实心，
+     * 而 §2.1.1 把"一屏出现好几个主操作长相"列为要清掉的问题。
+     */
+    label: '★★ 每个"新建"视图里，顶栏 + 右栏**只有一颗可用的主操作**（顶栏那颗进入后禁用）',
+    ok: (v) => !!v && Array.isArray(v.bad) && v.bad.length === 0 && Array.isArray(v.seen) && v.seen.length >= 3,
+    show: (v) => (v ? v.seen.join(' · ') + (v.bad.length ? ` · ✗ ${v.bad.join('；')}` : '') : '没量到'),
+  },
+  {
     key: 'heads.sweep',
     /**
      * ★★ D214：**每个"换掉右栏"的视图都量到了栏头，且内距不为 0**。

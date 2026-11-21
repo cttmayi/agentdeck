@@ -229,6 +229,33 @@
        * 而另外三个"新建"视图都是 16/24/12）。这类"整条声明被静默丢弃"的错，
        * 读样式表看不出来，只有量 computed 才会露。
        */
+      /**
+       * ★★ D214：**一屏只许有一颗"可用"的主操作**（顶栏轨道 + 右栏面板）。
+       *
+       * 由来：进入"新建/起草"视图后，顶栏那颗主操作（新建任务 / 新建对话…）与视图里的
+       *   主操作（创建并派发 / 保存 / 创建）**同时是实心的** ⇒ 一屏两颗"主操作长相"，
+       *   而 §2.1.1 明确把这种情况列为要清掉的问题（"一屏会出现好几个'主操作'长相"）。
+       * 现在的规矩：**进入那一步之后顶栏那颗 `disabled`**（五页同一套；
+       *   聊天页原来是"整颗拿掉"，D214 统一成禁用——拿掉会让格子挪位）。
+       * 排除：输入区的发送键（它属于输入区，不属于"这一页的主操作"）。
+       */
+      function sweepPrimary(label) {
+        const doc = d()
+        const acc = facts['btn.primaryCount'] ?? { seen: [], bad: [] }
+        const scope = [...doc.querySelectorAll('.page-actions .btn--primary, .detail-pane .btn--primary')].filter(
+          (b) => {
+            const r = b.getBoundingClientRect()
+            return r.height > 0 && r.width > 0
+          },
+        )
+        const enabled = scope.filter((b) => !b.disabled)
+        acc.seen.push(`${label}=${String(enabled.length)}颗可用/${String(scope.length)}颗`)
+        if (enabled.length > 1) {
+          acc.bad.push(`${label}：${enabled.map((b) => text(b)).join(' + ')}`)
+        }
+        facts['btn.primaryCount'] = acc
+      }
+
       function sweepHead(label) {
         const doc = d()
         const acc = facts['heads.sweep'] ?? { seen: [], bad: [] }
@@ -2788,6 +2815,7 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
           const ntListVisible = cs(d().querySelector('.list-pane')).display !== 'none'
           facts['tasks.createActionReachesForm'] = reached
           sweepHead('新建任务')
+          sweepPrimary('新建任务')
           facts['tasks.createKeepsListBeside'] = reached && ntListVisible && ntRowsBeside > 0
           facts['tasks.createPaneFormPresent'] = !!d().querySelector(
             '.detail-pane .create-body .newtask-form',
@@ -4024,6 +4052,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         })()
 
         sweepHead('新建定时任务')
+        sweepPrimary('新建定时任务')
         facts['schedules.cancelCloses'] = await (async () => {
           const cancel = [...d().querySelectorAll('.detail-pane button')].find(
             (b) => text(b) === '取消',
@@ -4438,6 +4467,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
 
         // ② 栏头带：**计数 + 搜索**，**没有标题**（D61~D66；页名已经在顶栏）
         sweepHead('新建编排')
+        sweepPrimary('新建编排')
         facts['workflows.listHead'] = (() => {
           const head = d().querySelector('.list-pane .pane-head')
           if (!head) return null
@@ -4999,6 +5029,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           })()
           facts['template.formHasNoTemplateField'] = !(form && form.querySelector('.tpl-text'))
           sweepHead('新建智能体')
+          sweepPrimary('新建智能体')
           // ★★★ 开表单**不许**动顶栏与侧边栏（2026-09 那次事故：表单被渲染进栏头，
           //   栏头从 167px 被撑到 1070px，整垮主从布局——那时这条是靠"抽屉是浮层"
           //   守住的；现在表单就住在正文里，所以改成直接量那两块有没有动）
