@@ -1246,6 +1246,7 @@ import ListRow from '../components/ListRow.svelte'
             {#if canAbandon}
               <button
                 type="button"
+                class="btn btn--primary"
                 disabled={deciding !== null}
                 title={deciding !== null ? $t('common.busyHint') : undefined}
                 onclick={() => setAbandoned(false)}
@@ -1272,6 +1273,7 @@ import ListRow from '../components/ListRow.svelte'
             <div class="decide-actions">
               <button
                 type="button"
+                class="btn btn--primary"
                 disabled={deciding !== null || !feedbackReady}
                 title={feedbackReady
                   ? $t('tasks.decideFeedbackHint')

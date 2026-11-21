@@ -249,8 +249,10 @@
     <label for="install-summary">{$t('remote.installSummaryLabel')}</label>
     <input id="install-summary" bind:value={installSummary} />
     <p>
+      <!-- ★ D181：它是这一段的动作 ⇒ 归进按钮族（裸 button 会渲染成 38px 的实心主按钮） -->
       <button
         type="button"
+        class="btn btn--primary"
         disabled={installBusy || installUrl.trim() === ''}
         onclick={() => void doInstall()}
       >

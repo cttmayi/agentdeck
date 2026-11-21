@@ -66,10 +66,22 @@
   --radius-none: 0;
   --radius-xs: 6px;
   --radius-pill: 999px;
-  /* ★ 298 批：控件高度（按钮/输入/下拉的两种档）。
-     298 批当批就用上了：`.topbar button` = `--ctl-h`、`.topbar .page-actions button` = `--ctl-h-sm` */
-  --ctl-h: 1.9rem;
-  --ctl-h-sm: 1.5rem;
+  /**
+   * ★ D181（使用者："按钮的类型差别大，一般按钮和顶栏的按钮差异太大，风格不一致"）：
+   *   **全站只有一个按钮高度**（`--btn-h` = 30px）。
+   *
+   *   改之前是两个数：普通按钮 38px（`padding: 8px 12px` + 14px 字）、工具条格子 24px。
+   *   于是同一颗「保存」在栏头里 24px、在面板底栏里 38px；再加上栏头那条轨道把
+   *   `btn--primary` 压成"400 字重 + 淡灰字 + 透明底"，和旁边的「删除」一模一样
+   *   ——主操作在栏头里根本看不出来（探针实测过）。
+   *
+   *   `--rail-h` 是工具条轨道（顶栏那排 / 栏头那排 / 对话头那排 / 来源切换）的高度：
+   *   比按钮高 4px，上下各留 2px 呼吸。它与顶栏的常驻控件（通知 / 设置 / 语言下拉）
+   *   同高——"一条带子上的节奏"（D59 那条判据量的就是它）。
+   */
+  --btn-h: 1.875rem;
+  --rail-h: calc(var(--btn-h) + 4px);
+  --ctl-h: var(--rail-h);
   --radius: 8px;
   --radius-lg: 12px;
 
@@ -460,7 +472,7 @@ hr {
   align-items: center;
   /* ★ 高度钉成与右边那几个图标控件一样（`--topbar-h` 那条带子上的节奏）：
      里面每一格矮一档，是**嵌套**关系，不是"高度不齐"（探针按这一点量）。 */
-  height: 1.9rem;
+  height: var(--rail-h);
   box-sizing: border-box;
   padding: 0 var(--sp-1);
   gap: 2px;
@@ -477,14 +489,14 @@ hr {
  * 组里每一格：同样的形状，只有底色随状态变。
  *
  * ⚠️ 选择器**必须带上 `.topbar`**：同一条带子上还有一条给常驻控件（通知 / 设置）
- *    的 `.topbar button { height: 1.9rem }`，两者同分，**靠源序决胜**——而这一块
+ *    的 `.topbar button { height: var(--ctl-h) }`，两者同分，**靠源序决胜**——而这一块
  *    在文件里排在它前面，于是格子被拉到 30px、工具条变成一条没有呼吸的实心带
  *    （实测踩过：三条探针都还是绿的，因为它们只量"高度齐不齐"）。
  */
 .topbar .page-actions button {
-  height: var(--ctl-h-sm);
+  height: var(--btn-h);
   padding: 0 var(--sp-3);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-dim);
   display: inline-flex;
@@ -500,14 +512,34 @@ hr {
 }
 
 /**
- * 主操作（新建 / 安装）：**只靠文字分重量**，不靠一整块实心色。
+ * 主操作（新建 / 安装 / 保存）：**实心 accent + 白字**，与面板底栏、模态框底栏的
+ * `btn--primary` **同一个样子**。
  *
- * ⚠️ 颜色不是直接的 `var(--accent)`：它压在浅色轨道上只有 **3.88:1**，而这个字号
- *    （13px）按 AA 要 4.5。朝正文色压 15% 之后是 **4.62:1**，色相不变、仍然一眼
- *    看出是"强调"。深色主题下这个式子算出来是 5.9:1，同样成立——所以只写一条。
+ * ★ D181 改判：这条原来写的是"只靠文字分重量，不靠一整块实心色"（298 批的意图：
+ *   顶栏不要抢眼）。**那个意图的代价是主操作在栏头里没法表达**——栏头那条轨道
+ *   把 primary 压成 400 字重 + 淡灰字 + 透明底，与旁边的「删除」一模一样（使用者：
+ *   "按钮的类型差别大……风格不一致"）。现在全站只有一处实心色块的含义：
+ *   "这一屏要你做的事"。要"这是当前哪一档"用 `.active`（同一种底色，见下）。
+ *
+ * ⚠️ 白字配 `--accent-dim`（不是 `--accent`）：暗色主题下 accent 是浅蓝
+ *    （#5aa9f5），白字在上面看不见——这是 `.source-toggle button.active` 里
+ *    写下的同一套惯例。
  */
 .topbar .page-actions button.btn--primary {
-  color: color-mix(in srgb, var(--accent) 85%, var(--text));
+  background: var(--accent-dim);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+/**
+ * 栏头 / 对话头那两条轨道里的主操作：**同一条**（D181 把"主操作处处实心"收成一处规矩）。
+ * 栏头这条的来历：`.detail-actions > button` 把颜色统一压成 `--text-dim`，
+ * 于是「保存」在这两条轨道里**看起来就是一颗 ghost**——主操作在栏头失效了。
+ */
+.detail-head .detail-actions > button.btn--primary,
+.pane-actions button.btn--primary {
+  background: var(--accent-dim);
+  color: var(--on-accent);
   font-weight: 600;
 }
 
@@ -532,7 +564,8 @@ hr {
  */
 .topbar select {
   width: auto;
-  height: 2rem;
+  /* ★ D181：与按钮/轨道同一套数（原来这里是另一个数 2rem，与同排的按钮差 2px） */
+  height: var(--ctl-h);
   padding: 0 var(--sp-2);
   font-size: var(--fs-xs);
 }
@@ -571,14 +604,16 @@ hr {
  * 无框 = 呈现方式切换（列表 / 看板，当前那个用底色标出来）。
  */
 .topbar button {
-  height: var(--ctl-h);
   /**
    * ⚠️ 高度是**写死的**，不是"字高 + 内距"算出来的：算出来的话，`⋯`（那个字比
    *    别的按钮大、行高又是 1）与带 24px 头像的账号按钮会各差几像素，一条带子上
    *    看着就是没对齐。钉成一个值之后，加一个新按钮不会把这一排弄歪。
    *    探针里也有一条量它（`topbar.buttonHeights` 去重之后必须只剩一种）。
+   *
+   * ★ D181：这个值现在叫 `--rail-h`（= 按钮高 + 4px），与工具条轨道**同一个数**
+   *   ——原来的 `--ctl-h` / `--ctl-h-sm` 两个数已经不存在了。
    */
-  height: 1.9rem;
+  height: var(--ctl-h);
   padding: 0 var(--sp-2);
   font-size: var(--fs-sm);
   line-height: 1;
@@ -1225,8 +1260,8 @@ hr {
 .pane-actions {
   display: flex;
   align-items: center;
-  /* 与顶栏那排同高同节奏：外面一条带子 1.9rem，里面每一格 1.5rem */
-  height: 1.9rem;
+  /* ★ D181：与顶栏那排同高同节奏——外面一条带子 `--rail-h`，里面每一格 `--btn-h` */
+  height: var(--rail-h);
   box-sizing: border-box;
   padding: 0 var(--sp-1);
   gap: 2px;
@@ -1235,10 +1270,10 @@ hr {
   border-radius: var(--radius);
 }
 .pane-actions button {
-  height: 1.5rem;
+  height: var(--btn-h);
   padding: 0 var(--sp-3);
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-dim);
   display: inline-flex;
@@ -1422,7 +1457,7 @@ hr {
  *   一条判据（`crystal.commitRight`）。一颗按钮不存在"和邻居对齐"的问题，不需要轨道。
  */
 .detail-head .detail-actions:has(> button + button) {
-  height: 1.9rem;
+  height: var(--rail-h);
   box-sizing: border-box;
   padding: 0 var(--sp-1);
   gap: 2px;
@@ -1431,10 +1466,10 @@ hr {
   border-radius: var(--radius);
 }
 .detail-head .detail-actions > button {
-  height: 1.5rem;
+  height: var(--btn-h);
   padding: 0 var(--sp-3);
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-dim);
   display: inline-flex;
@@ -1459,7 +1494,7 @@ hr {
  *
  * 「智能体 / 智能体组」这类二选一（乃至多选一）的切换：灰轨 + 透明胶囊按钮，
  * 选中那颗 `active` 变 `--accent-dim` 底白字。与 `.detail-actions` 工具条
- * 同一族（轨道 + 1.5rem 胶囊），只是它**贴内容宽**（`width: fit-content`）、
+ * 同一族（轨道 + 一格 30px 的胶囊），只是它**贴内容宽**（`width: fit-content`）、
  * 用在表单字段里而不是栏头。
  *
  * ★ 2026-11：原来定义在 `NewTaskForm.svelte` 局部，定时任务表单的「智能体/组」
@@ -1473,7 +1508,7 @@ hr {
      实测灰轨横贯整卡（使用者报"右侧被拉太长了"）。钉死内容宽，与顶栏
      `page-actions`（flex 行里的内容宽轨道）同一个行为。 */
   width: fit-content;
-  height: 1.9rem;
+  height: var(--rail-h);
   box-sizing: border-box;
   padding: 0 var(--sp-1);
   gap: 2px;
@@ -1482,9 +1517,9 @@ hr {
   border-radius: var(--radius);
 }
 .source-toggle button {
-  height: 1.5rem;
+  height: var(--btn-h);
   padding: 0 var(--sp-3);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   border: none;
   background: transparent;
   color: var(--text-dim);
@@ -1538,7 +1573,10 @@ hr {
 
 /* 返回按钮只在窄屏（详情整页显示时）需要——宽屏列表就在左边。
    智能体详情里的那个返回按钮同理（它自带 .back 类）。 */
-.back-to-list,
+/** ★ D181 修回归：`.btn` 现在带 `display: inline-flex`，与这条 `display: none` **同分**、
+ *  又排在文件后面 ⇒ 宽屏下「返回列表」被显示出来（实测栏头 58px → 105px，探针当场红）。
+ *  所以这里必须带一层上下文，把它抬到 0,2,0（媒体查询里那条同步加）。 */
+.detail-head .back-to-list,
 .split-layout.with-detail .detail-pane .back {
   display: none;
   margin-bottom: var(--sp-2);
@@ -1566,7 +1604,7 @@ hr {
     display: none;
   }
 
-  .back-to-list,
+  .detail-head .back-to-list,
   .split-layout.with-detail .detail-pane .back {
     display: inline-flex;
   }
@@ -1684,6 +1722,28 @@ button,
  * ⚠️ 不要图省事在这里全局写 `white-space: nowrap`：`.intake-choice` 那类按钮里**本来就要
  *    折行**（第一行是选项、第二行是说明），全局禁掉会把它们挤成横向溢出。
  */
+/**
+ * ★ D181：**按钮族的高度就是一个数**（`--btn-h`）。做法不是写 `height`——
+ *   实测有 `btn` 在窄栏里折成两行（高 53 / 64），写死 `height` 会把字切掉。
+ *   这里把"行高 = `--btn-h` − 上下内距"凑出来：单行正好 30px，多行自然长高。
+ *   （上下内距只留 4px，是给它一个能点的边；横向内距照旧 12px。）
+ */
+.btn {
+  /**
+   * ★ D181：字号也一并归一（`--fs-sm` 13px）。原来按钮靠 `font: inherit`，
+   *   于是同一颗按钮在栏头是 14px（继承正文）、在栏脚是 13px（继承栏脚的 `--fs-sm`）、
+   *   在顶栏是 13px（继承顶栏）——"同一个按钮三种字号"是实测数出来的。
+   *   小尺寸（`btn--sm` / `btn--mini` / `btn--link`）仍然各自压到 `--fs-xs`。
+   */
+  font-size: var(--fs-sm);
+  padding: var(--sp-1) var(--sp-3);
+  line-height: calc(var(--btn-h) - 2 * var(--sp-1));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
 button:hover:not(:disabled),
 .btn:hover:not(:disabled) { filter: brightness(1.15); }
 button:disabled,
@@ -1773,6 +1833,12 @@ button:disabled,
   background: none;
   color: var(--accent);
   font-size: var(--fs-xs);
+  /**
+   * ★ D181：**它是"句子里的几个字"，不是一颗按钮**——不许继承按钮族那 30px 的行高
+   *   （继承了就把一行灰字顶成一行控件，而"去掉一切按钮形状"正是这条变体存在的理由）。
+   */
+  display: inline;
+  line-height: inherit;
 }
 
 /* 禁用态：除了整体变淡，字色也压到 faint——只靠透明度的话，accent 蓝在浅色
@@ -1802,6 +1868,9 @@ button:disabled,
   color: var(--text-faint);
   font-size: var(--fs-xs);
   white-space: nowrap;
+  /* ★ D181：行尾那排"悬停才出现"的小动作**不许撑高行**：高度跟着字走 */
+  height: auto;
+  line-height: inherit;
 }
 
 .btn--mini:hover:not(:disabled) {
@@ -1818,6 +1887,8 @@ button:disabled,
 
 .btn--icon {
   padding: 0 var(--sp-2);
+  /* ★ D181：只有图标、没有文字行高可用 ⇒ 高度直接取那个数 */
+  height: var(--btn-h);
   display: inline-flex;
   align-items: center;
   justify-content: center;

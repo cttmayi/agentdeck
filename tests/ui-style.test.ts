@@ -392,6 +392,97 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
     const missing = [...used].filter((v) => !new RegExp(`\\.${v}\\b`).test(css))
     assert.deepEqual(missing, [], `这些按钮变体在 app.css 里没有定义（写了名字但没人画样子）：${missing.join('、')}`)
   })
+
+  /**
+   * ★★ D181：**动作按钮必须归进按钮族**（`class="btn btn--<重量>"`）。
+   *
+   * 由来：使用者说"按钮的类型差别大，一般按钮和顶栏的按钮差异太大"。查下来一半是
+   * 悬空类名（D180），**另一半是根本没进族的裸 `<button>`**：新建任务表单的
+   * 「保存并运行」、设置页的「登录」、平台设定的「保存」、技能的「安装」、
+   * 任务页的「接着干」/「恢复」、聊天的「保存」、智能体详情的「设为默认/复制/取消」
+   * ——它们没有类名，吃的是裸 `button` 的 base：**实心 accent + 38px 高**，
+   * 于是"主按钮"在全站有两种尺寸；而且任何一颗不带 `btn--primary` 的裸按钮
+   * 看起来都像主按钮（界面上一屏出现好几个"主要的事"）。
+   *
+   * 例外只有一类：**结构性控件**（`.fold-head` / `.nav-item` / `.row` / `.tab` /
+   * 轨道里的互斥切换 …）。它们自带类名，形状由 app.css 里那条 `X button` 的
+   * 元素选择器定，**不能拿按钮族的高度**（列表行、折叠头、开关都不是"按钮"）。
+   * 白名单就是下面这一串，加新的先问自己："它是一句要做一件事的话吗？"是 ⇒ 按钮族。
+   */
+  test('★★ 动作按钮必须归进按钮族：裸 `<button>` 只许出现在结构性控件里', async () => {
+    const STRUCTURAL = [
+      // 折叠 / 导航 / 行 / 标签这一族（形状由 `.X button` 的元素选择器定）
+      'fold-head', 'expand-toggle', 'nav-item', 'row', 'dir', 'column-label',
+      'list-group-head', 'list-row-main', 'list-row-action', 'card', 'card-head',
+      'tab', 'run-tab', 'theme-picker', 'view-switch', 'stage-chips', 'source-toggle',
+      // 各自的专用控件
+      'intake-choice', 'skill-choice', 'artifact-tab', 'draft-turn-toggle', 'file-row',
+      'history-row', 'mem-pin', 'pane-resizer', 'pe-close', 'pe-var-chip', 'pill',
+      'quick-weekdays', 'weekday-btn', 'prefix-x', 'prompt-expand', 'switch',
+      'terms-label', 'wd-dir', 'wd-file', 'wf-tpl', 'cat-toggle',
+      'pane-tabs', 'fv-toggle', 'page-menu',
+    ]
+    /**
+     * 一条 class 属性可能长这样（Svelte 里很常见）：
+     *   class="pill {form.freq === f.key ? 'active' : ''}"
+     * 先把它里面的 `{…}` 表达式抹掉，剩下的才是"写死的类名"。
+     */
+    const tokensOf = (tag: string): { tokens: string[]; dynamic: boolean } => {
+      const literal = /class="([^"]*)"/.exec(tag)?.[1]
+      const isDynamic = /class=(\{|`)/.test(tag)
+      if (literal === undefined && !isDynamic) return { tokens: [], dynamic: false }
+      const stripped = (literal ?? '').replace(/\{[^}]*\}/g, ' ')
+      const tokens = stripped.split(/\s+/).filter((t) => t !== '')
+      if (isDynamic) {
+        const inner = /class=\{([^}]*)\}/.exec(tag)?.[1] ?? ''
+        for (const q of inner.matchAll(/'([^']*)'|`([^`]*)`/g)) {
+          const v = q[1] ?? q[2] ?? ''
+          for (const t of v.split(/\s+/)) if (t !== '' && !t.includes('$')) tokens.push(t)
+        }
+      }
+      return { tokens, dynamic: isDynamic }
+    }
+    const bad: string[] = []
+    const files2 = await load()
+    for (const [file, text] of files2) {
+      if (!file.endsWith('.svelte')) continue
+      // 注释与 `<script>` 里也有 `<button>` 字样（讲历史的注释里就引过），先剥掉
+      const code = text
+        .replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, ' '))
+        .replace(/<script[\s\S]*?<\/script>/g, (m) => m.replace(/[^\n]/g, ' '))
+      for (const m of code.matchAll(/<button([\s\S]{0,400}?)>/g)) {
+        const tag = m[1] ?? ''
+        const line = code.slice(0, m.index).split('\n').length
+        const { tokens } = tokensOf(tag)
+        // ① 归了按钮族（`btn` 或任一 `btn--*`）⇒ 过
+        //    模板字面量（`` class={`btn btn--${kind ?? 'secondary'}`} ``）里的 `btn`
+        //    不是独立 token，得单独看一眼——Topbar 那排动作就是这么写的。
+        const templateBtn = /class=(?:\{|`)[^>]*?[\s"'`]btn(--|\s|`|$)/.test(tag)
+        if (templateBtn || tokens.some((t) => t === 'btn' || t.startsWith('btn--'))) continue
+        // ② 全是结构性类名 ⇒ 过（形状由 app.css 的元素选择器定）
+        if (tokens.some((t) => STRUCTURAL.includes(t))) continue
+        /**
+         * ③ 一个类名都没写（只有 `class:active` 这种指令）：它必须落在结构性容器里。
+         *    做法是往前找最近一个"带 class 的开标签"——粗略，但它只用来挡住"裸按钮"，
+         *    挡住之后剩下的每一个都在这五族里（`.theme-picker` / `.source-toggle` /
+         *    `.stage-chips` / `.view-switch` / 文件页签）。
+         */
+        const before = code.slice(0, m.index)
+        const lastClass = [...before.matchAll(/class="([^"]*)"/g)].pop()?.[1] ?? ''
+        if (STRUCTURAL.some((t) => lastClass.split(/\s+/).includes(t))) continue
+        bad.push(
+          `${file}:${line}  ${tokens.length > 0 ? `没进按钮族（类名 ${tokens.join(' ')}）` : '裸按钮（一个类名都没有）'}` +
+            `  <button ${tag.trim().slice(0, 80)}>`,
+        )
+      }
+    }
+    assert.deepEqual(
+      bad,
+      [],
+      '动作按钮要写成 `class="btn btn--<重量>"`（裸 button 会渲染成"实心 accent + 38px"，' +
+        '主按钮于是有两种尺寸、而且一屏会出现好几个"主操作"长相）：\n' + bad.join('\n'),
+    )
+  })
 })
 
 /** 把一个样式块拆成 { selector, body, line }（够用的浅解析：`}` 收尾即可）。 */

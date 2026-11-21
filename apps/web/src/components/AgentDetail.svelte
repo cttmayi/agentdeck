@@ -1095,6 +1095,7 @@
       {#if hasEntry(agent, 'task') && hasEntry(agent, 'chat') && agent.id !== $effectiveDefaultAgentId}
         <button
           type="button"
+          class="btn btn--secondary"
           data-agent-set-default
           disabled={busy}
           title={$t('agents.setDefaultTitle')}
@@ -1104,12 +1105,13 @@
       <!-- ★ 2026-11（D160）：**复制**（平台成员与自建都能用；想改内置就改副本）。 -->
       <button
         type="button"
+        class="btn btn--secondary"
         data-agent-copy
         disabled={busy}
         title={$t('agents.copyTitle')}
         onclick={() => void copyAgent()}
       >{$t('agents.copy')}</button>
-      <button type="button" data-agent-cancel onclick={cancelEdit}
+      <button type="button" class="btn btn--ghost" data-agent-cancel onclick={cancelEdit}
         >{readOnly ? $t('common.close') : $t('common.cancel')}</button
       >
       {#if !readOnly}

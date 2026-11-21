@@ -276,6 +276,7 @@
       <button
         type="submit"
         form="settings-form"
+        class="btn btn--primary"
         disabled={busy || $templateKit === null}
         title={busy ? $t('common.busyHint') : $templateKit === null ? $t('settings.kitNotLoaded') : undefined}
       >

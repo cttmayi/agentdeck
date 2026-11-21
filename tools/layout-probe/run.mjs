@@ -180,6 +180,35 @@ const CHECKS = [
     ok: (v) => v === true,
   },
   {
+    view: '新建任务 / 表单',
+    key: 'btn.uniform',
+    /**
+     * ★★★ D181：**一颗按钮一个高度**。四处（顶栏格子 / 表单底栏 / 模态框底栏 / 模态框关闭）
+     * 改之前是 24 / 38 / 38 / 38：同一颗「保存」在栏头 24px、在面板底栏 38px；
+     * 表单那颗甚至没进按钮族（裸 `<button>`，实心 accent + 38px）。
+     * 现在全部 30px、13px 字；主操作三处都是实心 accent + 白字。
+     */
+    label: '★★★ 全站一个按钮高度（30px）：顶栏格子 / 表单底栏 / 模态框底栏 / 模态框关闭 四处同高同字号，主操作同色',
+    ok: (v) => {
+      if (!v) return false
+      const keys = ['顶栏格子', '表单底栏', '模态框底栏', '模态框关闭']
+      const hs = keys.map((k) => v[k]?.['高'])
+      const fs = keys.map((k) => v[k]?.['字号'])
+      if (hs.some((h) => h !== 30) || fs.some((f) => f !== '13px')) return false
+      for (const k of ['顶栏格子', '表单底栏', '模态框底栏']) {
+        if (v[k]?.['底'] === 'rgba(0, 0, 0, 0)') return false
+        if (v[k]?.['字色'] !== 'rgb(255, 255, 255)') return false
+      }
+      return true
+    },
+    show: (v) =>
+      v
+        ? ['顶栏格子', '表单底栏', '模态框底栏', '模态框关闭']
+            .map((k) => `${k} ${String(v[k]?.['高'])}px/${String(v[k]?.['字号'])}`)
+            .join('　')
+        : '没量到',
+  },
+  {
     view: '新建任务 / 目录选择框',
     key: 'dirs.modalCloseIsGhost',
     /**
@@ -2083,19 +2112,38 @@ const CHECKS = [
     show: (v) => JSON.stringify(v),
   },
   {
+    view: '定时任务 / 栏头',
+    key: 'btn.headPrimary',
+    /**
+     * ★★ D181：**主操作在栏头里看得出来**——实心 accent + 白字 + 与全站同高 30px。
+     * 改之前它是 400 字重 + `--text-dim` + 透明底：`btn--primary` 在这条轨道里等于不存在，
+     * 与旁边的「删除」长得一模一样。使用者原话就是"按钮的类型差别大，风格不一致"。
+     */
+    label: '★★ 栏头的「保存」是**主操作长相**：实心 accent 底 + 白字 + 30px 高（不是一颗看不见的 ghost）',
+    ok: (v) =>
+      !!v &&
+      v['高'] === 30 &&
+      v['字重'] === '600' &&
+      v['底'] !== 'rgba(0, 0, 0, 0)' &&
+      String(v['字色']) === 'rgb(255, 255, 255)',
+    show: (v) =>
+      `「${String(v['文字'])}」${String(v['字号'])} / 高 ${String(v['高'])}px / 底 ${String(v['底'])} / 字 ${String(v['字色'])} / 字重 ${String(v['字重'])}`,
+  },
+  {
     view: '定时任务（D115）',
     key: 'schedules.headFormSingleRow',
     label:
       '★★★ 栏头用的是 `.detail-head`（两列网格：标题左、动作右），且**没有副题时是单行**：'
-      + '新建表单这一屏里 `.detail-sub` 不存在、栏头约 58px（上下内距 16+12 + 那排动作 30），'
+      + '新建表单这一屏里 `.detail-sub` 不存在、栏头约 62px（上下内距 16+12 + 那排动作 34），'
       + '标题与动作同一水平中线（不超过 2px）。有副题时约 78px；而「空副题仍占一行」的旧实现'
       + '是 59px 却带着一行空白（标题看着偏高、动作离标题更远——使用者说的是这个）',
     ok: (v) =>
       !!v &&
       v['用detailHead'] === true &&
       typeof v['栏头高'] === 'number' &&
-      // 单行约 58px（内距 16+12 + 动作那排 30）；有副题时约 78px。这里只要求「没有第二行」
-      v['栏头高'] <= 62 &&
+      // 单行约 62px（内距 16+12 + 动作那排 34，D181 把轨道从 30 抬到 34）；有副题时约 82px。
+      // 这里只要求「没有第二行」（旧实现 59px 却带着一行空白，那是 bug 不是基线）
+      v['栏头高'] <= 66 &&
       v['有副题'] === false &&
       Math.abs(v['标题动作中线差'] ?? 99) <= 2,
     show: (v) => JSON.stringify(v),
@@ -3952,14 +4000,16 @@ const CHECKS = [
     view: '顶栏',
     key: 'topbar.buttonHeights',
     label:
-      '★★ 两档高度**各自齐**：工具条里的格子 24px、工具条外的常驻控件 30px（2026-10 改版之后这是嵌套关系，不是"不齐"——但**组内**不齐仍然是"加一个按钮就把这排弄歪"）',
+      '★★ 两档高度**各自齐**：工具条里的格子 30px（= 全站按钮高度）、工具条外的常驻控件 34px（= 轨道高度）。'
+      + 'D181 之前是 24 / 30 —— 同一颗按钮在栏头 24px、在面板底栏 38px，使用者："按钮的类型差别大"。'
+      + '这两组仍是**嵌套**关系（外面那条带子比里面的格子高 4px），但**组内**不齐依旧是"加一个按钮就把这排弄歪"',
     ok: (v) =>
       !!v &&
       ['#/tasks', '#/agents', '#/crystallize'].every(
         (k) =>
           v[k] &&
-          JSON.stringify(v[k].cells) === JSON.stringify([24]) &&
-          JSON.stringify(v[k].others) === JSON.stringify([30]),
+          JSON.stringify(v[k].cells) === JSON.stringify([30]) &&
+          JSON.stringify(v[k].others) === JSON.stringify([34]),
       ),
     show: (v) =>
       Object.entries(v ?? {})
@@ -3972,8 +4022,8 @@ const CHECKS = [
     view: '顶栏',
     key: 'topbar.trackHeight',
     label:
-      '★ 工具条**轨道**与常驻控件同高（30px）——这一条钉的是"一条带子上的节奏"，也正是上面那个 bug 该被抓住的地方（格子被拉到 30 时轨道看不出问题，而工具条会变成一条没有呼吸的实心带）',
-    ok: (v) => v && v['#/tasks'] === 30 && v['#/agents'] === 30 && v['#/crystallize'] === 30,
+      '★ 工具条**轨道**与常驻控件同高（34px = 按钮 30 + 上下各 2px）——这一条钉的是"一条带子上的节奏"，也正是上面那个 bug 该被抓住的地方（格子被拉到轨道高时看不出问题，而工具条会变成一条没有呼吸的实心带）',
+    ok: (v) => v && v['#/tasks'] === 34 && v['#/agents'] === 34 && v['#/crystallize'] === 34,
     show: (v) => Object.entries(v ?? {}).map(([k, h]) => `${k}: ${h}px`).join('　'),
   },
   {

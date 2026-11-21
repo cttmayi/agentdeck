@@ -351,8 +351,11 @@
       <div class="notice bad">{error}</div>
     {/if}
     <div class="foot-row">
+      <!-- ★ D181：它是这一屏的主操作 ⇒ 归进按钮族（原来是个裸 `<button>`：38px 高、
+           和别处的 `btn--primary` 不是一个尺寸，正是"按钮的类型差别大"的一半）。 -->
       <button
         type="submit"
+        class="btn btn--primary"
         disabled={busy || !title.trim() || !executorName}
         title={busy || !title.trim() || !executorName ? $t('newtask.submitNotReady') : undefined}
       >

@@ -350,7 +350,7 @@
           <input id="set-password" bind:value={password} type="password" required autocomplete="current-password" />
         </div>
         <div class="field-row">
-          <button type="submit">{$t('settings.signIn')}</button>
+          <button type="submit" class="btn btn--primary">{$t('settings.signIn')}</button>
           <button type="button" class="btn btn--secondary" onclick={() => void submitLogin(true)}>{$t('settings.register')}</button>
         </div>
       </form>

@@ -4006,6 +4006,28 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             有副题: !!head.querySelector('.detail-sub'),
             标题动作中线差: Math.round((hr.top + hr.height / 2) - (ar.top + ar.height / 2)),
           }
+          /**
+           * ★★ D181（使用者："按钮的类型差别大，一般按钮和顶栏的按钮差异太大，风格不一致"）：
+           *   量"栏头的主操作**看得出来**"。改之前它是 400 字重 + `--text-dim` + 透明底，
+           *   与旁边的「删除」一模一样——`btn--primary` 在这条轨道里等于不存在。
+           *   现在与顶栏、面板底栏是同一个长相：实心 accent + 白字 + 同一高度。
+           */
+          facts['btn.headPrimary'] = (() => {
+            const btn = acts ? [...acts.querySelectorAll('button')].find((b) => b.classList.contains('btn--primary')) : null
+            if (!btn) return null
+            const c = cs(btn)
+            const r = btn.getBoundingClientRect()
+            return {
+              文字: text(btn),
+              高: Math.round(r.height),
+              字号: c.fontSize,
+              底: c.backgroundColor,
+              字色: c.color,
+              字重: c.fontWeight,
+              accent: cs(d().documentElement).getPropertyValue('--accent-dim').trim(),
+              onAccent: cs(d().documentElement).getPropertyValue('--on-accent').trim(),
+            }
+          })()
           const cancel = [...(head.querySelectorAll('.detail-actions button') ?? [])].find(
             (b) => (text(b) ?? '').trim() === '取消',
           )
@@ -5894,6 +5916,27 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
                 color: c.color,
                 transparent: /rgba\(0, 0, 0, 0\)|transparent/.test(c.backgroundColor),
                 accent,
+              }
+            })()
+            /**
+             * ★★ D181：**一颗按钮一个高度**（`--btn-h` 30px），而且"主操作"在四处只有一个长相
+             *   （实心 accent + 白字）。改之前：顶栏格子 24px、表单底栏 38px、模态框底栏 38px，
+             *   而且表单那颗甚至不是 `btn`（裸 `<button>`）——使用者说的"差别太大"就是这三处。
+             */
+            facts['btn.uniform'] = (() => {
+              const m = (el) => {
+                if (!el) return null
+                const c = cs(el)
+                const r = el.getBoundingClientRect()
+                return { 高: Math.round(r.height), 字号: c.fontSize, 底: c.backgroundColor, 字色: c.color, 字重: c.fontWeight }
+              }
+              return {
+                顶栏格子: m(d().querySelector('.topbar .page-actions button.btn--primary')),
+                表单底栏: m(d().querySelector('.form-foot button.btn--primary')),
+                模态框底栏: m(d().querySelector('[data-dir-picker-pick]')),
+                模态框关闭: m(d().querySelector('.modal-head > button')),
+                accent: cs(d().documentElement).getPropertyValue('--accent-dim').trim(),
+                onAccent: cs(d().documentElement).getPropertyValue('--on-accent').trim(),
               }
             })()
             const pick = d().querySelector('[data-dir-picker-pick]')

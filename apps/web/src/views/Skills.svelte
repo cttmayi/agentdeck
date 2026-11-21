@@ -1070,7 +1070,7 @@
     -->
     <div class="main-panel-foot">
       {#if tab === 'path'}
-        <button type="button" disabled={busy} onclick={submitPath}>
+        <button type="button" class="btn btn--primary" disabled={busy} onclick={submitPath}>
           {busy ? $t('skills.installing') : $t('skills.installCheck')}
         </button>
       {:else if tab === 'dirs'}

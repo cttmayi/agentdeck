@@ -1096,7 +1096,7 @@
                 if (e.key === 'Escape') renaming = false
               }}
             />
-            <button onclick={() => void saveTitle()}>{$t('chat.renameSave')}</button>
+            <button class="btn btn--primary" onclick={() => void saveTitle()}>{$t('chat.renameSave')}</button>
             <button class="btn btn--ghost" onclick={() => (renaming = false)}>{$t('chat.renameCancel')}</button>
           {:else}
             <!-- ★ 2026-11（使用者报的）：标题太长会把「改名」按钮挤到第二行 ⇒ 栏头整体 3 行。
