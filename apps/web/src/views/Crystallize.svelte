@@ -391,7 +391,7 @@
   }
 
   /* 窄屏（右栏变抽屉）时没有"两栏之间"这回事，把手不显示 */
-  @media (max-width: 73.99rem) {
+  @media (width < 74rem) {
     .pane-resizer {
       display: none;
     }

@@ -814,7 +814,7 @@ import ListRow from '../components/ListRow.svelte'
             {filter ? $t('tasks.emptyFilteredHint') : $t('tasks.emptyHint')}
           </div>
         {:else}
-          <div class="board board-6">
+          <div class="board">
             {#each COLUMNS as col (col.ids[0])}
               <!-- 一列可以收多档（「待处理」收 awaiting_review 与 needs_human） -->
               {@const items = staged.filter((x) => col.ids.includes(x.info.stage))}
@@ -1354,7 +1354,7 @@ import ListRow from '../components/ListRow.svelte'
   }
 
   /* 与 `.main` 同一条断点、同一个值（窄窗口下平台各处都收一档留白） */
-  @media (max-width: 60rem) {
+  @media (width < 60rem) {
     :global(.pane-body.create-body) {
       --create-pad-x: var(--sp-4);
     }
@@ -1466,7 +1466,7 @@ import ListRow from '../components/ListRow.svelte'
     align-items: start;
   }
 
-  @media (max-width: 60rem) {
+  @media (width < 60rem) {
     /* 窄屏堆起来：两栏挤在 800px 里两边都不能读 */
     .result-grid {
       grid-template-columns: minmax(0, 1fr);
@@ -1569,31 +1569,18 @@ import ListRow from '../components/ListRow.svelte'
   }
 
   /* ── 流水线看板 ──
-     阶段档位：执行中 / 待审查 / 待人工 / 已审查（+ 已放弃，**不是流水线的一站**，
-     见 `PIPELINE_COLUMNS`）。2026-11 精简成三列：进行中 / 待处理 / 已结束。
-     ⚠️ 2026-11（D123）：「行动中」「行动失败」两档随动作能力退场删掉——判决不再
-        触发动作，也就没有"判决要的那件事正在做/做失败了"这回事。
-     固定列数（而不是 auto-fit）：这几列就是流水线的几个状态，少一列会让人以为
-     那个状态不存在。
+     阶段档位：执行中 / 已结束（+ 已放弃，**不是流水线的一站**，见 `PIPELINE_COLUMNS`）。
 
-     ⚠️ 类名跟着列数走（`.board-6`），因为列数改了而名字不改，下一个改的人就要
-        先数一遍 CSS 里的 `repeat(N)` 才能确认它对应几列。 */
-  .board-6 {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: var(--sp-3);
-  }
-
-  /* 中等宽度放 6 列会把每列压到 130px 上下，读不了 ⇒ 改成 3+3 两行 */
-  @media (max-width: 110rem) {
-    .board-6 {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-  }
-  @media (max-width: 64rem) {
-    .board-6 {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
+     ★★ 2026-11（D192）：**这一族"固定列数"的规则整族删掉了**（`.board-6` 的
+        `repeat(6)` + 三个断点阶梯 110rem / 64rem / 60rem）。它们从来没有生效过：
+        `.board` 那条 `repeat(auto-fit, minmax(10rem, 1fr))` 写在**后面**、特异性相同，
+        于是把 `repeat(6)` 与它的每一步阶梯全压住了。实测（1920 宽的窗口、看板里
+        两个状态）：列宽 810 / 810 —— 那是 `auto-fit` 算的两列，不是 `repeat(6)` 的
+        六分之一。也就是说界面上一直是"有几个状态就几列、宽度不够自动折行"，
+        而样式表里写的却是另一回事。
+        ★ 留下来的这个行为本来就是对的（列数该跟着 `PIPELINE_COLUMNS` 走：状态
+        从三列并成两列之后，"固定六列"只是历史残留），所以删的是规则，不是行为——
+        `.board` 的 auto-fit 就是唯一那一份定义。 */
 
   .col-hint {
     display: block;

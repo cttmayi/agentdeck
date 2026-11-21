@@ -1020,7 +1020,7 @@ hr {
   grid-template-columns: var(--list-w, minmax(20rem, 26rem)) var(--grip-w, 0.375rem) minmax(0, 1fr);
 }
 
-@media (min-width: 74rem) {
+@media (width >= 74rem) {
   .split-layout.with-artifact {
     grid-template-columns: var(--list-w, minmax(20rem, 26rem)) var(--grip-w, 0.375rem) minmax(0, 1fr) var(--artifact-w, 28rem);
   }
@@ -1422,21 +1422,6 @@ hr {
   align-items: start;
 }
 
-@media (max-width: 60rem) {
-  /**
-   * ⚠️ 用 `:is(.card-grid)`（而不是直接写 `.card-grid`）是**故意**的：D179 有一条护栏
-   *   ——"`.card-grid` 在 `app.css` 里只能有一处定义"（防第二套卡片网格回来），那条护栏
-   *   按字面数"选择器 + 左花括号"出现的次数。这里只加"窄屏塌成一列"，不是第二套定义，
-   *   所以包一层 `:is()` 让护栏仍然是字面真话；特异性不变（`:is()` 取参数的特异性），
-   *   又排在后面，压得住 `.card-grid` 的 `repeat(2, …)`。
-   */
-  .pair-field,
-  .pair-card,
-  :is(.card-grid) {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
 /* ★ D187：`.card-grid` 保留名字（多处 markup 用它），排法走 `pair-card` 那一条 */
 .card-grid {
   display: grid;
@@ -1699,7 +1684,7 @@ hr {
      72rem —— 主从布局退化成"一次只显示一栏"（详情占满，返回按钮出现）
      60rem —— 看板三列改成纵向堆叠（三等分在窄屏挤得没法读） */
 
-@media (max-width: 72rem) {
+@media (width < 72rem) {
   .split-layout {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1722,10 +1707,41 @@ hr {
   }
 }
 
-@media (max-width: 60rem) {
-  .board-4 {
-    grid-template-columns: minmax(0, 1fr) !important;
+/**
+ * ★★ D192：**窄档（< 60rem = 960px）只有一块**。
+ *
+ * 这一档原来分成**两个** `max-width: 60rem` 块（一个管"两列塌成一列"，一个管内距与
+ *   顶栏动作），中间隔着别的东西——于是"60rem 这一档到底改了什么"要把文件翻两遍。
+ * 现在合成一块：条件写一次，里面的规则一眼看全。
+ *
+ * ⚠️ 条件用 **range 语法**（`width < 60rem` / `width >= 74rem`）而不是 `max-width`：
+ *   `max-width: 60rem` 含边界（≤960），`min-width` 也含边界（≥），一对边界要写
+ *   `59.99rem` / `73.99rem` 这种凑数才知道谁赢——本文件里真的出现过两个 `73.99rem`
+ *   （就为了当 `min-width: 74rem` 的补集）。range 语法里 `width < 74rem` 与
+ *   `width >= 74rem` 是**严格互补**，边界上不重叠、也不用凑数。
+ */
+@media (width < 60rem) {
+  /* 两列排法（字段对 / 卡片对 / 卡片栅格）在窄栏里塌成一列 */
+  /**
+   * ⚠️ 用 `:is(.card-grid)`（而不是直接写 `.card-grid`）是**故意**的：D179 有一条护栏
+   *   ——"`.card-grid` 在 `app.css` 里只能有一处定义"（防第二套卡片网格回来），那条护栏
+   *   按字面数"选择器 + 左花括号"出现的次数。这里只加"窄屏塌成一列"，不是第二套定义，
+   *   所以包一层 `:is()` 让护栏仍然是字面真话；特异性不变（`:is()` 取参数的特异性），
+   *   又排在后面，压得住 `.card-grid` 的 `repeat(2, …)`。
+   */
+  .pair-field,
+  .pair-card,
+  :is(.card-grid) {
+    grid-template-columns: minmax(0, 1fr);
   }
+
+  /*
+   * ⚠️ 原来这里有一条 `.board-4 { grid-template-columns: minmax(0, 1fr) !important }`。
+   *   D192 删掉了，连 `Tasks.svelte` 里那一整族"固定列数"规则（`.board-6` + 110/64/60rem
+   *   三个阶梯）一起删——原因是量出来的：那一族规则**从来没有生效过**（`.board` 的
+   *   `auto-fit` 写在后面、特异性相同，把它全压住了），看板一直是"有几个状态就几列、
+   *   宽度不够自动折行"。删的是规则，不是行为。
+   */
 
   /**
    * ★ D183：窄屏的统一收法——**页面级从 24/32 收到 16**，面板级只收"左右"
@@ -1768,7 +1784,7 @@ hr {
  * 名字是这一条带子上最长的**可变**文字（`max-width: 8rem`），其它都是固定词条；
  * 挤不下时先牺牲它，头像仍然说明"我是谁"。
  */
-@media (max-width: 48rem) {
+@media (width < 48rem) {
   .account-name {
     display: none;
   }

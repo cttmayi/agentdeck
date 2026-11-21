@@ -344,7 +344,7 @@
   /* ══════════════ 不够宽（< 74rem）：第三列改成右侧抽屉，不占网格 ══════════════
      ⚠️ 断点必须与 `app.css` 里 `@media (min-width: 74rem)` 对齐：一个管"占不占列"，
      另一个管"长什么样"，两处不一致就会出现"网格里留了列、里面却是抽屉"的错位。 */
-  @media (max-width: 73.99rem) {
+  @media (width < 74rem) {
     .artifact-pane {
       position: fixed;
       top: 0;

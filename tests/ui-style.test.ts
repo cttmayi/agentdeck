@@ -394,6 +394,69 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
   })
 
   /**
+   * ★★★ D192：**断点只有四级**，而且写法只有一种（range 语法）。
+   *
+   * 量到的现状：`app.css` 里有四档断点（74 / 72 / 60 / 48rem），但
+   *   ① **60rem 那一档被拆成两块**（一块管"两列塌一列"、一块管内距与顶栏动作），
+   *      中间隔着别的东西 ⇒ "60rem 到底改了什么"要翻两遍文件；
+   *   ② 边界靠**凑数**：`min-width: 74rem` 的补集被写成 `max-width: 73.99rem`
+   *      （两个页面各一处，注释还专门说明"必须对齐"）——一对边界需要 0.01 的差值
+   *      才不重叠，这是 `max-width` 含边界造成的，不是任何人的疏忽；
+   *   ③ 页面里还藏着一档 `110rem` / `64rem`，是**看板列数**的步进（6→3→2 列），
+   *      跟"页面怎么排版"不是一回事，但它长得跟断点一模一样，没人登记就分不开。
+   *
+   * 现在：`app.css` 只许四档，一律 range 语法（`width >= 74rem` / `width < 72rem` /
+   *   `width < 60rem` / `width < 48rem`），每档**只有一块**；页面里额外允许看板那一族
+   *   （`110rem` / `64rem`，登记在 `BOARD_STEPS` 里并写明理由）。
+   */
+  test('★★★ 断点只有四级（range 语法、每档一块），看板列数步进单独登记', async () => {
+    const files = await load()
+    const css = files.get('packages/ui/src/styles/app.css') ?? ''
+    const noComments = (t: string): string => t.replace(/\/\*[^]*?\*\//g, '')
+    const queries = (t: string): string[] => [...noComments(t).matchAll(/@media\s*([^{]*?)\s*\{/g)].map((m) => (m[1] ?? '').trim())
+    /** 四级断点：**每档一块**（同一档出现两次就说明又被拆开了） */
+    const TIERS = [
+      '(width >= 74rem)',
+      '(width < 74rem)',
+      '(width < 72rem)',
+      '(width < 60rem)',
+      '(width < 48rem)',
+    ]
+    // app.css 自己只许**四块**（其中 `< 74rem` 是"宽档的另一半"，归页面用，见下）
+    const APP_TIERS = ['(width >= 74rem)', '(width < 72rem)', '(width < 60rem)', '(width < 48rem)']
+    const appQ = queries(css)
+    assert.deepEqual([...appQ].sort(), [...APP_TIERS].sort(), `app.css 的断点必须正好是这四块（每档一块，range 语法）：\n实际 ${appQ.join(' / ')}`)
+    /** 不许再用 `max-width` / `min-width` 写屏幕宽度（那是"含边界"的写法，逼人凑 73.99） */
+    const badSyntax: string[] = []
+    for (const [rel, text] of files) {
+      if (!rel.endsWith('.css') && !rel.endsWith('.svelte')) continue
+      for (const q of queries(text.slice(text.indexOf('<style') >= 0 && rel.endsWith('.svelte') ? text.indexOf('<style') : 0))) {
+        if (/max-width|min-width/.test(q)) badSyntax.push(`${rel} → @media ${q}`)
+      }
+    }
+    assert.deepEqual(badSyntax, [], `屏幕宽度的断点请用 range 语法（\`width >= 74rem\` / \`width < 72rem\`）：\n${badSyntax.join('\n')}`)
+    /** 页面里额外允许的、登记过的断点（每一项都要写清"为什么它不属四级"） */
+    // ★ D192：原来这里登记着 Tasks 的 （看板列数步进）——
+    //   实测发现那一族规则**从来没生效过**（被  的 auto-fit 压住），整族删了。
+    //   所以这张表现在是空的：页面里除了四级断点，一个额外断点都不该有。
+    const BOARD_STEPS: Record<string, string> = {}
+    // 页面里的断点值：四级里的可以直接用；其余必须在 BOARD_STEPS 里登记
+    const stray: string[] = []
+    for (const [rel, text] of files) {
+      if (!rel.endsWith('.svelte')) continue
+      const at = text.indexOf('<style')
+      if (at < 0) continue
+      for (const q of queries(text.slice(at))) {
+        if (TIERS.some((t2) => q === t2)) continue
+        const reg = BOARD_STEPS[rel]
+        if (reg && new RegExp(reg).test(q)) continue
+        stray.push(`${rel} → @media ${q}`)
+      }
+    }
+    assert.deepEqual(stray, [], `这些断点没有登记（四级是 74 / 72 / 60 / 48rem；其它必须进 BOARD_STEPS 并写明理由）：\n${stray.join('\n')}`)
+  })
+
+  /**
    * ★★★ D190：**"要截断的长文字"只有一个写法——全局 `.ellipsis`**。
    *
    * 来时：那条"让省略号真的生效"的四行（`max-width:100%` + `overflow:hidden` +
