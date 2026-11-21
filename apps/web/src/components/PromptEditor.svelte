@@ -148,7 +148,7 @@
       <header class="pe-head">
         <div class="pe-head-title">
           <span class="pe-head-mark">✎</span>
-          <h3 class="ellipsis">{title}</h3>
+          <span class="pe-head-name ellipsis">{title}</span>
         </div>
         <div class="pe-head-right">
           <button type="button" class="pe-close" title={$t('common.close')} onclick={cancel}>✕</button>
@@ -246,11 +246,16 @@
     font-size: var(--fs-base);
     flex-shrink: 0;
   }
-  .pe-head h3 {
-  /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
+  /* ★ D194：这里原来写的是 `.pe-head h3`——用 `<h3>` 画一行 14/600 的说明，既不是标题档
+     （17/600）也不是标签档（13/500）。它不是标题（标题说的是"这一段在讲什么"的层级），
+     而是工具条上"我在编辑什么"的一行说明 ⇒ 换成非标题元素，视觉一字不改
+     （14/600 + margin 0，另把原来从 h1–h4 继承来的 `line-height: var(--lh-tight)` 补上）。 */
+  .pe-head-name {
+    /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     margin: 0;
     font-size: var(--fs-base);
     font-weight: 600;
+    line-height: var(--lh-tight);
   }
   .pe-head-right {
     display: flex;

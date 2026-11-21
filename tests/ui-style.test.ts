@@ -409,14 +409,15 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
     for (const need of ['h1, h2, h3, h4', 'font-size: var(--fs-lg)', 'font-size: var(--fs-sm)']) {
       assert.ok(css.includes(need), `app.css 的标题族少了一行：${need}`)
     }
-    /** 登记过的例外：文件 → 选择器片段（必须写明"为什么它不是标题层级的事"） */
-    const HEADING_OVERRIDES: Array<[string, string, string]> = [
-      [
-        'apps/web/src/components/PromptEditor.svelte',
-        '.pe-head h3',
-        '编辑器头那一行是"这块编辑什么东西"+ 工具按钮的**工具条**，不是正文层级；它按 14/600 画（与标签档 13、h4 13 都不撞，因为它在浮层里独占一行）。真要统一该动 markup（换成非标题元素），但那会改观感 ⇒ 只登记，不擅改。',
-      ],
-    ]
+    /**
+     * 登记过的例外：文件 → 选择器片段（+ 一句"为什么它不是标题层级的事"）。
+     *
+     * ★ D194：原来是空的以前有一条——`PromptEditor` 的 `.pe-head h3`（把 `<h3>` 画成
+     *   14/600）。D194 把那个 `<h3>` 换成了非标题元素 `<span class="pe-head-name">`，
+     *   声明一字不改（14/600 + margin 0 + 补上原来继承来的 `line-height`），**视觉一致**，
+     *   于是"标题当标签用"这件事从根上没了，表也就空了。
+     */
+    const HEADING_OVERRIDES: Array<[string, string, string]> = []
     const offenders: string[] = []
     for (const [rel, text] of files) {
       if (!rel.endsWith('.svelte')) continue
