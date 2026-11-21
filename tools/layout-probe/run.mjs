@@ -2434,7 +2434,37 @@ const CHECKS = [
       v['入口文案'].includes('编排') &&
       v['保存置灰'] === true &&
       v['有删除'] === true &&
-      v['独有技能框'] === true,
+      v['独有技能框'] === true &&
+      // ★ 关键那条：**复用了智能体编辑页**（同一份组件 ⇒ 同一副骨架），不是另画一个
+      v['复用了编辑页'] === true,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '编排',
+    key: 'workflows.agentsNewMatchesAgentForm',
+    label:
+      '★★★ 点「新建智能体」⇒ 就是智能体页那张新建表单（`SettingsPanel` 外壳 + 底栏主操作），'
+      + '不是另画一个；没有「用哪个 CLI」那一格、入口**锁死只有「编排」**',
+    ok: (v) =>
+      !!v &&
+      v['打开'] === true &&
+      String(v['地址']).includes('/agents/') &&
+      String(v['地址']).endsWith('/new') &&
+      v['是设置面板'] === true &&
+      v['有返回'] === true &&
+      v['没有CLI那一格'] === true &&
+      v['入口数'] === 1 &&
+      v['入口锁着编排'] === true &&
+      v['主操作在底栏'] === true &&
+      v['指令框'] === true &&
+      v['技能格'] === true,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '编排',
+    key: 'workflows.agentsNewBack',
+    label: '★★ 新建页点「← 返回」回到编排详情（那一节还在）——两个入口都回得来',
+    ok: (v) => !!v && v['回到详情'] === true,
     show: (v) => JSON.stringify(v),
   },
   {

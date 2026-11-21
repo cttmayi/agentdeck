@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { createAgent, identity, skills } from '../lib/stores.ts'
-  import type { ReviewStandard } from '../lib/api.ts'
+  import { createAgent, identity, skills, workflows } from '../lib/stores.ts'
+  import { api, type ReviewStandard, type Workflow } from '../lib/api.ts'
   import { showToast } from '../lib/view.ts'
   import PromptField from './PromptField.svelte'
   import SettingsPanel from './SettingsPanel.svelte'
@@ -46,6 +46,18 @@
    */
   export let onclose: () => void = () => {}
   export let oncreated: () => void = () => {}
+  /**
+   * ★★ 2026-11（D238）：**同一个表单服务两种智能体**。
+   *
+   * `{ kind: 'workflow' }` = 编排内建智能体（`workflows/<id>/agents/<名字>/`，D234）：
+   * 使用者要求"编排的新建智能体要和智能体的新建智能体页面**一致、最好复用**"，
+   * 所以复用这一个组件，只差三件事——落库地址、**入口固定只有「编排」**、没有 CLI 那一格
+   * （`WorkflowInlineAgent` 没有 `runtimeKey`，跑的时候跟工作区默认；给一个选不动的下拉
+   * 才是假控件）。
+   */
+  export let scope: { kind: 'agent' } | { kind: 'workflow'; workflowId: string; workflowName?: string } =
+    { kind: 'agent' }
+  $: isWf = scope.kind === 'workflow'
   /**
    * ★★ 2026-11（D164）：**预填**（复制智能体时用）。
    *
@@ -119,7 +131,9 @@
    */
   let selectedEntries: string[] = prefill?.entries?.length
     ? [...prefill.entries]
-    : [...USER_ENTRY_CHOICES]
+    : isWf
+      ? ['workflow']
+      : [...USER_ENTRY_CHOICES]
   /**
    * 可选的 runtime —— 从**身份接口**来，不写死两项。
    *
@@ -136,7 +150,15 @@
     error = ''
     busy = true
     try {
-      await createAgent({
+      if (scope.kind === 'workflow') {
+        // 编排内建智能体：没有 runtime / 入口（固定「编排」）/ 审核标准，只有名字+指令+技能
+        await api(`/api/workflows/${encodeURIComponent(scope.workflowId)}/agents`, {
+          method: 'POST',
+          body: JSON.stringify({ name: name.trim(), instructions, skillIds: selectedSkills }),
+        })
+        const out = await api<{ items: Workflow[] }>('/api/workflows')
+        workflows.set(out.items ?? [])
+      } else await createAgent({
         name,
         instructions,
         skillIds: selectedSkills,
@@ -179,7 +201,12 @@
   底栏在 form 元素外面也能提交）。
   ══════════════════════════════════════════════════════════════════
 -->
-<SettingsPanel title={$t('agents.newTitle')} onback={onclose} ariaLabel={$t('agents.newTitle')}>
+<SettingsPanel
+  title={$t('agents.newTitle')}
+  subtitle={isWf && scope.kind === 'workflow' ? $t('workflows.agentsOfWorkflow', { name: scope.workflowName ?? '' }) : ''}
+  onback={onclose}
+  ariaLabel={$t('agents.newTitle')}
+>
   {#snippet body()}
 <form onsubmit={submit} class="agent-form" id="new-agent-form">
   {#if error}
@@ -217,20 +244,23 @@
         <input bind:value={name} placeholder={$t('agents.namePlaceholder')} required autocomplete="off" />
       </label>
 
-      <label class="cell">
-        {$t('agents.runtimeFieldLabel')}
-        <select bind:value={runtimeKey}>
-          {#each runtimeOptions as key (key)}
-            {@const r = $identity?.runtimes.find((x) => x.key === key)}
-            <option value={key}>
-              {key}{r && r.evidence !== 'verified' ? $t('agents.runtimeUnverified') : ''}
-            </option>
-          {/each}
-          {#if !runtimeOptions.includes(runtimeKey)}
-            <option value={runtimeKey}>{$t('agents.runtimeCurrent', { key: runtimeKey })}</option>
-          {/if}
-        </select>
-      </label>
+      {#if !isWf}
+        <!-- 编排内建智能体没有 `runtimeKey`（跑的时候跟工作区默认）——不给一个选不动的下拉 -->
+        <label class="cell">
+          {$t('agents.runtimeFieldLabel')}
+          <select bind:value={runtimeKey}>
+            {#each runtimeOptions as key (key)}
+              {@const r = $identity?.runtimes.find((x) => x.key === key)}
+              <option value={key}>
+                {key}{r && r.evidence !== 'verified' ? $t('agents.runtimeUnverified') : ''}
+              </option>
+            {/each}
+            {#if !runtimeOptions.includes(runtimeKey)}
+              <option value={runtimeKey}>{$t('agents.runtimeCurrent', { key: runtimeKey })}</option>
+            {/if}
+          </select>
+        </label>
+      {/if}
 
       <label class="cell">
         <!-- ★ 分批第 53 批：点明「指令」= 第一句话的 ② 身份。
@@ -281,18 +311,29 @@
         ★ 三个勾选框，默认全勾；**一个都不勾**时下方的「创建」按钮置灰并给一句原因
           （那样造出来的智能体在每一个入口里都叫不出来——服务端同样会拒）。
       -->
-      <div class="cell entry-cell">
+      <div class="cell entry-cell" data-wf-agent-entries>
         <span class="cell-label">{$t('agents.entriesLabel')}</span>
-        <div class="entry-picker">
-          {#each USER_ENTRY_CHOICES as entry (entry)}
+        {#if isWf}
+          <!-- 入口**固定只有「编排」**（使用者："只是入口是固定的，只能有编排"）：
+               同一个控件、勾着且禁用——不另造一个"只读徽标"，免得两边长得不一样 -->
+          <div class="entry-picker locked">
             <label class="entry-option">
-              <input type="checkbox" value={entry} bind:group={selectedEntries} />
-              <span>{$t(USER_ENTRY_LABEL_KEYS[entry])}</span>
+              <input type="checkbox" checked disabled />
+              <span>{$t('workflows.agentsEntryWorkflow')}</span>
             </label>
-          {/each}
-        </div>
-        {#if !hasAnyEntry(selectedEntries)}
-          <p class="hint entry-warning" data-entries-empty>{$t('agents.entriesEmpty')}</p>
+          </div>
+        {:else}
+          <div class="entry-picker">
+            {#each USER_ENTRY_CHOICES as entry (entry)}
+              <label class="entry-option">
+                <input type="checkbox" value={entry} bind:group={selectedEntries} />
+                <span>{$t(USER_ENTRY_LABEL_KEYS[entry])}</span>
+              </label>
+            {/each}
+          </div>
+          {#if !hasAnyEntry(selectedEntries)}
+            <p class="hint entry-warning" data-entries-empty>{$t('agents.entriesEmpty')}</p>
+          {/if}
         {/if}
       </div>
 
@@ -316,7 +357,7 @@
       type="submit"
       form="new-agent-form"
       class="btn btn--primary"
-      disabled={busy || !name.trim() || !hasAnyEntry(selectedEntries)}
+      disabled={busy || !name.trim() || (!isWf && !hasAnyEntry(selectedEntries))}
     >
       {busy ? $t('common.creating') : $t('common.create')}
     </button>

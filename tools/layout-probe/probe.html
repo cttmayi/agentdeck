@@ -4713,26 +4713,31 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           if (!edit) return null
           const hash0 = f.contentWindow.location.hash
           click(edit)
-          const ok = await until(() => !!d().querySelector('[data-wf-agent-editor]'), 60)
-          // 名字与指令**有值**（不是一张空表单）；入口锁死只有「编排」；进编辑页时保存置灰
-          const ed = d().querySelector('[data-wf-agent-editor]')
-          const entryInputs = [...(ed?.querySelectorAll('[data-wf-agent-entries] input') ?? [])]
+          /*
+           * ★ D238：编辑页**复用** `AgentDetail`（与智能体页同一份组件），所以这里量的是
+           *   它那份真 DOM 契约：`.agent-head` 栏头、`[data-agent-save]` / `[data-agent-delete]`、
+           *   `[data-agent-entries]`、`.skill-box`。**没有**自造控件的痕迹才算"一致"。
+           */
+          const ok = await until(() => !!d().querySelector('[data-wf-agent-back]'), 60)
+          const pane = d().querySelector('.detail-pane')
+          const entryInputs = [...(pane?.querySelectorAll('[data-agent-entries] input') ?? [])]
           return {
             打开: ok,
             地址变了: f.contentWindow.location.hash !== hash0,
             地址: f.contentWindow.location.hash,
-            标题: (text(ed?.querySelector('[data-wf-agent-title]')) ?? '').trim(),
-            名字: ed?.querySelector('[data-wf-agent-name]')?.value ?? '',
-            指令: (ed?.querySelector('textarea')?.value ?? '').slice(0, 4),
+            标题: (text(pane?.querySelector('.agent-head h2 .agent-head-name')) ?? '').trim(),
+            名字: (text(pane?.querySelector('.agent-head h2')) ?? '').trim(),
+            指令: (pane?.querySelector('textarea')?.value ?? '').slice(0, 4),
             入口数: entryInputs.length,
-            入口全是编排: entryInputs.every((i) => i.checked && i.disabled),
-            入口文案: [...(ed?.querySelectorAll('[data-wf-agent-entries] span') ?? [])]
+            入口全是编排: entryInputs.length === 1 && entryInputs[0].checked && entryInputs[0].disabled,
+            入口文案: [...(pane?.querySelectorAll('[data-agent-entries] span') ?? [])]
               .map((x) => (text(x) ?? '').trim())
               .filter((x) => x !== '')
               .join(','),
-            保存置灰: ed?.querySelector('[data-wf-agent-save]')?.disabled ?? null,
-            有删除: !!ed?.querySelector('[data-wf-agent-delete]'),
-            独有技能框: !!ed?.querySelector('[data-wf-agent-skills]'),
+            保存置灰: pane?.querySelector('[data-agent-save]')?.disabled ?? null,
+            有删除: !!pane?.querySelector('[data-agent-delete]'),
+            独有技能框: !!pane?.querySelector('.skill-box'),
+            复用了编辑页: !!pane?.querySelector('.agent-card') && !!pane?.querySelector('.agent-head'),
           }
         })()
 
@@ -4751,6 +4756,41 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           }
         })()
 
+        // ⑦d2 「新建智能体」= 智能体页那张新建表单（复用 `NewAgentForm`/`SettingsPanel`）
+        facts['workflows.agentsNewMatchesAgentForm'] = await (async () => {
+          const sec = d().querySelector('[data-wf-agents]')
+          if (!sec) return null
+          const add = sec.querySelector('[data-wf-agent-new]')
+          if (!add) return null
+          click(add)
+          const ok = await until(() => !!d().querySelector('.main-panel[data-settings-panel]'), 60)
+          if (!ok) return { 打开: false }
+          const pane = d().querySelector('.main-panel[data-settings-panel]')
+          const entryInputs = [...pane.querySelectorAll('[data-wf-agent-entries] input')]
+          const create = pane.querySelector('.main-panel-foot .btn--primary')
+          return {
+            打开: true,
+            地址: f.contentWindow.location.hash,
+            是设置面板: !!pane,
+            有返回: !!pane.querySelector('[data-settings-back]'),
+            没有CLI那一格: !pane.querySelector('#agent-runtime') && !pane.querySelector('.runtime-cell'),
+            入口数: entryInputs.length,
+            入口锁着编排: entryInputs.length === 1 && entryInputs[0].checked && entryInputs[0].disabled,
+            主操作在底栏: !!create && (text(create) ?? '').trim() !== '',
+            指令框: !!pane.querySelector('textarea'),
+            技能格: !!pane.querySelector('.skill-picker'),
+          }
+        })()
+
+        // 从新建页回到编排详情（后面几段假设停在详情）
+        facts['workflows.agentsNewBack'] = await (async () => {
+          const back = d().querySelector('[data-settings-back]')
+          if (!back) return null
+          click(back)
+          const ok = await until(() => !!d().querySelector('[data-wf-agents]'), 60)
+          return { 回到详情: ok }
+        })()
+
         // ⑦e 本编排内重名 ⇒ 服务端原话出现在编辑页，且**不跳走**
         facts['workflows.agentsDupError'] = await (async () => {
           const sec = d().querySelector('[data-wf-agents]')
@@ -4761,18 +4801,35 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           )
           if (!row) return null
           click([...row.querySelectorAll('button')].find((b) => (text(b) ?? '').trim() === '编辑'))
-          await until(() => !!d().querySelector('[data-wf-agent-editor]'), 60)
-          const input = d().querySelector('[data-wf-agent-name]')
+          await until(() => !!d().querySelector('[data-wf-agent-back]'), 60)
+          /*
+           * 名字走**智能体编辑页同一条改名流程**（h2 旁的「改名字」→ 输入框 → Enter）：
+           * 这本身就是"一致"的一部分——编排内建智能体的名字不是另造一个输入框。
+           */
+          const rename = d().querySelector('[data-agent-rename]')
+          if (!rename) return null
+          click(rename)
+          // ⚠️ `until()` 返回**布尔**，不是元素——元素要再取一次（第一版直接当元素用，
+          //    于是 `input.constructor.prototype` 是 Boolean 的，`.set` undefined）
+          const opened = await until(() => !!d().querySelector('input.agent-rename-input'), 40)
+          const input = opened ? d().querySelector('input.agent-rename-input') : null
           if (!input) return null
-          // 走原生的 value setter + input 事件（Svelte 的 bind:value 才认）
-          const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+          /*
+           * ⚠️ 用**元素自己那个 realm** 的 setter（`input.constructor.prototype`）：
+           *   探针跑在父文档里，`HTMLInputElement` 是父文档的构造器，而 input 在 iframe 里
+           *   ⇒ 拿父文档的 setter 去 `call` 它会 `TypeError: Illegal invocation`（实测就是这么
+           *   炸的，而且整条探针在这里中断，后面几十条全变"没量到"）。
+           */
+          const setter = Object.getOwnPropertyDescriptor(input.constructor.prototype, 'value').set
           setter.call(input, '短名')
-          input.dispatchEvent(new Event('input', { bubbles: true }))
-          await wait(150)
-          const save = d().querySelector('[data-wf-agent-save]')
+          input.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
+          await wait(120)
+          input.dispatchEvent(new f.contentWindow.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+          await wait(200)
+          const save = d().querySelector('[data-agent-save]')
           if (save) click(save)
-          const shown = await until(() => !!d().querySelector('[data-wf-agent-error]'), 80)
-          const msg = shown ? (text(d().querySelector('[data-wf-agent-error]')) ?? '').trim() : ''
+          const shown = await until(() => !!d().querySelector('.detail-pane .notice.bad'), 80)
+          const msg = shown ? (text(d().querySelector('.detail-pane .notice.bad')) ?? '').trim() : ''
           // 收尾：点返回，把页面还给后面的段落（它们假设停在编排详情）
           const back = d().querySelector('[data-wf-agent-back]')
           if (back) click(back)
@@ -4789,8 +4846,8 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           )
           if (!row) return null
           click([...row.querySelectorAll('button')].find((b) => (text(b) ?? '').trim() === '编辑'))
-          await until(() => !!d().querySelector('[data-wf-agent-editor]'), 60)
-          const del = d().querySelector('[data-wf-agent-delete]')
+          await until(() => !!d().querySelector('[data-wf-agent-back]'), 60)
+          const del = d().querySelector('[data-agent-delete]')
           if (!del) return null
           click(del)
           const shown = await until(() => !!d().querySelector('.modal .confirm-message'), 60)

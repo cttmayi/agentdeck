@@ -20,9 +20,10 @@
   import { t, tx } from '../lib/i18n.ts'
   // ★ 分批第 208 批：起草者的「沉淀用技能」可以从**这一页**直接装（使用者定：安装入口留两处，
   //   另一处是「沉淀设置」）。装的是同一个上游地址，走的是同一个接口。
-  import { api } from '../lib/api.ts'
+  import { api, type Workflow } from '../lib/api.ts'
   import { DISTILLY_SOURCE } from '../lib/crystallize-editor.svelte.ts'
   import { showToast } from '../lib/view.ts'
+  import { workflows } from '../lib/stores.ts'
   import PromptField from './PromptField.svelte'
   import ChatMemoryTidy from './ChatMemoryTidy.svelte'
   import {
@@ -73,6 +74,23 @@
       }) => void)
     | undefined = undefined
 
+  /**
+   * ★★ 2026-11（D238）：**同一个编辑页服务两种智能体**。
+   *
+   * `{ kind: 'workflow' }` = 编排内建智能体（`workflows/<id>/agents/<名字>/`，D234）。
+   * 使用者要求"编排的（编辑页）要和智能体的编辑页一致，最好复用"——所以复用这一个
+   * 组件，只差四处：
+   *   · 落库地址（PATCH/DELETE `/api/workflows/:id/agents/:aid`）；
+   *   · 没有「CLI」「记忆」两格（`WorkflowInlineAgent` 没有那两个字段，给假控件更糟）；
+   *   · 入口**固定只有「编排」**（锁死）；
+   *   · 独有技能**只读**（写入口二期接）。
+   * 返回按钮改成**常驻**（这一页是把编排详情整块换掉的，不是主从布局）。
+   */
+  export let scope:
+    | { kind: 'agent' }
+    | { kind: 'workflow'; workflowId: string; workflowName?: string } = { kind: 'agent' }
+  $: isWf = scope.kind === 'workflow'
+
   let busy = false
   let error = ''
 
@@ -98,6 +116,14 @@
   async function loadExclusive(): Promise<void> {
     exclusiveLoading = true
     try {
+      if (scope.kind === 'workflow') {
+        // 编排内建智能体的独有技能：`workflows/<wid>/agents/<名字>/skills/`（只读）
+        const out = await api<{ skills: AgentExclusiveSkill[] }>(
+          `/api/workflows/${encodeURIComponent(scope.workflowId)}/agents/${encodeURIComponent(agent.id)}/skills`,
+        )
+        exclusiveSkills = (out.skills ?? []).map((x) => ({ ...x, body: '' }))
+        return
+      }
       exclusiveSkills = await listExclusiveSkills(agent.id)
     } catch {
       // ★ 2026-11（使用者："有报错『独有技能读取失败』，没有每个智能体都有独有技能的，
@@ -671,6 +697,49 @@
    *    （`changedCount` 那一套是给"查看/编辑两态"用的，两态没了它就没意义了。）
    */
   async function save(): Promise<void> {
+    /*
+     * ★ D238：编排内建智能体的保存**只发它真有的三个字段**（名字 / 指令 / 技能）。
+     *   走 `buildPatch()` 会把 runtime / entries / memory 一起送过去——那些字段
+     *   它根本没有（服务端也只会忽略），送出去的东西与实际形状不符。
+     */
+    if (scope.kind === 'workflow') {
+      const changed =
+        draft.name.trim() !== agent.name ||
+        draft.instructions !== agent.instructions ||
+        !sameIdSet(draft.skillIds, agent.skillIds)
+      if (!changed) return
+      if (draft.name.trim() === '') {
+        error = $t('workflows.agentsNameRequired')
+        return
+      }
+      busy = true
+      error = ''
+      try {
+        await api(
+          `/api/workflows/${encodeURIComponent(scope.workflowId)}/agents/${encodeURIComponent(agent.id)}`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify({
+              name: draft.name.trim(),
+              instructions: draft.instructions,
+              skillIds: draft.skillIds,
+            }),
+          },
+        )
+        // 界面跟着数据走：编排页那一节的名字/计数来自这份 store
+        const out = await api<{ items: Workflow[] }>('/api/workflows')
+        workflows.set(out.items ?? [])
+        showToast($t('workflows.agentsSaved'))
+        onchanged()
+        onclose()
+      } catch (err) {
+        // 服务端的原话照给（比如本编排内重名那句）
+        error = err instanceof Error ? err.message : String(err)
+      } finally {
+        busy = false
+      }
+      return
+    }
     const patch = buildPatch()
     if (Object.keys(patch).length === 0) {
       return
@@ -776,6 +845,42 @@
 
   /** 删除（2026-11）：先确认，再删；删完退出这一栏（列表已随 store 刷新）。 */
   async function remove(): Promise<void> {
+    if (scope.kind === 'workflow') {
+      /*
+       * 编排内建智能体的删除（D237 使用者拍板"只点名、不拦"）：代码里还引用着这个
+       * 名字时，确认框多说一句——那句是**扫出来的事实**（工作流代码里出现 `'<名字>'`），
+       * 扫不到就不说。
+       */
+      const code = $workflows.find((w) => w.id === scope.workflowId)?.code ?? ''
+      const referenced = code.includes(`'${agent.name}'`)
+      const ok = await askConfirm({
+        title: $t('workflows.agentsDelete'),
+        message: referenced
+          ? $t('workflows.agentsConfirmDeleteUsed', { name: agent.name })
+          : $t('workflows.agentsConfirmDelete', { name: agent.name }),
+        confirmLabel: $t('workflows.agentsDelete'),
+        danger: true,
+      })
+      if (!ok) return
+      busy = true
+      error = ''
+      try {
+        await api(
+          `/api/workflows/${encodeURIComponent(scope.workflowId)}/agents/${encodeURIComponent(agent.id)}`,
+          { method: 'DELETE' },
+        )
+        const out = await api<{ items: Workflow[] }>('/api/workflows')
+        workflows.set(out.items ?? [])
+        showToast($t('workflows.agentsDeleted'))
+        onchanged()
+        onclose()
+      } catch (err) {
+        error = err instanceof Error ? err.message : String(err)
+      } finally {
+        busy = false
+      }
+      return
+    }
     const ok = await askConfirm({
       title: tx('agents.confirmDeleteTitle'),
       message: tx('agents.confirmDeleteBody', { name: agent.name }),
@@ -789,6 +894,13 @@
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
     }
+  }
+
+  /** 两个 id 集合是否相同（顺序无关）——编排那条保存时的脏态判定用。 */
+  function sameIdSet(a: readonly string[], b: readonly string[]): boolean {
+    if (a.length !== b.length) return false
+    const set = new Set(b)
+    return a.every((x) => set.has(x))
   }
 
   /**
@@ -983,9 +1095,23 @@
       ⚠️ 改之前窄屏只能靠动作里那颗「取消」出去，而「取消」的语义是"放弃改动"，
         读起来不像"回到列表"（探针曾把这件事记成一条事实：侧边栏那一项在选中态下是空操作）。
     -->
-    <button type="button" class="btn btn--ghost btn--sm back-to-list" data-agent-back onclick={onclose}>
-      {$t('agents.backToList')}
-    </button>
+    {#if isWf}
+      <!--
+        ★ D238：编排内建智能体这一页是**把编排详情整块换掉**的（不是主从布局），
+        所以返回按钮必须**常驻**——不能用 `.back-to-list`（它在宽屏是 display:none，
+        因为主从布局里列表就在左边）。与运行画面的返回按钮同一个做法。
+      -->
+      <button
+        type="button"
+        class="btn btn--ghost btn--sm"
+        data-wf-agent-back
+        onclick={onclose}
+      >{$t('workflows.agentsBack')}</button>
+    {:else}
+      <button type="button" class="btn btn--ghost btn--sm back-to-list" data-agent-back onclick={onclose}>
+        {$t('agents.backToList')}
+      </button>
+    {/if}
     <!--
       ⚠️⚠️ 2026-11（D157）：**标题与副题必须包在同一个格子里**（`.detail-head-main`）。
       `.detail-head` 是两列网格（`minmax(0,1fr) auto`）：不包的话它们是**三个并列的网格子项**
@@ -1056,13 +1182,20 @@
       data-agent-head-sub
       title={draft.runtimeKey === 'default' ? $t('agents.runtimeFollowDefaultHint') : ''}
     >
-      {$t('agents.headSub', {
-        cli: draft.runtimeKey === 'default' ? $t('agents.runtimeFollowDefault') : draft.runtimeKey,
-        memory: draft.memoryEnabled
-          ? $t('agents.headMemoryOn', { n: String(activeMemRows.length) })
-          : $t('agents.headMemoryOff'),
-        skills: String(draft.skillIds.length),
-      })}
+      {#if isWf}
+        {$t('workflows.agentsHeadSub', {
+          name: (scope.kind === 'workflow' ? scope.workflowName : '') ?? '',
+          n: String(draft.skillIds.length),
+        })}
+      {:else}
+        {$t('agents.headSub', {
+          cli: draft.runtimeKey === 'default' ? $t('agents.runtimeFollowDefault') : draft.runtimeKey,
+          memory: draft.memoryEnabled
+            ? $t('agents.headMemoryOn', { n: String(activeMemRows.length) })
+            : $t('agents.headMemoryOff'),
+          skills: String(draft.skillIds.length),
+        })}
+      {/if}
     </p>
     </div>
     <!--
@@ -1092,7 +1225,7 @@
         ⚠️ 写成功后界面跟着数据走：`setDefaultAgent()` 内部会重拉列表，
           列表上那枚「默认」徽章随之移动（这里不手动改任何状态）。
       -->
-      {#if hasEntry(agent, 'task') && hasEntry(agent, 'chat') && agent.id !== $effectiveDefaultAgentId}
+      {#if !isWf && hasEntry(agent, 'task') && hasEntry(agent, 'chat') && agent.id !== $effectiveDefaultAgentId}
         <button
           type="button"
           class="btn btn--secondary"
@@ -1103,14 +1236,16 @@
         >{$t('agents.setDefault')}</button>
       {/if}
       <!-- ★ 2026-11（D160）：**复制**（平台成员与自建都能用；想改内置就改副本）。 -->
-      <button
-        type="button"
-        class="btn btn--secondary"
-        data-agent-copy
-        disabled={busy}
-        title={$t('agents.copyTitle')}
-        onclick={() => void copyAgent()}
-      >{$t('agents.copy')}</button>
+      {#if !isWf}
+        <button
+          type="button"
+          class="btn btn--secondary"
+          data-agent-copy
+          disabled={busy}
+          title={$t('agents.copyTitle')}
+          onclick={() => void copyAgent()}
+        >{$t('agents.copy')}</button>
+      {/if}
       <button type="button" class="btn btn--ghost" data-agent-cancel onclick={cancelEdit}
         >{readOnly ? $t('common.close') : $t('common.cancel')}</button
       >
@@ -1154,6 +1289,7 @@
           每一行都是满的（探针 `agents.cardNoHoles` 钉着这件事）。
           ⚠️ 2026-11（D123）：「行动权限」那一行随动作能力退场删了。
         -->
+        {#if !isWf}
         <label class="cell runtime-cell" class:locked={readOnly}>
           {$t('agents.runtimeRowLabel')}
           <!-- 服务端连 CLI 都不许改（内置整份只读），界面就别让它看起来能改。 -->
@@ -1190,6 +1326,7 @@
             <p class="row-hint warn">{evidenceWarnings[draft.runtimeKey]}</p>
           {/if}
         </label>
+        {/if}
 
         <label class="cell instructions-cell">
           {$t('agents.instructionsLabel')}
@@ -1321,7 +1458,7 @@
                     {s.name}
 
                   </span>
-                  {#if !readOnly}
+                  {#if !readOnly && !isWf}
                     <span class="exclusive-actions">
                       <button
                         type="button"
@@ -1391,6 +1528,15 @@
         -->
         <section class="cell entry-cell" data-agent-entries>
           <span class="cell-label">{$t('agents.entriesLabel')}</span>
+          {#if isWf}
+            <!-- 入口固定只有「编排」（使用者："只是入口是固定的，只能有编排"）：同一个控件、锁着 -->
+            <div class="entry-picker locked">
+              <label class="entry-option">
+                <input type="checkbox" checked disabled />
+                <span>{$t('workflows.agentsEntryWorkflow')}</span>
+              </label>
+            </div>
+          {:else}
           <div class="entry-picker" class:locked={readOnly}>
             {#each USER_ENTRY_CHOICES as entry (entry)}
               <label class="entry-option">
@@ -1425,6 +1571,7 @@
           {#if !readOnly && !hasAnyEntry(draft.entries ?? [])}
             <p class="hint entry-warning" data-entries-empty>{$t('agents.entriesEmpty')}</p>
           {/if}
+          {/if}
         </section>
 
         <!--
@@ -1437,6 +1584,7 @@
             最后才裁）。**没有"停用/退役"**：久不用的靠注入顺序自然沉底。
           ★ 与「指令」一起随页面底部那个「保存」提交，提交的是**差量**。
         -->
+        {#if !isWf}
         <section class="cell memory-cell" data-agent-memory>
           <!--
             ★ 分批第 257 批（使用者："又发现了居中的选择框，比如『启用记忆』的选择框布局很奇怪"）：
@@ -1632,6 +1780,7 @@
             <p class="row-hint warn" data-memory-error>{memError}</p>
           {/if}
         </section>
+        {/if}
 
         <!--
           ⚠️ 2026-10 / 2026-11（D123）：这里原来是「行动权限」那一节（`ActionPicker`），
