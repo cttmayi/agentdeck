@@ -74,7 +74,7 @@ import { cleanAgent } from '@agentdeck/protocol'
  *
  * **3. 没有内存态，所以"重开后数据看起来丢了"那一类 bug 结构上不存在。**
  *
- * 文件适配器踩过一次：每个 workspace 的存储是懒建的，而 `getAgent` 这类
+ * 文件适配器踩过一次：每个 workspace 的存储是懒建的，而 `getAgentById` 这类
  * 方法是跨 workspace 遍历内存里的 store 集合，于是重开进程后集合为空，
  * 所有跨 workspace 查询都返回 null——数据好好躺在日志里，却表现为"丢了"。
  * 这里所有查询都直接打数据库，没有需要重建的缓存，也没有"先列举才会被加载"
@@ -1006,9 +1006,32 @@ export class SqliteStore implements Store {
 
   // ⚠️ 与文件存储同一个判据：agent 读取的唯一总闸，撤掉的字段（老记录里还留着）
   //    在**读**这一层就摘掉，见 `stripLegacyAgentFields`。
-  async getAgent(id: AgentId): Promise<Agent | null> {
+  async getAgentById(id: AgentId): Promise<Agent | null> {
     const found = this.#getEntity<Agent>('agent', id as string)
     return found ? cleanAgent(found) : null
+  }
+
+  async getAgentByName(
+    name: string,
+  ): Promise<
+    | { kind: 'found'; agent: Agent }
+    | { kind: 'ambiguous'; agents: Agent[] }
+    | { kind: 'none' }
+  > {
+    /*
+     * 与文件适配器同一套口径（D231）：按名字**全库**找，撞了不猜，交给调用方说话。
+     * 这里用 SQL 直查更省，但为了"两个适配器行为一致"（端口纯洁性那条判据的用意），
+     * 先走一遍全表——SQLite 这条链路今天本来就没接线。
+     */
+    const hits: Agent[] = []
+    for (const id of await this.listWorkspaceIds()) {
+      for (const agent of this.#listByWorkspace<Agent>('agent', id)) {
+        if (String(agent.name) === name.trim()) hits.push(cleanAgent(agent))
+      }
+    }
+    if (hits.length === 0) return { kind: 'none' }
+    if (hits.length > 1) return { kind: 'ambiguous', agents: hits }
+    return { kind: 'found', agent: hits[0]! }
   }
 
   async listAgents(workspaceId: WorkspaceId): Promise<Agent[]> {

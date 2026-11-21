@@ -8,6 +8,7 @@ import { agentId, makeAgent, wsId } from '@agentdeck/domain/testing'
 import type { Agent, MemoryEntry, Workspace } from '@agentdeck/protocol'
 import { FileStore } from './file-store.ts'
 import { agentsRoot } from './agent-dirs.ts'
+import { slugForAgentName } from './agent-slug.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
@@ -39,7 +40,17 @@ function mk(
   id: string,
   over: Partial<Agent> = {},
 ): Agent {
-  return makeAgent({ id: id as Agent['id'], workspaceId: WS, name: '测试智能体', ...over })
+  /*
+   * ★ D231：目录名 = 名字的 slug（不再是 id）。夹具里把 id 拼进名字，目录名就
+   *   可预测了（`测试智能体-a-shape`）；不这样写的话，多个夹具智能体同名会被
+   *   自动加 `-2` / `-3` 后缀，测试就得反过来推"这次是第几个同名的"。
+   */
+  return makeAgent({ id: id as Agent['id'], workspaceId: WS, name: `测试智能体-${id}`, ...over })
+}
+
+/** 这个夹具智能体的目录名（与 `mk` 的命名规则一致）。 */
+function dirOf(id: string, over: Partial<Agent> = {}): string {
+  return slugForAgentName(String(over.name ?? `测试智能体-${id}`))
 }
 
 /** 老工作区的落盘形状：workspaces.jsonl（wsIndex）+ workspaces/<WS>/log/agent.jsonl（集合名是单数）。 */
@@ -74,26 +85,26 @@ describe('一个智能体 = 一个目录（D111）', () => {
   test('★ 目录形态：agent.json 不含指令正文，instructions.md 存**组装前**正文', async () => {
     await store.insertAgent(mk('a-shape', { builtin: true, instructions: '身份块（组装前）' }))
     const json = JSON.parse(
-      await readFile(join(agentsRoot(dir), 'a-shape', 'agent.json'), 'utf8'),
+      await readFile(join(agentsRoot(dir), dirOf('a-shape'), 'agent.json'), 'utf8'),
     ) as Record<string, unknown>
-    assert.equal(json['name'], '测试智能体')
+    assert.equal(json['name'], '测试智能体-a-shape')
     assert.equal(json['id'], 'a-shape')
     assert.equal(json['instructions'], undefined, '结构化资讯里不许有指令正文（它在 md 里）')
-    const md = await readFile(join(agentsRoot(dir), 'a-shape', 'instructions.md'), 'utf8')
+    const md = await readFile(join(agentsRoot(dir), dirOf('a-shape'), 'instructions.md'), 'utf8')
     assert.equal(md, '身份块（组装前）')
   })
 
   test('★ 读回：instructions 恒为 md 的**组装前**正文；缺 md ⇒ 空串；缺 agent.json ⇒ null', async () => {
     await store.insertAgent(mk('a-read', { instructions: '原始正文' }))
-    const got = await store.getAgent('a-read' as Agent['id'])
+    const got = await store.getAgentById('a-read' as Agent['id'])
     assert.equal(got?.instructions, '原始正文')
     // 手工删掉 instructions.md ⇒ 空正文（不抛）
     const { rm } = await import('node:fs/promises')
-    await rm(join(agentsRoot(dir), 'a-read', 'instructions.md'))
-    const empty = await store.getAgent('a-read' as Agent['id'])
+    await rm(join(agentsRoot(dir), dirOf('a-read'), 'instructions.md'))
+    const empty = await store.getAgentById('a-read' as Agent['id'])
     assert.equal(empty?.instructions, '')
     // 目录整个不在 ⇒ null
-    assert.equal(await store.getAgent('nope' as Agent['id']), null)
+    assert.equal(await store.getAgentById('nope' as Agent['id']), null)
   })
 
   test('★ 独有技能：写 / 列 / 读 / 删（skills/<slug>/SKILL.md，不进技能库）', async () => {
@@ -123,7 +134,11 @@ describe('一个智能体 = 一个目录（D111）', () => {
     const dir = await makeTempDir('agent-skills-case')
     try {
       const id = agentId('legacy-case')
-      // 手工造"改之前"的形状：agents/<id>/SKILL/<slug>/SKILL.md（大写目录名）
+      /*
+       * 手工造"改之前"的形状：`agents/<id>/SKILL/<slug>/SKILL.md`（大写目录名）。
+       * ⚠️ D231 之后开库会连目录名一起改成名字的 slug（`老智能体`），所以后面
+       *    检查"小写目录在"时用 slug 目录名——这两条迁移在同一次 open 里先后跑。
+       */
       await mkdir(join(agentsRoot(dir), String(id), 'SKILL', 'old-one'), { recursive: true })
       await writeFile(
         join(agentsRoot(dir), String(id), 'SKILL', 'old-one', 'SKILL.md'),
@@ -146,14 +161,13 @@ describe('一个智能体 = 一个目录（D111）', () => {
       const listed = await store.listExclusiveSkills(agentSkillOwner(id))
       assert.deepEqual(listed.map((x) => x.slug), ['old-one'])
       assert.match(listed[0]!.body, /在大写目录里/)
-      // 大写目录没了、小写目录在
-      assert.equal(await exists(join(agentsRoot(dir), String(id), 'SKILL')).catch(() => false), false)
-      assert.equal(
-        await readFile(join(agentsRoot(dir), String(id), 'skills', 'old-one', 'SKILL.md'), 'utf8').then(
-          () => true,
-        ),
-        true,
-      )
+      // 大写目录没了、小写目录在（目录名同时被 D231 改成了名字的 slug）
+      const slugDir = slugForAgentName('老智能体')
+      assert.equal(await exists(join(agentsRoot(dir), slugDir, 'SKILL')), false)
+      assert.equal(await readFile(join(agentsRoot(dir), slugDir, 'skills', 'old-one', 'SKILL.md'), 'utf8').then(
+        () => true,
+        () => false,
+      ), true)
       assert.ok(infos.some((m) => m.includes('独有技能目录已改为小写')), `要打日志：${infos.join(' / ')}`)
       await store.close()
     } finally {
@@ -191,10 +205,10 @@ describe('一个智能体 = 一个目录（D111）', () => {
     await store.insertAgent(mk(id))
     await store.writeExclusiveSkill(agentSkillOwner(id), 'gone-with-me', '# 陪葬技能')
     assert.equal(await store.deleteAgent(id), true)
-    assert.equal(await store.getAgent(id), null)
+    assert.equal(await store.getAgentById(id), null)
     // 目录真的没了（连 skills/ 一起）
     assert.equal(
-      await readFile(join(agentsRoot(dir), id, 'skills', 'gone-with-me', 'SKILL.md'), 'utf8').then(
+      await readFile(join(agentsRoot(dir), dirOf('gone-1'), 'skills', 'gone-with-me', 'SKILL.md'), 'utf8').then(
         () => true,
         () => false,
       ),
@@ -219,7 +233,7 @@ describe('一个智能体 = 一个目录（D111）', () => {
     }
     await store.insertMemoryEntry(entry)
     // 落点：agents/<id>/memory.jsonl（不是 workspace 级）
-    const onDisk = await readFile(join(agentsRoot(dir), id, 'memory.jsonl'), 'utf8')
+    const onDisk = await readFile(join(agentsRoot(dir), dirOf('a-memory'), 'memory.jsonl'), 'utf8')
     assert.ok(onDisk.includes('这个仓库用 pnpm'), '记忆在智能体目录里')
     const listed = await store.listMemoryEntries(WS, id)
     assert.equal(listed.length, 1)
@@ -249,14 +263,14 @@ describe('老 JSONL → 目录的迁移（D111）', () => {
 
       const s2 = await FileStore.open({ dataDir: d2, fsync: false })
       try {
-        const builtin = await s2.getAgent('old-builtin' as Agent['id'])
+        const builtin = await s2.getAgentById('old-builtin' as Agent['id'])
         assert.equal(builtin?.instructions, '老内置全文（已组装）', '正文原样落 md')
         assert.equal(builtin?.instructionsAssembled, true, '老内置 = 组装后，读取端不再拼一遍')
-        const self = await s2.getAgent('old-self' as Agent['id'])
+        const self = await s2.getAgentById('old-self' as Agent['id'])
         assert.equal(self?.instructionsAssembled, false, '老自建 = 组装前')
-        // 目录真的在（迁移产物）
+        // 目录真的在（迁移产物）——D231：目录名是名字的 slug（夹具名字带 id）
         assert.ok(
-          await readFile(join(agentsRoot(d2), 'old-builtin', 'agent.json'), 'utf8').then(
+          await readFile(join(agentsRoot(d2), dirOf('old-builtin'), 'agent.json'), 'utf8').then(
             () => true,
             () => false,
           ),
@@ -274,7 +288,7 @@ describe('老 JSONL → 目录的迁移（D111）', () => {
       // 幂等：再 open 一字不动（有标记 ⇒ 不重迁）
       const s3 = await FileStore.open({ dataDir: d2, fsync: false })
       try {
-        assert.equal((await s3.getAgent('old-builtin' as Agent['id']))?.instructions, '老内置全文（已组装）')
+        assert.equal((await s3.getAgentById('old-builtin' as Agent['id']))?.instructions, '老内置全文（已组装）')
       } finally {
         await s3.close()
       }
@@ -291,7 +305,7 @@ describe('老 JSONL → 目录的迁移（D111）', () => {
       // 第一轮：open ⇒ 迁移 → 删掉它 → 关
       const s1 = await FileStore.open({ dataDir: d2, fsync: false })
       try {
-        assert.ok(await s1.getAgent('old-zombie' as Agent['id']), '迁移后存在')
+        assert.ok(await s1.getAgentById('old-zombie' as Agent['id']), '迁移后存在')
         await s1.deleteAgent('old-zombie' as Agent['id'])
       } finally {
         await s1.close()
@@ -306,7 +320,7 @@ describe('老 JSONL → 目录的迁移（D111）', () => {
       )
       const s2 = await FileStore.open({ dataDir: d2, fsync: false })
       try {
-        assert.equal(await s2.getAgent('old-zombie' as Agent['id']), null, '删掉的不许被老记录复活')
+        assert.equal(await s2.getAgentById('old-zombie' as Agent['id']), null, '删掉的不许被老记录复活')
       } finally {
         await s2.close()
       }

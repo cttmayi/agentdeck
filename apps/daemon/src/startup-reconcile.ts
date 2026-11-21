@@ -238,7 +238,7 @@ export async function reconcileStartup(deps: ReconcileDeps): Promise<ReconcileRe
         for (const slot of PLATFORM_SLOTS) {
           const id = table[slot]
           if (id === undefined) continue
-          const agent = await store.getAgent(id as Agent['id'])
+          const agent = await store.getAgentById(id as Agent['id'])
           if (agent === null || ownerOf(agent) !== 'platform') continue
           const name = String(agent.name)
           if (!name.endsWith('（内置）')) continue
@@ -275,10 +275,10 @@ export async function reconcileStartup(deps: ReconcileDeps): Promise<ReconcileRe
         const workspace = await store.getWorkspace(workspaceId)
         const currentId = (workspace?.defaultAgentId as string | null | undefined) ?? null
         const current =
-          currentId === null ? null : await store.getAgent(currentId as Agent['id'])
+          currentId === null ? null : await store.getAgentById(currentId as Agent['id'])
         const usable = current !== null && canChat(current) && canBeDispatched(current)
         if (!usable) {
-          const assistant = await store.getAgent(slotAssistant as Agent['id'])
+          const assistant = await store.getAgentById(slotAssistant as Agent['id'])
           if (assistant !== null && workspace !== null) {
             await store.insertWorkspace({
               ...workspace,

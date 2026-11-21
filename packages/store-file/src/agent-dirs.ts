@@ -1,17 +1,28 @@
 import { join } from 'node:path'
 import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
-import type { Agent, AgentId } from '@agentdeck/protocol'
+import type { Agent } from '@agentdeck/protocol'
+import { slugForAgentName, uniqueAgentDirName } from './agent-slug.ts'
 import { atomicWrite, ensureDir, exists, readJsonOrNull, removeQuietly } from './fs-utils.ts'
 
 /**
  * ★ 2026-11（D111，设计定稿 `docs/design/agent-directory.md`）：
- * **一个智能体 = 一个目录**——`<dataDir>/agents/<id>/`。
+ * **一个智能体 = 一个目录**。目录是智能体**唯一的真相**，与 JSONL 那条老路彻底分家：
  *
- * 目录是智能体**唯一的真相**，与 JSONL 那条老路彻底分家：
+ *   agents/<目录名>/agent.json          ← 结构化资讯（不含指令正文；**`id` 在这里**）
+ *   agents/<目录名>/instructions.md     ← 指令**组装前**正文（内置 = 身份块；自建 = 全文）
+ *   agents/<目录名>/skills/<slug>/SKILL.md ← 这个智能体**独有的**技能（文件资产，不进技能库）
  *
- *   agents/<id>/agent.json          ← 结构化资讯（不含指令正文）
- *   agents/<id>/instructions.md     ← 指令**组装前**正文（内置 = 身份块；自建 = 全文）
- *   agents/<id>/skills/<slug>/SKILL.md ← 这个智能体**独有的**技能（文件资产，不进技能库）
+ * ★★ D231（2026-11，方案 D）：**目录名 = 名字的 slug，不再是 id**。
+ *
+ *   目录名是**给人看的标签**（`agents/助手审核员/`），身份仍是 `agent.json` 里的 `id`
+ *   （ULID，永不变）。于是：
+ *     · 改名 = 改 `name` + 改目录名，**8 处引用一个都不动**（id 没变）；
+ *     · 目录名是**可重算**的（`slugForAgentName(name)`），所以对账能发现"有人在别处改过"；
+ *     · 解析不能靠拼路径了 ⇒ 由 `file-store.ts` 维护 `id → 目录名` 的内存索引
+ *       （miss 时全量扫一次，磁盘是真相、内存只是缓存）。
+ *
+ *   ⚠️ 本文件的函数因此**一律吃"目录名"**（`dirName`），不再吃 id。谁有 id、
+ *      谁就得先把它解析成目录名——那件事只有 `file-store.ts` 会做。
  *
  * 为什么目录而不是 JSONL（使用者的决定，逐条记在这里，防倒退）：
  *
@@ -29,18 +40,19 @@ export function agentsRoot(dataDir: string): string {
   return join(dataDir, 'agents')
 }
 
-export function agentDirPath(dataDir: string, id: AgentId | string): string {
-  return join(agentsRoot(dataDir), String(id))
+/** 一个智能体的目录（参数是**目录名**，不是 id——见文件头 D231）。 */
+export function agentDirPath(dataDir: string, dirName: string): string {
+  return join(agentsRoot(dataDir), dirName)
 }
 
 /** 结构化资讯落点（不含指令正文）。 */
-function agentJsonPath(dataDir: string, id: AgentId | string): string {
-  return join(agentDirPath(dataDir, id), 'agent.json')
+function agentJsonPath(dataDir: string, dirName: string): string {
+  return join(agentDirPath(dataDir, dirName), 'agent.json')
 }
 
 /** 指令正文落点（组装前）。 */
-function instructionsMdPath(dataDir: string, id: AgentId | string): string {
-  return join(agentDirPath(dataDir, id), 'instructions.md')
+function instructionsMdPath(dataDir: string, dirName: string): string {
+  return join(agentDirPath(dataDir, dirName), 'instructions.md')
 }
 
 /**
@@ -51,26 +63,34 @@ function instructionsMdPath(dataDir: string, id: AgentId | string): string {
  *   `apps/daemon/src/workflows-dirs.ts`，由 daemon 在装配时把解析函数注入进来
  *   （`FileStoreOptions.exclusiveSkillsDir`）。这样"谁知道路径"仍然只有一处。
  */
-function skillsDir(dataDir: string, id: AgentId | string): string {
-  return join(agentDirPath(dataDir, id), 'skills')
+function skillsDir(dataDir: string, dirName: string): string {
+  return join(agentDirPath(dataDir, dirName), 'skills')
 }
 
 /** 导出给 `FileStore` 拼 `owner.kind === 'agent'` 的目录（别的包别自己拼）。 */
-export function agentExclusiveSkillsDir(dataDir: string, id: AgentId | string): string {
-  return skillsDir(dataDir, id)
+export function agentExclusiveSkillsDir(dataDir: string, dirName: string): string {
+  return skillsDir(dataDir, dirName)
 }
 
-function skillMdPath(dataDir: string, id: AgentId | string, slug: string): string {
-  return join(skillsDir(dataDir, id), slug, 'SKILL.md')
+function skillMdPath(dataDir: string, dirName: string, slug: string): string {
+  return join(skillsDir(dataDir, dirName), slug, 'SKILL.md')
 }
 
-/** 把一条 `Agent` 落成目录：agent.json（结构化，不含指令）+ instructions.md（组装前正文）。 */
-export async function writeAgentDir(dataDir: string, agent: Agent): Promise<void> {
-  const dir = agentDirPath(dataDir, agent.id)
-  await ensureDir(dir)
+/**
+ * 把一条 `Agent` 落成目录：agent.json（结构化，不含指令）+ instructions.md（组装前正文）。
+ *
+ * @param dirName 目录名（= 名字的 slug，D231）。调用方负责**唯一性**（`uniqueAgentDirName`）
+ *   与"改名时把旧目录搬过来"——本函数只写内容，不搬目录。
+ */
+export async function writeAgentDir(
+  dataDir: string,
+  agent: Agent,
+  dirName: string,
+): Promise<void> {
+  await ensureDir(agentDirPath(dataDir, dirName))
   const { instructions, ...structured } = agent
-  await atomicWrite(agentJsonPath(dataDir, agent.id), JSON.stringify(structured, null, 2))
-  await atomicWrite(instructionsMdPath(dataDir, agent.id), instructions)
+  await atomicWrite(agentJsonPath(dataDir, dirName), JSON.stringify(structured, null, 2))
+  await atomicWrite(instructionsMdPath(dataDir, dirName), instructions)
 }
 
 /**
@@ -82,39 +102,68 @@ export async function writeAgentDir(dataDir: string, agent: Agent): Promise<void
  * ⚠️ 目录损坏（agent.json 读不到）⇒ 返回 null（"没有这个智能体"）；
  *    instructions.md 读不到 ⇒ 正文空（`ensure` 会自愈内置；自建的会露出"指令空"）。
  */
-export async function readAgentDir(dataDir: string, id: AgentId | string): Promise<Agent | null> {
-  const json = await readJsonOrNull<Record<string, unknown>>(agentJsonPath(dataDir, id))
+export async function readAgentDirIn(dataDir: string, dirName: string): Promise<Agent | null> {
+  const json = await readJsonOrNull<Record<string, unknown>>(agentJsonPath(dataDir, dirName))
   if (json === null) return null
   let instructions = ''
   try {
-    instructions = await readFile(instructionsMdPath(dataDir, id), 'utf8')
+    instructions = await readFile(instructionsMdPath(dataDir, dirName), 'utf8')
   } catch {
     // instructions.md 缺失 ⇒ 空正文（损坏/手工删了）。由上层决定怎么处理。
   }
-  return { ...(json as Agent), id: String(id) as Agent['id'], instructions }
+  /*
+   * ⚠️ D231：**`id` 从 agent.json 里取**（以前是拿目录名当 id——名字当目录之后
+   *   那条路就错了）。`agent.json` 里没有 id 的记录（手改坏了）退化成用目录名，
+   *   总比"读不出这个智能体"好：它仍然能被解析、被改名修好。
+   */
+  const rawId = json['id']
+  const id = typeof rawId === 'string' && rawId !== '' ? rawId : dirName
+  return { ...(json as unknown as Agent), id: id as Agent['id'], instructions }
 }
 
-/** 列出全部智能体目录（跨工作区；`workspaceId` 过滤由调用方做）。 */
-export async function listAgentDirs(dataDir: string): Promise<Agent[]> {
-  let ids: string[]
+/**
+ * 列出全部智能体目录（跨工作区；`workspaceId` 过滤由调用方做）。
+ *
+ * 返回**目录名**与记录（D231：目录名是标签，`agent.id` 是身份——两者不再是同一个东西，
+ * 所以必须一起带出去，索引要靠它对上）。
+ */
+export async function listAgentDirs(
+  dataDir: string,
+): Promise<Array<{ dirName: string; agent: Agent }>> {
+  let dirNames: string[]
   try {
-    ids = await readdir(agentsRoot(dataDir))
+    dirNames = await readdir(agentsRoot(dataDir))
   } catch {
     return []
   }
-  const out: Agent[] = []
-  for (const id of ids) {
-    if (id.startsWith('.')) continue // 占位/元文件不读
-    const agent = await readAgentDir(dataDir, id)
-    if (agent) out.push(agent)
+  const out: Array<{ dirName: string; agent: Agent }> = []
+  for (const dirName of dirNames) {
+    if (dirName.startsWith('.')) continue // 占位/元文件不读
+    const agent = await readAgentDirIn(dataDir, dirName)
+    if (agent) out.push({ dirName, agent })
   }
+  /*
+   * ★★ D231：**顺序必须是"创建先后"，不能是 `readdir` 的顺序**。
+   *
+   * 目录名变成名字之后，`readdir` 返回的是**按名字排**（还与语言环境有关）——
+   * 于是同一个库在不同机器上、改一次名字之后，列表顺序就变了。实测代价：
+   * 探针里"长名字那一行"从最后一行变成第一行，界面顺势把它选中、详情栏打开、
+   * 列表变窄 ⇒ 它的副行换成两行 ⇒ 行高 96 而别人 64（一条本来与它无关的判据红了）。
+   *
+   * 按 `createdAt` 排（再用 id 兜底）与改之前"ULID 目录名天然按创建排"等价，
+   * 而且**是显式的**：目录名怎么变，列表顺序都不动。
+   */
+  out.sort(
+    (a, b) =>
+      a.agent.createdAt - b.agent.createdAt || String(a.agent.id).localeCompare(String(b.agent.id)),
+  )
   return out
 }
 
 /** 删掉整个智能体目录（连同它的独有技能文件）。 */
-export async function removeAgentDir(dataDir: string, id: AgentId | string): Promise<boolean> {
-  const had = await exists(agentJsonPath(dataDir, id))
-  await removeQuietly(agentDirPath(dataDir, id))
+export async function removeAgentDirIn(dataDir: string, dirName: string): Promise<boolean> {
+  const had = await exists(agentJsonPath(dataDir, dirName))
+  await removeQuietly(agentDirPath(dataDir, dirName))
   return had
 }
 
@@ -268,22 +317,101 @@ export async function removeExclusiveSkillBodyIn(
 export async function writeLegacyAgentDir(
   dataDir: string,
   agent: Agent & { id: string },
+  dirName: string,
 ): Promise<void> {
-  const dir = agentDirPath(dataDir, agent.id)
-  await ensureDir(dir)
+  await ensureDir(agentDirPath(dataDir, dirName))
   const { instructions, ...structured } = agent
   await atomicWrite(
-    agentJsonPath(dataDir, agent.id),
+    agentJsonPath(dataDir, dirName),
     JSON.stringify(
       { ...structured, instructionsAssembled: agent.builtin === true },
       null,
       2,
     ),
   )
-  await atomicWrite(instructionsMdPath(dataDir, agent.id), instructions)
+  await atomicWrite(instructionsMdPath(dataDir, dirName), instructions)
 }
 
-/** 给目录化迁移用的判断：id 对应目录是否已经存在（幂等：迁过的不重迁）。 */
-export async function agentDirExists(dataDir: string, id: AgentId | string): Promise<boolean> {
-  return (await readJsonOrNull(agentJsonPath(dataDir, id))) !== null
+/**
+ * **把"用 id 命名的老目录"改成"用名字命名的目录"**（D231，一次性迁移）。
+ *
+ * 改之前：`agents/01M72Y8XZRYQ0F643Z3Y2N8A1D/`
+ * 改之后：`agents/智能体生成者/`
+ *
+ * 三条口径：
+ *   · **只改目录名，什么都不动**：`agent.json` 里的 `id` 一个字都不改 ⇒
+ *     run / issue / conversation 里那些引用**全部照旧有效**（这是方案 D 相对
+ *     "名字当键" 的最大收益）；
+ *   · **幂等**：目录名已经等于 `slug(name)` 就跳过（所以重跑安全）；
+ *   · **两步 rename**：先 `<目标>.tmp-<随机>` 再目标名（macOS 大小写不敏感，
+ *     直接改大小写会 EEXIST——D229 踩过）。
+ *
+ * 撞名（两个名字算出同一个 slug，如 `写作员` 与 `写作 员`）⇒ 加 `-2` / `-3` 后缀，
+ * 并在返回值里报出来。**不合并、不猜**。
+ */
+export async function migrateAgentDirsToNames(dataDir: string): Promise<{
+  renamed: Array<{ from: string; to: string; id: string }>
+  conflicts: string[]
+  failed: Array<{ dirName: string; error: string }>
+}> {
+  const renamed: Array<{ from: string; to: string; id: string }> = []
+  const conflicts: string[] = []
+  const failed: Array<{ dirName: string; error: string }> = []
+  let dirNames: string[]
+  try {
+    dirNames = await readdir(agentsRoot(dataDir))
+  } catch {
+    return { renamed, conflicts, failed } // 还没有 agents/ ⇒ 没什么可迁
+  }
+
+  // 先把现有目录读一遍：拿到每个目录的 id 与名字（读不出来的跳过，交给对账）
+  const entries: Array<{ dirName: string; id: string; name: string }> = []
+  for (const dirName of dirNames) {
+    if (dirName.startsWith('.')) continue
+    const agent = await readAgentDirIn(dataDir, dirName)
+    if (agent === null) continue
+    entries.push({ dirName, id: String(agent.id), name: String(agent.name ?? dirName) })
+  }
+
+  /*
+   * `taken` 的初值是**所有已经不需要改的目录名**（已经是 slug 的那些）。
+   * 逐个迁的时候把新名字也加进去——否则两个"待迁"的名字可能算出同一个 slug 而撞车。
+   */
+  const taken = new Set<string>()
+  const pending: typeof entries = []
+  for (const e of entries) {
+    if (e.dirName === slugForAgentName(e.name)) taken.add(e.dirName)
+    else pending.push(e)
+  }
+
+  for (const e of pending) {
+    const target = uniqueAgentDirName(e.name, taken)
+    if (target.toLowerCase() === e.dirName.toLowerCase() && target !== e.dirName) {
+      // 只有大小写不同（APFS 上其实是同一个目录）⇒ 仍然走两步 rename 把大小写改对
+    }
+    const from = agentDirPath(dataDir, e.dirName)
+    const to = agentDirPath(dataDir, target)
+    const tmp = `${to}.tmp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+    try {
+      await rename(from, tmp)
+      await rename(tmp, to)
+      taken.add(target)
+      renamed.push({ from: e.dirName, to: target, id: e.id })
+      if (target !== slugForAgentName(e.name)) conflicts.push(`${e.name} → ${target}（slug 撞名）`)
+    } catch (err) {
+      failed.push({ dirName: e.dirName, error: String(err) })
+      // 尽力还原，别留一个 `xxx.tmp-*`
+      try {
+        await rename(tmp, from)
+      } catch {
+        // 还原也失败 ⇒ 原样留着（数据没动，只是名字怪），由调用方点名
+      }
+    }
+  }
+  return { renamed, conflicts, failed }
+}
+
+/** 给目录化迁移用的判断：这个**目录名**已经有记录了（幂等：迁过的不重迁）。 */
+export async function agentDirExists(dataDir: string, dirName: string): Promise<boolean> {
+  return (await readJsonOrNull(agentJsonPath(dataDir, dirName))) !== null
 }

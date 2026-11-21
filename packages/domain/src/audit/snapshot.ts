@@ -320,7 +320,7 @@ export async function importData(
     {
       key: 'agents',
       rows: doc.data.agents,
-      get: (id) => store.getAgent(id as Agent['id']),
+      get: (id) => store.getAgentById(id as Agent['id']),
       put: (row) => store.insertAgent(row),
     },
     /*

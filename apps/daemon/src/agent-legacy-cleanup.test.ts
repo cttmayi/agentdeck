@@ -240,7 +240,7 @@ describe('★ 老记录清理：撤下的字段要从**库里**消失（不只�
       assert.equal((await rawAgent(d, id))['allowedActions'] !== undefined, true)
 
       // 而**所有**读路径都看不见：两个 store 方法 + 两个 API 端点
-      const got = (await d.store.getAgent(id as Agent['id']))!
+      const got = (await d.store.getAgentById(id as Agent['id']))!
       for (const key of DEAD_KEYS) {
         assert.equal(key in (got as unknown as Record<string, unknown>), false, `store 读出来不带 ${key}`)
       }

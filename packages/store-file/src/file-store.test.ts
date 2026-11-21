@@ -54,7 +54,7 @@ describe('基本 CRUD 与持久化', () => {
     await store.insertSkill(skill)
     await store.insertIssue(issue)
 
-    assert.equal((await store.getAgent(agentId('a1')))?.id, 'a1')
+    assert.equal((await store.getAgentById(agentId('a1')))?.id, 'a1')
     assert.equal((await store.getSkill(skill.id))?.slug, 'sec-vuln')
     assert.equal((await store.getIssue(issue.id))?.title, '改一下')
   })
@@ -68,7 +68,7 @@ describe('基本 CRUD 与持久化', () => {
       await a.close()
 
       const b = await FileStore.open({ dataDir: reopenDir, fsync: false })
-      assert.equal((await b.getAgent(agentId('persist-me')))?.id, 'persist-me')
+      assert.equal((await b.getAgentById(agentId('persist-me')))?.id, 'persist-me')
       await b.close()
     } finally {
       await cleanup(reopenDir)
@@ -301,7 +301,7 @@ describe('★ D226：workspace 登记表是普通 JSON（不是日志）', () =>
        * 自愈之后：登记表按目录重建，老数据仍然可读（名称回到默认名）。
        */
       assert.deepEqual(await b.listWorkspaceIds(), ['ws-a'])
-      assert.equal((await b.getAgent(agentId('heal-me')))?.id, 'heal-me', '老数据仍然读得到')
+      assert.equal((await b.getAgentById(agentId('heal-me')))?.id, 'heal-me', '老数据仍然读得到')
       assert.equal((await b.getWorkspace('ws-a' as never))?.name, '默认工作区')
       await b.close()
       // 重建结果已经落盘
@@ -419,6 +419,109 @@ describe('★ D227：日志回收（compact 终于有调用点）与迁移留档
       await assert.rejects(() => readFile(join(d, 'schedules.json.migrated-123'), 'utf8'))
       // 标记还在
       assert.match(await readFile(join(d, 'agents', '.migrated'), 'utf8'), /v/)
+    } finally {
+      await cleanup(d)
+    }
+  })
+})
+
+describe('★ D231：目录名 = 名字的 slug（id 仍是身份）', () => {
+  test('★★ 建目录按名字；`getAgentById` 走索引仍然取得到；改名字不改 id', async () => {
+    const d = await makeTempDir('agent-dir-name')
+    try {
+      const store2 = await FileStore.open({ dataDir: d, fsync: false })
+      await store2.insertAgent(
+        makeAgent({ id: 'a-1' as never, workspaceId: WS, name: '智能体生成者' }),
+      )
+      const { readdir } = await import('node:fs/promises')
+      const dirs = async (): Promise<string[]> =>
+        (await readdir(join(d, 'agents'))).filter((n) => !n.startsWith('.'))
+      assert.deepEqual(await dirs(), ['智能体生成者'], '目录名 = 名字')
+
+      // 按 id 取：走内存索引（目录名不再是 id）
+      const got = await store2.getAgentById('a-1' as never)
+      assert.equal(got?.name, '智能体生成者')
+      assert.equal(got?.id, 'a-1', 'id 仍是 ULID（身份没变）')
+
+      // 按名字取：可用的句柄
+      const byName = await store2.getAgentByName('智能体生成者')
+      assert.equal(byName.kind, 'found')
+      assert.equal(byName.kind === 'found' ? byName.agent.id : null, 'a-1')
+      assert.equal((await store2.getAgentByName('没这个人')).kind, 'none')
+
+      // 改名 = 只改 name 字段（这一轮还没做目录 rename，所以目录名先不变——由 #dirNameOf 读到旧名）
+      await store2.insertAgent(
+        makeAgent({ id: 'a-1' as never, workspaceId: WS, name: '改过的名字' }),
+      )
+      const renamed = await store2.getAgentById('a-1' as never)
+      assert.equal(renamed?.name, '改过的名字')
+      await store2.close()
+    } finally {
+      await cleanup(d)
+    }
+  })
+
+  test('★★ 老盘上的 `agents/<ULID>/` ⇒ 开库时改成 `agents/<名字>/`，**引用一个不动**', async () => {
+    const d = await makeTempDir('agent-dir-migrate')
+    try {
+      const { mkdir, writeFile } = await import('node:fs/promises')
+      const legacyId = '01LEGACYULID000000000000000'
+      // 造"改之前"的形状：目录名 = ULID
+      await mkdir(join(d, 'agents', legacyId), { recursive: true })
+      await writeFile(
+        join(d, 'agents', legacyId, 'agent.json'),
+        JSON.stringify({
+          id: legacyId,
+          workspaceId: String(WS),
+          name: '老写作员',
+          skillIds: [],
+          env: {},
+          createdAt: 1,
+          updatedAt: 1,
+        }),
+        'utf8',
+      )
+      await writeFile(join(d, 'agents', legacyId, 'instructions.md'), '老指令', 'utf8')
+
+      const infos: string[] = []
+      const s1 = await FileStore.open({ dataDir: d, fsync: false, onInfo: (m) => infos.push(m) })
+      const { readdir } = await import('node:fs/promises')
+      const dirs = async (): Promise<string[]> =>
+        (await readdir(join(d, 'agents'))).filter((n) => !n.startsWith('.'))
+      assert.deepEqual(await dirs(), ['老写作员'], '目录名变成名字')
+      assert.ok(
+        infos.some((m) => m.includes('智能体目录名已改为名字')),
+        `要打日志：${infos.join(' / ')}`,
+      )
+      // ★ 关键：id 没变 ⇒ 按 id 仍能取到（历史/槽位/执行者里存的就是它）
+      const got = await s1.getAgentById(legacyId as never)
+      assert.equal(got?.name, '老写作员')
+      assert.equal(got?.instructions, '老指令', 'instructions.md 跟着目录一起搬过去了')
+      await s1.close()
+
+      // 幂等：再开一次不再迁（账本记着）
+      const s2 = await FileStore.open({ dataDir: d, fsync: false })
+      assert.deepEqual(await dirs(), ['老写作员'])
+      await s2.close()
+    } finally {
+      await cleanup(d)
+    }
+  })
+
+  test('★ 索引 miss 时自愈：外部把目录改名，按 id 仍然找得到', async () => {
+    const d = await makeTempDir('agent-dir-heal')
+    try {
+      const s1 = await FileStore.open({ dataDir: d, fsync: false })
+      await s1.insertAgent(makeAgent({ id: 'a-h' as never, workspaceId: WS, name: '甲' }))
+      await s1.close()
+
+      // 外部手改目录名（索引是启动时的缓存，已经过时）
+      const { rename } = await import('node:fs/promises')
+      await rename(join(d, 'agents', '甲'), join(d, 'agents', '外面改的名字'))
+
+      const s2 = await FileStore.open({ dataDir: d, fsync: false })
+      assert.equal((await s2.getAgentById('a-h' as never))?.name, '甲', '靠重扫找回')
+      await s2.close()
     } finally {
       await cleanup(d)
     }

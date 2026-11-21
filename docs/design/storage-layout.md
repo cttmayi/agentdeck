@@ -56,7 +56,7 @@
 ├── migrations.json               **迁移账本**（跑过哪些一次性迁移；§14）
 ├── workspaces.json               workspace 记录（普通 JSON 数组，**不是日志**，§6）
 │
-├── agents/<agentId>/             ★ 一个智能体 = 一个目录（§3）
+├── agents/<名字>/                ★ 一个智能体 = 一个目录（§3；**目录名 = 名字的 slug**，D231）
 │   ├── agent.json                结构化（**不含指令正文**）
 │   ├── instructions.md           指令正文（**组装前**：内置 = 身份块，自建 = 全文）
 │   ├── memory.jsonl              它自己的记忆（权威；§5）
@@ -102,8 +102,8 @@
 ## 3. 智能体 —— `agents/<id>/`
 
 ```
-~/.agentdeck/data/agents/<agentId>/
-├── agent.json          结构化（**不含指令正文**）
+~/.agentdeck/data/agents/<名字>/
+├── agent.json          结构化（**不含指令正文**；**`id` 在这里**，是身份）
 ├── instructions.md     指令正文（**组装前**：内置 = 身份块，自建 = 全文）
 ├── memory.jsonl        这个智能体自己的记忆（逐条 op 日志，§5）
 └── skills/<slug>/SKILL.md   它**独有**的技能（文件资产，不进技能库、不进技能页、不可卸载）
@@ -144,6 +144,26 @@
 | `instructions.md` | 同上 | 同上（读回时拼成一条 `Agent.instructions`） | 组装**前**正文 |
 | `memory.jsonl` | store 端口 `insertMemoryEntry` | `listMemoryEntries` | 记忆的**权威** |
 | `skills/<slug>/SKILL.md` | store 端口 `writeExclusiveSkill(owner, …)` | `listExclusiveSkills(owner)` | 这个智能体独有的技能（**按来源定位**，见下） |
+
+**目录名 = 名字的 slug，身份仍是 `agent.json` 里的 `id`**（D231，方案 D）：
+
+| | 是什么 | 会不会变 | 谁在用 |
+|---|---|---|---|
+| `agents/<目录名>/` | **标签**（`助手审核员`） | 改名就跟着改（`slugForAgentName(name)`） | 人（Finder / 终端里一眼认出来） |
+| `agent.json` 的 `id` | **身份**（ULID） | **永不变** | 程序：`Run.agentRef.id`、`Issue.assignee`、`conversation.agentId`、`platformSlots`、`executorId`、`MemoryEntry.agentId` |
+
+带来的三件事：
+
+1. **改名不再动引用**：改名 = 改 `name` 字段 + 改目录名，8 处引用一个都不动（id 没变）；
+2. **解析不能拼路径了**：`FileStore` 维护 `id → 目录名` 的内存索引（启动时 `readdir` 建，**miss 时全量重扫一次**自愈）；磁盘是真相，缓存只是缓存；
+3. **两个访问器**：`getAgentById(id)`（历史/快照/槽位）与 `getAgentByName(name)`（人给的句柄；撞名返回 `ambiguous`，**不猜**）。
+
+目录名的规则见 `packages/store-file/src/agent-slug.ts`：保留中文、ASCII 转小写（APFS 大小写不敏感）、
+非法字符折 `-`、长度 60、点开头与 Windows 设备名加 `agent-` 前缀；slug 撞车加 `-2` / `-3`。
+
+> 迁移（一次性，`migrations.json` 记 `agent-dir-names`）：`agents/<ULID>/` → `agents/<名字>/`，
+> 两步 rename（大小写不敏感的文件系统上直接改会 `EEXIST`），**`agent.json` 里的 id 一个字都不改**。
+> 实测（真数据拷贝）：11 个智能体全部改名，按 id 仍能取到人、`instructions.md` 跟着目录走。
 
 **独有技能按「来源」定位，不按 `agentId`**（D228，2026-11）：
 

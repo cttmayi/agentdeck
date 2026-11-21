@@ -53,21 +53,21 @@ import { MIGRATIONS, MigrationLedger } from './migrations.ts'
 import { Mutex, pruneUndefined } from './mutex.ts'
 import { readSkillContent, removeSkillFiles, writeSkillFiles } from './skill-files.ts'
 import {
-  agentDirExists,
   agentDirPath,
   agentsRoot,
-  agentExclusiveSkillsDir,
-  migrateExclusiveSkillsDirCase,
   getExclusiveSkillBodyIn,
   listAgentDirs,
   listExclusiveSkillBodiesIn,
-  readAgentDir,
-  removeAgentDir,
+  migrateAgentDirsToNames,
+  migrateExclusiveSkillsDirCase,
+  readAgentDirIn,
+  removeAgentDirIn,
   removeExclusiveSkillBodyIn,
   writeAgentDir,
   writeExclusiveSkillBodyIn,
   writeLegacyAgentDir,
 } from './agent-dirs.ts'
+import { slugForAgentName, uniqueAgentDirName } from './agent-slug.ts'
 
 /**
  * 文件存储适配器 —— `Store` 端口的 v1 实现。
@@ -478,7 +478,7 @@ export class FileStore implements Store {
   /** 使用者提炼技能（D80）的落点——与 `#skillsRoot` 物理分离，见 `FileStoreOptions`。 */
   readonly #mineRoot: string
   /** 独有技能目录解析（D228）：`owner → 目录`。见 `FileStoreOptions.exclusiveSkillsDir`。 */
-  readonly #exclusiveDirOf: (owner: ExclusiveSkillOwner) => string
+  readonly #injectedExclusiveDirOf: ((owner: ExclusiveSkillOwner) => string) | null
   /**
    * ★ 2026-11（D226）：workspace 记录**不是日志**，是一个普通 JSON 数组文件
    *   （`<dataDir>/workspaces.json`）——见 `#loadWorkspaces` 上面那段。
@@ -490,7 +490,16 @@ export class FileStore implements Store {
   /** 智能体目录的写锁——目录是平的（`<dataDir>/agents/`），不属于某个 workspace。 */
   readonly #agentsMutex = new Mutex()
   readonly #stores = new Map<string, WorkspaceStore>()
-  /** 每个智能体一份 `agents/<id>/memory.jsonl` 的懒缓存（D112：记忆 = 智能体自己的）。 */
+  /**
+   * **`id → 目录名` 索引**（D231）。
+   *
+   * 目录名是名字的 slug（`agents/助手审核员/`），而引用一律用 `agent.json` 里的 `id`
+   * （ULID）——所以"拿到 id 之后去哪读"必须查这张表。它是**缓存**：
+   * 磁盘是真相（启动时 `readdir` 建表），miss 时**全量扫一次**自愈（外部手改目录、
+   * 从备份恢复都能找回来）。
+   */
+  readonly #agentDirOfId = new Map<string, string>()
+  /** 每个智能体一份 `agents/<目录>/memory.jsonl` 的懒缓存（D112：记忆 = 智能体自己的）。 */
   readonly #memoryLogs = new Map<string, JsonlLog<MemoryEntry & { id: string }>>()
   /** 启动一次性迁移的日志出口（D112）。 */
   readonly #onInfo: (message: string) => void
@@ -511,15 +520,11 @@ export class FileStore implements Store {
     this.#skillsRoot = skillsRoot
     this.#mineRoot = mineRoot
     this.#onInfo = onInfo
-    this.#exclusiveDirOf =
-      exclusiveSkillsDir ??
-      ((owner) => {
-        if (owner.kind === 'agent') return agentExclusiveSkillsDir(dataDir, owner.agentId)
-        throw new Error(
-          '独有技能目录没配解析函数（`exclusiveSkillsDir`）——' +
-            `装配处漏了 ${owner.kind} 那一种来源。别静默当"没有技能"`,
-        )
-      })
+    /*
+     * `workflow-agent` 那一种的目录形状归 daemon（`workflows-dirs.ts`），由装配处注入；
+     * `agent` 那一种由本类自己解析（要走 `id → 目录名` 索引，见 `#exclusiveSkillsDirOf`）。
+     */
+    this.#injectedExclusiveDirOf = exclusiveSkillsDir ?? null
   }
 
   /* ══════════════════════════════════════════════════════════════════
@@ -798,6 +803,30 @@ export class FileStore implements Store {
     // 之后——它要遍历 `#stores` 里的记录。
     await store.#migrateSkillsToDisk()
 
+    /*
+     * ── D231：智能体目录名从 id 改成名字的 slug（方案 D）──
+     *
+     * ⚠️ 必须在**任何 agent 读取之前**跑：读路径靠"id → 目录名"的索引，索引又靠
+     *   `readdir` 之后读每个 `agent.json` 建起来。先迁名字、再建索引，顺序不能反。
+     */
+    if (!ledger.has(MIGRATIONS.agentDirNames)) {
+      const { renamed, conflicts, failed } = await store.#agentsMutex.run(() =>
+        migrateAgentDirsToNames(dataDir),
+      )
+      if (renamed.length > 0) {
+        store.#onInfo(
+          `智能体目录名已改为名字：${renamed.length} 个（例：${renamed[0]!.to}）；引用（run / issue / 槽位…）一个都没动`,
+        )
+      }
+      for (const c of conflicts) store.#onInfo(`⚠️ 智能体目录 slug 撞名，已加后缀：${c}`)
+      for (const f of failed) {
+        store.#onInfo(`⚠️ 智能体目录 ${f.dirName} 改名失败（目录被占用？数据没动，下次启动会再试）：${f.error}`)
+      }
+      await ledger.mark(MIGRATIONS.agentDirNames)
+    }
+    // 建 `id → 目录名` 索引（磁盘是真相；miss 时会重扫，见 `#dirNameOf`）
+    await store.#refreshAgentDirIndex()
+
     // ── D229：独有技能目录 `SKILL/` → `skills/`（大小写 + 幂等，见 agent-dirs.ts）──
     if (!ledger.has(MIGRATIONS.exclusiveSkillsDirCase)) {
       const { renamed, conflicts, failed } = await store.#agentsMutex.run(() =>
@@ -970,8 +999,14 @@ export class FileStore implements Store {
       await this.#agentsMutex.run(async () => {
         for (const ws of this.#stores.values()) {
           for (const rec of ws.agent().all()) {
-            if (await agentDirExists(this.#dataDir, rec.id)) continue
-            await writeLegacyAgentDir(this.#dataDir, rec)
+            if (this.#agentDirOfId.has(String(rec.id))) continue
+            // D231：新目录按名字命名（撞名靠索引里已有的目录名加后缀）
+            const dirName = uniqueAgentDirName(
+              String(rec.name ?? rec.id),
+              this.#takenDirNames(String(rec.id)),
+            )
+            await writeLegacyAgentDir(this.#dataDir, rec, dirName)
+            this.#agentDirOfId.set(String(rec.id), dirName)
           }
         }
       })
@@ -1025,7 +1060,8 @@ export class FileStore implements Store {
         const legacy = new JsonlLog<MemoryEntry & { id: string }>(legacyPath, { fsync: false })
         await legacy.open()
         for (const entry of legacy.all() as unknown as MemoryEntry[]) {
-          if (!(await agentDirExists(this.#dataDir, entry.agentId))) {
+          // D231：判"这个智能体还在不在"要看索引（目录名不再是 id），miss 会重扫一次
+          if ((await this.#dirNameOf(entry.agentId)) === null) {
             dropped += 1
             continue
           }
@@ -1136,7 +1172,69 @@ export class FileStore implements Store {
     )
   }
 
-  // ── Agent（D111：一个智能体 = `<dataDir>/agents/<id>/` 一个目录，不是 JSONL）──
+  // ── Agent（D111：一个智能体 = 一个目录；D231：目录名 = 名字的 slug）──
+
+  /**
+   * 重建 `id → 目录名` 索引（`readdir` + 读每个 `agent.json`）。
+   *
+   * ⚠️ **磁盘是真相**：这里不做任何"按名字重算目录名"的事——目录名是什么就是什么
+   *   （否则"有人手改了目录名"会被悄悄改回去，而你根本不知道发生过）。
+   *   名字与目录名不一致的情况由**对账**报出来（只报不改）。
+   */
+  async #refreshAgentDirIndex(): Promise<void> {
+    this.#agentDirOfId.clear()
+    for (const { dirName, agent } of await listAgentDirs(this.#dataDir)) {
+      this.#agentDirOfId.set(String(agent.id), dirName)
+    }
+  }
+
+  /**
+   * `id → 目录名`。**miss 时全量扫一次**再查（自愈路径）。
+   *
+   * 为什么允许 miss 重扫：目录可能被外部改名/被备份覆盖，而索引是启动时建的缓存。
+   * 扫描成本是 O(#智能体) 次小文件读（今天 11 个），比"数据看不见"便宜得多。
+   */
+  async #dirNameOf(id: AgentId | string): Promise<string | null> {
+    const key = String(id)
+    const hit = this.#agentDirOfId.get(key)
+    if (hit !== undefined) return hit
+    await this.#refreshAgentDirIndex()
+    return this.#agentDirOfId.get(key) ?? null
+  }
+
+  /**
+   * **独有技能目录**（D228 的概念、D231 的解析方式）。
+   *
+   * `agent` 那一种：`id → 目录名`（索引）→ `agents/<目录名>/skills`
+   * `workflow-agent`：交给装配处注入的解析函数（形状归 daemon 的 `workflows-dirs.ts`）
+   *
+   * @returns 目录；智能体不存在时返回 `null`（读 ⇒ 空列表，写 ⇒ 调用方报错）
+   */
+  async #exclusiveSkillsDirOf(owner: ExclusiveSkillOwner): Promise<string | null> {
+    if (owner.kind === 'agent') {
+      const dirName = await this.#dirNameOf(owner.agentId)
+      if (dirName === null) return null
+      return join(agentDirPath(this.#dataDir, dirName), 'skills')
+    }
+    if (this.#injectedExclusiveDirOf === null) {
+      throw new Error(
+        '独有技能目录没配解析函数（`exclusiveSkillsDir`）——' +
+          `装配处漏了 ${owner.kind} 那一种来源。别静默当"没有技能"`,
+      )
+    }
+    return this.#injectedExclusiveDirOf(owner)
+  }
+
+  /** 当前已占用的目录名（建新目录 / 改名时算唯一名用）。 */
+  #takenDirNames(exceptId?: string): Set<string> {
+    const taken = new Set<string>()
+    for (const [id, dirName] of this.#agentDirOfId) {
+      if (exceptId !== undefined && id === exceptId) continue
+      taken.add(dirName)
+    }
+    return taken
+  }
+
 
   // ⚠️ 两个读方法都要过 `cleanAgent`（**这里是 agent 读取的唯一总闸**）：
   //    agent 整条以 JSON 存，2026-10 撤掉的字段（`reviewerAgentId` / 行动权限那三个）
@@ -1146,26 +1244,67 @@ export class FileStore implements Store {
   //
   //   `instructions` 恒为 **instructions.md 的内容（组装前正文）**——平台守则的
   //   组装在 daemon 读取端（`effectiveInstructions`），存储层不拼。
-  async getAgent(id: AgentId): Promise<Agent | null> {
-    const found = await readAgentDir(this.#dataDir, id)
+  /**
+   * 按 **id** 取（D231 起改叫 `getAgentById`）。
+   *
+   * ★ 为什么拆成两个访问器：`id` 是身份（历史/快照/槽位里存的就是它），
+   *   名字是人给的句柄。`getAgent(idOrName)` 那种"猜一下这是哪种"的分派没有定义，
+   *   所以两个名字各管一件事。
+   */
+  async getAgentById(id: AgentId): Promise<Agent | null> {
+    const dirName = await this.#dirNameOf(id)
+    if (dirName === null) return null
+    const found = await readAgentDirIn(this.#dataDir, dirName)
     if (!found) return null
     return cleanAgent(found)
   }
 
+  /**
+   * 按 **名字** 取（D231）。
+   *
+   * 不猜：名字可能撞（老数据里真有重名，D164 之前的记录不受新写入校验约束），
+   * 撞了就返回 `ambiguous` 让调用方说话——**静默取第一个**正是 D163 修掉的那个坑。
+   */
+  async getAgentByName(
+    name: string,
+  ): Promise<
+    | { kind: 'found'; agent: Agent }
+    | { kind: 'ambiguous'; agents: Agent[] }
+    | { kind: 'none' }
+  > {
+    const wanted = name.trim()
+    if (wanted === '') return { kind: 'none' }
+    const hits: Agent[] = []
+    for (const { agent } of await listAgentDirs(this.#dataDir)) {
+      if (String(agent.name) === wanted) hits.push(cleanAgent(agent))
+    }
+    if (hits.length === 0) return { kind: 'none' }
+    if (hits.length > 1) return { kind: 'ambiguous', agents: hits }
+    return { kind: 'found', agent: hits[0]! }
+  }
+
   async listAgents(workspaceId: WorkspaceId): Promise<Agent[]> {
     const all = await listAgentDirs(this.#dataDir)
-    return all.filter((a) => a.workspaceId === workspaceId).map(cleanAgent)
+    return all.filter((x) => x.agent.workspaceId === workspaceId).map((x) => cleanAgent(x.agent))
   }
 
   // 未经清理的那一份（磁盘上是什么样就是什么样）：只给启动时的老记录清理用——
   // 它要删的正是读时兜底藏起来的那几个键，用 `listAgents` 就永远判不出"需要清"。
   async listAgentsRaw(workspaceId: WorkspaceId): Promise<Agent[]> {
     const all = await listAgentDirs(this.#dataDir)
-    return all.filter((a) => a.workspaceId === workspaceId)
+    return all.filter((x) => x.agent.workspaceId === workspaceId).map((x) => x.agent)
   }
 
   async insertAgent(agent: Agent): Promise<void> {
-    await this.#agentsMutex.run(() => writeAgentDir(this.#dataDir, agent))
+    await this.#agentsMutex.run(async () => {
+      const id = String(agent.id)
+      // 已有目录（更新同一条）就沿用；否则按名字算一个没被占用的（`-2` / `-3` 后缀）
+      const dirName =
+        this.#agentDirOfId.get(id) ??
+        uniqueAgentDirName(String(agent.name ?? id), this.#takenDirNames(id))
+      await writeAgentDir(this.#dataDir, agent, dirName)
+      this.#agentDirOfId.set(id, dirName)
+    })
   }
 
   async deleteAgent(id: AgentId): Promise<boolean> {
@@ -1178,7 +1317,11 @@ export class FileStore implements Store {
         await log.close()
         this.#memoryLogs.delete(id as string)
       }
-      return removeAgentDir(this.#dataDir, id)
+      const dirName = await this.#dirNameOf(id)
+      if (dirName === null) return false
+      const had = await removeAgentDirIn(this.#dataDir, dirName)
+      this.#agentDirOfId.delete(String(id))
+      return had
     })
   }
 
@@ -1197,11 +1340,15 @@ export class FileStore implements Store {
   async listExclusiveSkills(
     owner: ExclusiveSkillOwner,
   ): Promise<Array<{ slug: string; body: string }>> {
-    return listExclusiveSkillBodiesIn(this.#exclusiveDirOf(owner))
+    const dir = await this.#exclusiveSkillsDirOf(owner)
+    if (dir === null) return [] // 智能体不存在 ⇒ 没有独有技能（读不该抛）
+    return listExclusiveSkillBodiesIn(dir)
   }
 
   async getExclusiveSkill(owner: ExclusiveSkillOwner, slug: string): Promise<string | null> {
-    return getExclusiveSkillBodyIn(this.#exclusiveDirOf(owner), slug)
+    const dir = await this.#exclusiveSkillsDirOf(owner)
+    if (dir === null) return null
+    return getExclusiveSkillBodyIn(dir, slug)
   }
 
   async writeExclusiveSkill(
@@ -1209,11 +1356,16 @@ export class FileStore implements Store {
     slug: string,
     body: string,
   ): Promise<void> {
-    await this.#agentsMutex.run(() => writeExclusiveSkillBodyIn(this.#exclusiveDirOf(owner), slug, body))
+    const dir = await this.#exclusiveSkillsDirOf(owner)
+    // 写要抛：往一个不存在的智能体写技能，只会造出一个没有 agent.json 的孤儿目录
+    if (dir === null) throw new Error(`智能体不存在，不能给它写独有技能：${owner.kind === 'agent' ? owner.agentId : owner.workflowId}`)
+    await this.#agentsMutex.run(() => writeExclusiveSkillBodyIn(dir, slug, body))
   }
 
   async removeExclusiveSkill(owner: ExclusiveSkillOwner, slug: string): Promise<boolean> {
-    return this.#agentsMutex.run(() => removeExclusiveSkillBodyIn(this.#exclusiveDirOf(owner), slug))
+    const dir = await this.#exclusiveSkillsDirOf(owner)
+    if (dir === null) return false
+    return this.#agentsMutex.run(() => removeExclusiveSkillBodyIn(dir, slug))
   }
 
   /*
@@ -1235,8 +1387,15 @@ export class FileStore implements Store {
     const key = agentId as string
     let log = this.#memoryLogs.get(key)
     if (!log) {
+      /*
+       * ★ D231：记忆住在**智能体目录里**，所以路径要按"目录名"拼，不是 id
+       *    （目录名 = 名字的 slug）。索引 miss 时重扫一次——记忆写进错地方
+       *    是最难查的那种错（它不报错，只是"记了但找不到"）。
+       */
+      const dirName = await this.#dirNameOf(agentId)
+      if (dirName === null) throw new Error(`智能体不存在，不能读写它的记忆：${key}`)
       log = new JsonlLog<MemoryEntry & { id: string }>(
-        join(agentDirPath(this.#dataDir, key), 'memory.jsonl'),
+        join(agentDirPath(this.#dataDir, dirName), 'memory.jsonl'),
         { fsync: this.#fsync },
       )
       await log.open()
@@ -1251,12 +1410,18 @@ export class FileStore implements Store {
   ): Promise<MemoryEntry[]> {
     const out: MemoryEntry[] = []
     if (agentId !== undefined) {
+      /*
+       * ⚠️ D231：智能体可能已经被删（目录没了）。**读**这条路要返回空、不抛——
+       *   删完智能体再问"它的记忆"是正常调用（界面刚删完还会重画一次），
+       *   而"抛错"会让一个已经正确的操作看起来失败了。
+       */
+      if ((await this.#dirNameOf(agentId)) === null) return []
       const all = (await this.#memoryLog(agentId)).all() as unknown as MemoryEntry[]
       out.push(...all)
     } else {
       // 不给 agentId = 跨所有智能体目录汇总（列表页的 `memoryCount` 用）。
       // 这是唯一"全部"的调用点，逐目录读是合理的（agent 数量少）。
-      for (const agent of await listAgentDirs(this.#dataDir)) {
+      for (const { agent } of await listAgentDirs(this.#dataDir)) {
         const all = (await this.#memoryLog(agent.id)).all() as unknown as MemoryEntry[]
         out.push(...all)
       }

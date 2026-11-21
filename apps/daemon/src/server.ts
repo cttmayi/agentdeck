@@ -3287,7 +3287,7 @@ async function injectedSkillsOf(
         })
         return
       }
-      const agent = await store.getAgent(raw as Agent['id'])
+      const agent = await store.getAgentById(raw as Agent['id'])
       if (!agent) {
         sendJson(res, 400, { error: `agent 不存在：${raw}` })
         return
@@ -3726,7 +3726,7 @@ async function injectedSkillsOf(
       const previewAgent =
         previewAgentId === ''
           ? null
-          : await store.getAgent(previewAgentId as Agent['id'])
+          : await store.getAgentById(previewAgentId as Agent['id'])
       if (previewAgentId !== '' && previewAgent === null) {
         sendJson(res, 404, { error: `agent 不存在：${previewAgentId}` })
         return
@@ -4070,7 +4070,7 @@ async function injectedSkillsOf(
         sendJson(res, 405, { error: '这个地址只接受 GET' })
         return
       }
-      const agent = await store.getAgent(agentId)
+      const agent = await store.getAgentById(agentId)
       if (!agent) {
         sendJson(res, 404, { error: `agent 不存在：${agentId}` })
         return
@@ -4094,7 +4094,7 @@ async function injectedSkillsOf(
       const agentId = decodeURIComponent(agentSkillsMatch[1]!) as Agent['id']
       const skillSlug = decodeURIComponent(agentSkillsMatch[2]!)
       if (req.method === 'PUT') {
-        const agent = await store.getAgent(agentId)
+        const agent = await store.getAgentById(agentId)
         if (!agent) {
           sendJson(res, 404, { error: `agent 不存在：${agentId}` })
           return
@@ -4139,7 +4139,7 @@ async function injectedSkillsOf(
         return
       }
       if (req.method === 'DELETE') {
-        const agent = await store.getAgent(agentId)
+        const agent = await store.getAgentById(agentId)
         if (!agent) {
           sendJson(res, 404, { error: `agent 不存在：${agentId}` })
           return
@@ -4168,7 +4168,7 @@ async function injectedSkillsOf(
       const agentId = decodeURIComponent(agentMatch[1]!) as Agent['id']
 
       if (req.method === 'GET') {
-        const agent = await store.getAgent(agentId)
+        const agent = await store.getAgentById(agentId)
         if (!agent) {
           sendJson(res, 404, { error: `agent 不存在：${agentId}` })
           return
@@ -4204,7 +4204,7 @@ async function injectedSkillsOf(
       }
 
       if (req.method === 'PATCH' || req.method === 'PUT') {
-        const current = await store.getAgent(agentId)
+        const current = await store.getAgentById(agentId)
         if (!current) {
           sendJson(res, 404, { error: `agent 不存在：${agentId}` })
           return
@@ -4562,7 +4562,7 @@ async function injectedSkillsOf(
       // 老 run 不挡：run 上带的是**执行时的快照**（`agentRef`），agent 删了
       // 历史任务照常显示（与组删私有成员一路的取舍：删 agent 不删历史）。
       if (req.method === 'DELETE') {
-        const current = await store.getAgent(agentId)
+        const current = await store.getAgentById(agentId)
         if (!current) {
           sendJson(res, 404, { error: `agent 不存在：${agentId}` })
           return
@@ -4625,7 +4625,7 @@ async function injectedSkillsOf(
     if (consolidateMatch) {
       const agentId = decodeURIComponent(consolidateMatch[1]!) as Agent['id']
       const runId = consolidateMatch[2] === undefined ? null : decodeURIComponent(consolidateMatch[2])
-      const target = await store.getAgent(agentId)
+      const target = await store.getAgentById(agentId)
       if (!target || target.workspaceId !== workspaceId) {
         sendJson(res, 404, { error: '智能体不存在' })
         return
@@ -4761,7 +4761,7 @@ async function injectedSkillsOf(
     if (memoryMatch) {
       const targetAgentId = decodeURIComponent(memoryMatch[1]!) as Agent['id']
       const entryId = memoryMatch[2] === undefined ? null : decodeURIComponent(memoryMatch[2])
-      const target = await store.getAgent(targetAgentId)
+      const target = await store.getAgentById(targetAgentId)
       if (!target) {
         sendJson(res, 404, { error: `agent 不存在：${targetAgentId}` })
         return
@@ -5042,7 +5042,7 @@ async function injectedSkillsOf(
        */
       const assigneeId = typeof body.assignee === 'string' ? body.assignee : null
       if (assigneeId !== null) {
-        const target = await store.getAgent(assigneeId as Agent['id'])
+        const target = await store.getAgentById(assigneeId as Agent['id'])
         if (!target) {
           sendJson(res, 400, { error: `agent 不存在：${assigneeId}`, code: 'agent_not_found' })
           return
@@ -5149,7 +5149,7 @@ async function injectedSkillsOf(
         return
       }
       // 创建时校验存在性（防手滑）；之后被删了由 fire 记 failed，不拦
-      if (executorType === 'agent' && !(await store.getAgent(executorId as AgentId))) {
+      if (executorType === 'agent' && !(await store.getAgentById(executorId as AgentId))) {
         sendJson(res, 400, { error: '执行智能体不存在', code: 'schedule_agent_not_found' })
         return
       }
@@ -5237,7 +5237,7 @@ async function injectedSkillsOf(
       if (body.executorType !== undefined || body.executorId !== undefined) {
         const executorType = body.executorType === 'group' || body.executorType === 'agent' ? body.executorType : s.executorType
         const executorId = typeof body.executorId === 'string' && body.executorId !== '' ? body.executorId : s.executorId
-        if (executorType === 'agent' && !(await store.getAgent(executorId as AgentId))) {
+        if (executorType === 'agent' && !(await store.getAgentById(executorId as AgentId))) {
           sendJson(res, 400, { error: '执行智能体不存在', code: 'schedule_agent_not_found' })
           return
         }
@@ -6493,7 +6493,7 @@ async function injectedSkillsOf(
       // ⚠️ 素材判空（上面）在**拷贝之前**：转写为空就是没有可沉淀的内容，文件再多
       //   也不能把"没跑过的东西"变成素材——起草者需要的上下文来自对话/任务本身。
       if (!startFromBlank && sourceRun !== null && sourceRun.workDir !== null) {
-        const sourceAgent = await store.getAgent(sourceRun.agentId as never)
+        const sourceAgent = await store.getAgentById(sourceRun.agentId as never)
         const wd = await collectSourceWorkdirFiles(sourceRun.workDir, await managedPathsOf(sourceAgent))
         if (wd.pieces.length > 0) {
           collected = { pieces: [...collected.pieces, ...wd.pieces], stats: collected.stats }
@@ -7315,7 +7315,7 @@ async function injectedSkillsOf(
     const adoptMatch = /^\/api\/agents\/([^/]+)\/review-standard\/adopt-from-skills$/.exec(path)
     if (adoptMatch && req.method === 'POST') {
       const agentId = decodeURIComponent(adoptMatch[1]!) as Agent['id']
-      const agent = await store.getAgent(agentId)
+      const agent = await store.getAgentById(agentId)
       if (!agent) {
         sendJson(res, 404, { error: `agent 不存在：${agentId}` })
         return
@@ -7758,7 +7758,7 @@ async function injectedSkillsOf(
         return
       }
       const text = typeof body?.text === 'string' ? body.text.trim() : ''
-      const agent = await store.getAgent(agentIdRaw as Agent['id'])
+      const agent = await store.getAgentById(agentIdRaw as Agent['id'])
       if (!agent || agent.workspaceId !== workspaceId) {
         sendJson(res, 400, { error: `执行者不存在（${agentIdRaw}）`, code: 'agent_not_found' })
         return
@@ -7901,7 +7901,7 @@ async function injectedSkillsOf(
         workRoot,
       }).path
       if (sub === 'files') {
-        const agent = await store.getAgent(conversation.agentId as Agent['id'])
+        const agent = await store.getAgentById(conversation.agentId as Agent['id'])
         // ★ 分批第 40 批：三级解析 + 降级（原来 `agent?.runtimeKey ?? 'claude'` ⇒ 'default' 直接 500）
         const managed = await managedPathsOf(agent)
         await sendWorkDirListing(res, dir, url.searchParams.get('dir') ?? '', managed)
@@ -8448,7 +8448,7 @@ async function injectedSkillsOf(
       }
       // 执行者可能在这中间被删掉了。**这时候要说清是哪一步坏了**，而不是
       // 静默换一个人接着聊——那会让上文与新 agent 的指令混在一起。
-      const agent = await store.getAgent(conversation.agentId)
+      const agent = await store.getAgentById(conversation.agentId)
       if (!agent) {
         sendJson(res, 409, {
           error: '这个对话的执行者已经被删掉了。换一个执行者要新建对话：' +
@@ -8551,7 +8551,7 @@ async function injectedSkillsOf(
          *
          * ⚠️ 只比对**这个对话的执行者**：整理出来的记忆本来就是写给它的。
          */
-        const owner = await store.getAgent(conversation.agentId)
+        const owner = await store.getAgentById(conversation.agentId)
         const existing = owner ? await listActiveMemory(store, workspaceId, owner.id) : []
         /** 把"它说的旧原文"解析成库里的 id（多对少、少对多都如实返回）。 */
         const resolveOld = (texts: readonly string[]): MemoryEntry[] => {
@@ -8647,7 +8647,7 @@ async function injectedSkillsOf(
        * ★ 分批第 245 批：记忆功能关着 ⇒ 没有「整理成记忆」（界面不给按钮，接口也拒——
        *   按钮是第一道，不是唯一一道）。
        */
-      if (req.method === 'POST' && !memoryEnabledOf(await store.getAgent(conversation.agentId))) {
+      if (req.method === 'POST' && !memoryEnabledOf(await store.getAgentById(conversation.agentId))) {
         sendJson(res, 409, { error: MEMORY_DISABLED_MESSAGE, code: 'memory_disabled' })
         return
       }
@@ -8824,7 +8824,7 @@ async function injectedSkillsOf(
       //   调用方漏了，而它的后果是"用裸模型跑审核"——正常完成、结果不对。
       let skills = body.skills
       if (skills === undefined || skills.length === 0) {
-        const agent = await store.getAgent(body.agentRef.id as Agent['id'])
+        const agent = await store.getAgentById(body.agentRef.id as Agent['id'])
         // ★ 2026-11（D111）：按 agent 配置解析 = 共享（skillIds）∪ 独有（目录文件），
         //   与聊天/审核/返工同一份（`agent-injectable-skills.ts`）。
         const configured = agent
@@ -8918,7 +8918,7 @@ async function injectedSkillsOf(
        */
       let agentRef: SubmitRunRequest['agentRef']
       {
-        const agent = await store.getAgent(s.executorId as AgentId)
+        const agent = await store.getAgentById(s.executorId as AgentId)
         if (!agent) {
           pushScheduleRecord(s, {
             triggeredAt: now, runId: null, issueId: null, status: 'failed',
@@ -9080,7 +9080,7 @@ async function injectedSkillsOf(
     const texts = messages
       .filter((m) => m.type === 'text' && m.content.trim() !== '')
       .map((m) => m.content)
-    const owner = await store.getAgent(run.agentId as Agent['id'])
+    const owner = await store.getAgentById(run.agentId as Agent['id'])
 
     // 产物 = 工作目录**顶层**的文件（`listWorkDir` 与任务详情右栏同一条判据：
     // 平台注入物不算产出，所以 `managed` 的要排除）。
@@ -9216,7 +9216,7 @@ async function injectedSkillsOf(
        *   不认识的字段（与其它未知字段同一处置）。
        *
        * ⚠️ 下面这条 `agent` 的类型校验**必须留着**：不带它，`{"agent": 123}` 会一路
-       *   走到 `store.getAgent(123)` 再去猜——那是"接口接受了坏输入、行为上才炸"。
+       *   走到 `store.getAgentById(123)` 再去猜——那是"接口接受了坏输入、行为上才炸"。
        */
       if (agentInput !== undefined && typeof agentInput !== 'string') {
         sendJson(res, 400, { error: 'agent 必须是字符串 id', code: 'task_agent_invalid' })
@@ -9326,7 +9326,7 @@ async function injectedSkillsOf(
        *   或者用默认执行者。
        */
       if (typeof agentInput === 'string') {
-        const agent = await store.getAgent(agentInput as Agent['id'])
+        const agent = await store.getAgentById(agentInput as Agent['id'])
         if (agent === null) {
           sendJson(res, 404, { error: `agent 不存在：${agentInput}`, code: 'task_agent_not_found' })
           return
@@ -9351,7 +9351,7 @@ async function injectedSkillsOf(
         const workspace = await store.getWorkspace(workspaceId)
         const preferred =
           workspace?.defaultAgentId != null
-            ? await store.getAgent(workspace.defaultAgentId as Agent['id'])
+            ? await store.getAgentById(workspace.defaultAgentId as Agent['id'])
             : null
         /*
          * ⚠️ 2026-11（S4）：这里原来按 `role === 'executor'` 挑默认执行者。角色退场 ⇒
@@ -9620,7 +9620,7 @@ async function injectedSkillsOf(
         const dir = url.searchParams.get('dir') ?? ''
         // ★ "哪些是平台注入的"按**这个 run 用的 runtime** 算。
         //   写死 `.claude/` 的版本对别的 CLI 会把注入物当成 agent 的产出显示。
-        const owner = await store.getAgent(run.agentId as never)
+        const owner = await store.getAgentById(run.agentId as never)
         // ★ 分批第 40 批：同上（任务详情右边那一栏与聊天右栏底部那一栏是同一条判据）
         const managed = await managedPathsOf(owner)
         await sendWorkDirListing(res, run.workDir, dir, managed)

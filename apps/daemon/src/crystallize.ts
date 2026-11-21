@@ -295,7 +295,7 @@ async function resolveLoadedSkills(
   agentId: string,
   extraSkillIds: string[],
 ): Promise<CrystallizeTargets['loadedSkills']> {
-  const agent = await store.getAgent(agentId as Agent['id'])
+  const agent = await store.getAgentById(agentId as Agent['id'])
   const all = await store.listSkills(agent?.workspaceId ?? ('' as never))
   const byId = new Map(all.map((s) => [s.id as string, s]))
   const seen = new Set<string>()

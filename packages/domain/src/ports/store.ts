@@ -201,7 +201,23 @@ export interface Store {
 
   // ── Agent ──
 
-  getAgent(id: AgentId): Promise<Agent | null>
+  /**
+   * 按 **id** 取（D231：以前叫 `getAgent`）。`id` 是**身份**——历史、快照、平台槽位、
+   * 定时任务的执行者里存的都是它；它永不变（改名字也不变）。
+   */
+  getAgentById(id: AgentId): Promise<Agent | null>
+  /**
+   * 按 **名字** 取（D231）。名字是**人给的句柄**（编排代码 `agent('写作员')`、CLI、
+   * 界面跳转），可改、理论上可能撞（老数据里真有重名）。
+   *
+   * ⚠️ 撞了**不猜**：返回 `ambiguous` 让调用方自己说话——静默取第一个正是 D163
+   *    修掉的那个坑（"我明明选了新的，怎么跑的是旧的"）。
+   */
+  getAgentByName(name: string): Promise<
+    | { kind: 'found'; agent: Agent }
+    | { kind: 'ambiguous'; agents: Agent[] }
+    | { kind: 'none' }
+  >
   listAgents(workspaceId: WorkspaceId): Promise<Agent[]>
   /**
    * 读**未经清理**的 agent 记录：磁盘上是什么样就是什么样。
@@ -210,7 +226,7 @@ export interface Store {
    * 它只为一件事存在：把老记录里撤掉的键**从磁盘上**摘掉
    * ══════════════════════════════════════════════════════════════════
    *
-   * `getAgent` / `listAgents` 会摘掉那几个键（读时兜底，见
+   * `getAgentById` / `listAgents` 会摘掉那几个键（读时兜底，见
    * `packages/protocol/src/agent-legacy.ts`），于是**磁盘清理没法用它们**：读回来
    * 的记录已经"看起来干净"，判据永远是"没有老字段"⇒ 一个字都不用改 ⇒ 磁盘上那些
    * 键会永久留着（而使用者的要求是"不要遗留旧数据"）。

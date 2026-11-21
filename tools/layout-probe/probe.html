@@ -11955,6 +11955,15 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               return {
                 minH: getComputedStyle(rows[0]).minHeight,
                 spread: Math.max(...hs) - Math.min(...hs),
+                /*
+                 * ★ D231（诊断用，长期留着）：**每一行的高度与首行文字**。
+                 *   只报 `spread` 的时候，"某一页差 32px"只能靠猜是哪一行——
+                 *   这次就是靠它才看到"某条夹具的副行换行了"。多 60 字节，值。
+                 */
+                rows: rows.map((r, i) => ({
+                  h: hs[i],
+                  text: String(r.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 60),
+                })),
                 n: hs.length,
               }
             })

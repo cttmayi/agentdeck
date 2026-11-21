@@ -118,7 +118,7 @@ export async function resolveSlot(
 ): Promise<Agent | null> {
   const claimed = table[slot]
   if (claimed !== undefined) {
-    const agent = await store.getAgent(claimed as Agent['id'])
+    const agent = await store.getAgentById(claimed as Agent['id'])
     if (agent === null) return null
     return ownerOf(agent) === 'platform' ? agent : null
   }
@@ -180,7 +180,7 @@ export async function alignMemberEntries(
   for (const slot of PLATFORM_SLOTS) {
     const agentId = table[slot]
     if (agentId === undefined) continue
-    const agent = await store.getAgent(agentId as Agent['id'])
+    const agent = await store.getAgentById(agentId as Agent['id'])
     if (agent === null || ownerOf(agent) !== 'platform') continue
     const want = [...expected(slot)]
     const have = Array.isArray(agent.entries) ? agent.entries : []

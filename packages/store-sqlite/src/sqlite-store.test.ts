@@ -72,7 +72,7 @@ describe('基本 CRUD 与持久化', () => {
     await store.insertSkill(skill)
     await store.insertIssue(issue)
 
-    assert.equal((await store.getAgent(agentId('a1')))?.id, 'a1')
+    assert.equal((await store.getAgentById(agentId('a1')))?.id, 'a1')
     assert.equal((await store.getSkill(skill.id))?.slug, 'sec-vuln')
     assert.equal((await store.getIssue(issue.id))?.title, '改一下')
     assert.deepEqual(
@@ -99,7 +99,7 @@ describe('基本 CRUD 与持久化', () => {
       await a.close()
 
       const b = await SqliteStore.open({ dataDir: reopenDir, fsync: false })
-      assert.equal((await b.getAgent(agentId('persist-me')))?.id, 'persist-me')
+      assert.equal((await b.getAgentById(agentId('persist-me')))?.id, 'persist-me')
       assert.equal(await b.formatVersion(), SQLITE_STORE_FORMAT_VERSION)
       await b.close()
     } finally {

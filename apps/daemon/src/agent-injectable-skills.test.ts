@@ -60,6 +60,28 @@ async function seed(dir: string): Promise<FileStore> {
     createdAt: 1,
     updatedAt: 1,
   } as never)
+  /*
+   * ★ D231：写独有技能要**智能体存在**（目录名 = 名字的 slug，索引里没有它就写不了，
+   *   否则会造出一个没有 agent.json 的孤儿目录）。所以夹具里先把人建出来。
+   */
+  for (const [id, name] of [
+    ['a-1', '甲'],
+    ['a-2', '乙'],
+  ] as const) {
+    await store.insertAgent({
+      id: id as never,
+      workspaceId: WS as never,
+      name,
+      instructions: '',
+      model: null,
+      runtimeKey: 'default',
+      workDir: null,
+      skillIds: [],
+      env: {},
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+  }
   return store
 }
 

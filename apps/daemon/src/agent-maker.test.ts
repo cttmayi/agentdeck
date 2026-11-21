@@ -258,7 +258,7 @@ describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）',
         const e = exclusive.find((x) => x.slug === slug)
         assert.equal(e?.body, bodies[slug])
       }
-      const after = await store.getAgent('maker-1' as Agent['id'])
+      const after = await store.getAgentById('maker-1' as Agent['id'])
       assert.deepEqual(after?.skillIds, [])
 
       // 幂等：再跑一遍 = 什么都不做

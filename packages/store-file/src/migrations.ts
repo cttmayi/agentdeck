@@ -141,11 +141,18 @@ export class MigrationLedger {
  *       · `skills-to-disk`（2026-10）—— 内存里遍历技能记录看有没有 `body`；
  *       · 编排 / 定时任务 / workspace 那三处（`apps/daemon`）—— 判断"老文件还在吗"，一次 `stat`。
  *
- * 所以今天真正被门住的只有一条（`exclusive-skills-dir-case`：要 readdir 全部智能体目录）。
+ * 所以今天真正被门住的是两条（`agent-dir-names` 与 `exclusive-skills-dir-case`）：它们都要 `readdir` 全部智能体目录。
  * 账本真正的价值在**以后**：新迁移若判据贵，登记一个 key 就再也不摊启动成本；
  * 而"已登记了哪些"本身也是一份可查的账（`keys()`）。
  */
 export const MIGRATIONS = {
+  /**
+   * 智能体目录名从 **id** 改成 **名字的 slug**（D231，方案 D）。
+   *
+   * 判据是 `readdir(agents/)` + 读每个 `agent.json`（要算 slug 才知道该不该改）——
+   * 随智能体数量线性涨，且只在改目录名的那一次有意义，所以门住。
+   */
+  agentDirNames: { key: 'agent-dir-names', version: 1 },
   /**
    * 独有技能目录 `SKILL/` → `skills/`（D229）。
    *

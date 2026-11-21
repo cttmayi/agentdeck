@@ -554,7 +554,7 @@ export class RunExecutor {
     const fallback = { backend: this.#deps.backend, descriptor: this.#deps.descriptor }
     if (!this.#deps.resolveRuntime) return fallback
 
-    const agent = await this.#deps.store.getAgent(run.agentId as never)
+    const agent = await this.#deps.store.getAgentById(run.agentId as never)
     if (!agent) return fallback
 
     // ★ `'default'` = **跟随全局默认**（2026-10）。三级解析：
@@ -1055,7 +1055,7 @@ export class RunExecutor {
       //   取在这里而不是等下面拼命令行时再取，是因为「指令」现在要进第一句话
       //   ——而它此前**从来没被送达过**（`ExecOptions` 里没有这个通道）：
       //   界面上能填、能存、能显示，运行时被丢掉。
-      const agentConfig = await this.#deps.store.getAgent(run.agentId as never)
+      const agentConfig = await this.#deps.store.getAgentById(run.agentId as never)
 
       // ★ 第一句话的模版是**全局配置**（D32），挂在 workspace 上：一次设定，
       //   所有 agent 都按它来。空 = 平台默认。
@@ -1209,7 +1209,7 @@ export class RunExecutor {
        *
        * ⚠️ 判据是 `memoryEnabledOf`（`!== false`）：老记录没有这个键 ⇒ 照旧开。
        */
-      const memoryAgent = await this.#deps.store.getAgent(run.agentId as never)
+      const memoryAgent = await this.#deps.store.getAgentById(run.agentId as never)
       const memoryItems = memoryEnabledOf(memoryAgent)
         ? await listActiveMemory(
             this.#deps.store,
