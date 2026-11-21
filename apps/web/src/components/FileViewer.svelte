@@ -500,7 +500,7 @@
         <pre class="fv-pre" data-json-text>{jsonView}</pre>
       {/if}
     {:else if kind === 'csv'}
-      <div class="fv-table-wrap">
+      <div class="table-wrap fv-table-wrap">
         <table class="fv-table" data-csv-table>
           <tbody>
             {#each csvView.rows as row, i (i)}
@@ -694,11 +694,16 @@
     margin-bottom: var(--sp-2);
   }
 
+  /*
+   * ★★ D216：壳复用全局 **`.table-wrap`**（边框 / 圆角 / 底色三样完全一样），
+   *   这里只写差异：CSV 预览要**纵向也能滚**并限高（`max-height: 62vh`）。
+   *   ⚠️ 表格本体 `.fv-table` **没有**改成 `.table`：它是"数据预览"（等宽、`white-space: pre`、
+   *   列宽上限 24rem、表头 sticky、表头不做大写），与通用数据表是两件事——
+   *   这条在 `ui-style.md` §5 的例外里写明。
+   */
   .fv-table-wrap {
     overflow: auto;
     max-height: 62vh;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
   }
 
   .fv-table {

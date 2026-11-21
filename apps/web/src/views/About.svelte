@@ -64,7 +64,7 @@
       </div>
       <div class="ab-row">
         <span class="ab-k">{$t('about.device')}</span>
-        <span class="ab-v">{id.deviceName} <span class="ab-badge ab-badge--good">{$t('about.currentDevice')}</span></span>
+        <span class="ab-v">{id.deviceName} <span class="badge good">{$t('about.currentDevice')}</span></span>
       </div>
       <div class="ab-row">
         <span class="ab-k">{$t('about.locale')}</span>
@@ -87,7 +87,7 @@
               <span class="ab-cli">
                 {cliLine(rt).cmd}
                 {#if cliLine(rt).version}<code>{cliLine(rt).version}</code>{/if}
-                <span class:ab-badge--good={cliLine(rt).ok} class:ab-badge--bad={!cliLine(rt).ok} class="ab-badge">
+                <span class:good={cliLine(rt).ok} class:bad={!cliLine(rt).ok} class="badge">
                   {cliLine(rt).state}
                 </span>
               </span>
@@ -105,9 +105,9 @@
         <span class="ab-k">{$t('about.envPreflight')}</span>
         <span class="ab-v">
           {#if id.environment && id.environment.issues.length > 0}
-            <span class="ab-badge ab-badge--warn">{$t('about.envIssuesCount', { n: id.environment.issues.length })}</span>
+            <span class="badge warn">{$t('about.envIssuesCount', { n: id.environment.issues.length })}</span>
           {:else}
-            <span class="ab-badge ab-badge--good">{$t('about.envNoIssues')}</span>
+            <span class="badge good">{$t('about.envNoIssues')}</span>
           {/if}
         </span>
       </div>
@@ -241,16 +241,17 @@
     font-size: var(--fs-xs);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
-  .ab-badge {
-    display: inline-block;
-    font-size: var(--fs-2xs);
-    border-radius: var(--radius-pill);
-    padding: 1px var(--sp-2);
+  /*
+   * ★★ D216：这一族（`.ab-badge` + 三个语义变体）**整族删掉了**——它是"关于页自己画的一套徽标”：
+   *   inline-block + 胶囊圆角 + 内距 + fs-2xs + 三个 color-mix 背景，而全局 `.badge` 早就
+   *   有同一套（`--fs-xs` 胶囊 + `currentColor` 描边与 10% 底色），`.badge--sm` 是 `--fs-2xs` 那一档，
+   *   语义色用 `.good` / `.warn` / `.bad` 文字色即可（`.badge` 的描边与底色都跟 `currentColor` 走）。
+   *   现在 About 的四处徽标都用 `class="badge badge--sm good|warn|bad"`，**只有一处定义**。
+   */
+  .ab-v .badge {
+    /* 唯一的差异：原 `.ab-badge` 与前面文字之间留 8px（这是位置，不是徽标本身的长相） */
     margin-left: var(--sp-2);
   }
-  .ab-badge--good { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
-  .ab-badge--warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
-  .ab-badge--bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
   .ab-cli { margin-left: var(--sp-3); }
   .ab-cli code { margin: 0 var(--sp-2); }
   .ab-issues {

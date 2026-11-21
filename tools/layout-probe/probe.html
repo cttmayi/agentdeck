@@ -4803,7 +4803,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         }
 
         // ③ 环境预检区存在（问题列表或"全部通过"）
-        facts['about.envPreflightShown'] = !!d().querySelector('[data-ab-env] .ab-badge')
+        facts['about.envPreflightShown'] = !!d().querySelector('[data-ab-env] .badge')
 
         // ④ 存储与目录：daemon 下发的路径（工作目录/数据目录/技能目录）至少两行 code
         facts['about.storageDirs'] = (() => {

@@ -2235,12 +2235,14 @@
     align-items: center;
     gap: var(--sp-2);
   }
+  /*
+   * ★★ D216：变体**只写差异**。原来这里把 `.badge` 的圆角/内距/字号又抄了一遍并改成矩形圆角
+   *   ——那是"关于页/沉淀页各画一套徽标"的老毛病（D142 说过：变体只写差异，自己再画一遍
+   *   就会在改 `.badge` 时被漏掉）。现在只留颜色：实心 accent 底 + 反白字。
+   */
   .badge.mine {
     background: var(--accent);
     color: var(--bg);
-    border-radius: var(--radius-sm);
-    padding: 0 var(--sp-1);
-    font-size: var(--fs-xs);
   }
 
   /* ══════════ 表单字段（审阅态） ══════════ */

@@ -1972,11 +1972,8 @@
 
   /* ── 值的呈现 ── */
 
-  .empty-value {
-    margin: 0;
-    color: var(--text-faint);
-    font-size: var(--fs-sm);
-  }
+  /* D216：`.empty-value` 的样式收进 `app.css`（文档 §2.4 早就承诺了这个类，
+     却一直只有本组件自己写一份 ⇒ 别的组件用它等于没有样式）。 */
 
   .row-hint {
     margin: var(--sp-2) 0 0;

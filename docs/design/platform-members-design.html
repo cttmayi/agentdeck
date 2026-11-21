@@ -2679,6 +2679,18 @@ tbody tr:last-child td,
  * 这一档原来是在 `Schedules.svelte` 里用内联 `style="text-align:left;padding:.5rem 0"`
  * **掰**全局样式掰出来的——同一个类在两个语境下长得不一样，却没人说得出为什么。
  */
+/**
+ * ★★ D216：**字段无值那一档**（`ui-style.md` §2.4 早就写着"字段无值用 `.empty-value`"，
+ *   但 `app.css` 里**从来没有这条规则**——于是 `WorkspaceSettings` 里的 `.empty-value`
+ *   完全没有样式（只有 `AgentDetail` 自己写了一份，两处长得不一样）。
+ *   现在收进全局这一处：淡一档、13px、不额外留白（它总是跟在字段标签后面）。
+ */
+.empty-value {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+}
+
 .empty.empty--flush {
   text-align: left;
   border: 0;
