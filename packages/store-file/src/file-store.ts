@@ -49,6 +49,7 @@ import {
 import { JsonlLog } from './log.ts'
 import { LockHeldError, acquireLock } from './lock.ts'
 import { MessageLog, ensureRunDir, messageLogPath } from './messages.ts'
+import { MIGRATIONS, MigrationLedger } from './migrations.ts'
 import { Mutex, pruneUndefined } from './mutex.ts'
 import { readSkillContent, removeSkillFiles, writeSkillFiles } from './skill-files.ts'
 import {
@@ -771,6 +772,22 @@ export class FileStore implements Store {
     // 智能体从"JSONL 记录"迁到"一个智能体一个目录"（D111，2026-11）。
     // 必须在预加载之后——迁移要遍历 `#stores` 里的老记录。幂等：目录在就跳过，
     // 全部迁完写 `.migrated` 标记，之后老 `agent.jsonl` 已删（使用者确认）。
+    /*
+     * ★ D230：**读一次迁移账本**（`<dataDir>/migrations.json`），后面的迁移都先用它门一遍。
+     *
+     *   为什么：到 2026-11 为止每条迁移各用各的判据（标记文件 / "老文件还在吗" /
+     *   "老目录还在吗"）。单条都便宜，但**每次启动都要重新判断一遍**——迁移越加越多，
+     *   启动成本就跟着涨（而且每加一条都要重新审一遍"这个判据贵不贵"）。
+     *   账本把"跑过了"记下来：读一个文件，之后一条条 `has()` 都是内存判断。
+     *
+     *   ⚠️ 账本是**加速层**，不是正确性来源：迁移本身仍然幂等，手工删掉账本只会让它们
+     *      重跑一遍（宁可慢一次，也不要把"正确"押在一个可能被删的文件上）。
+     */
+    const ledger = await MigrationLedger.load(dataDir, store.#onInfo)
+
+    // ⚠️ 下面三条**刻意不用账本门**（D230 的规矩：判据便宜就不门）：
+    //   它们的判据都是一次 stat / 一次内存遍历，而门住的代价是"账本一丢就再不为
+    //   老数据跑一次"。详见 `migrations.ts` 里 MIGRATIONS 上面那张档位表。
     await store.#migrateAgentsToDirs()
 
     // 记忆从 workspace 级 `log/memory.jsonl` 迁到智能体目录（D112，2026-11）。
@@ -782,7 +799,7 @@ export class FileStore implements Store {
     await store.#migrateSkillsToDisk()
 
     // ── D229：独有技能目录 `SKILL/` → `skills/`（大小写 + 幂等，见 agent-dirs.ts）──
-    {
+    if (!ledger.has(MIGRATIONS.exclusiveSkillsDirCase)) {
       const { renamed, conflicts, failed } = await store.#agentsMutex.run(() =>
         migrateExclusiveSkillsDirCase(dataDir),
       )
@@ -801,6 +818,9 @@ export class FileStore implements Store {
           `⚠️ 智能体 ${id} 同时有 SKILL/ 与 skills/ 两个目录——不合并（猜哪份对是另一种坏），请人工确认后删掉多余的`,
         )
       }
+      // ⚠️ 有冲突/失败时**也记**：那两种是"要人处理"的终态，不是"还没跑"——
+      //    重跑既不会合并也不会更成功，只会在日志里重复刷同一条。
+      await ledger.mark(MIGRATIONS.exclusiveSkillsDirCase)
     }
 
     // ── D227：日志的回收（`compact()` 以前**没有任何调用点**，所以只增不减）──
@@ -817,9 +837,15 @@ export class FileStore implements Store {
    *
    *   ① **历史很长**：`pendingOps`（日志里还没物化的条数）> `max(200, 3 × 现存记录数)`
    *      ——run 这种"状态来回改"的典型（2811 条历史 / 397 条现存）；
-   *   ② **日志很肥**：日志字节数 > `max(512 KB, 4 × 现存记录的字节数)`
+   *   ② **日志很肥**：日志字节数 > `max(512 KB, 4 × 快照字节数)`
    *      ——`skill.jsonl` 这种"记录数很少、老记录却带着正文副本"的典型
    *      （真机：4.4 MB 日志 / 13 条现存索引 ⇒ ① 算出来才 88 条，压不动，② 一眼看穿）。
+   *
+   *      ⚠️ D230：这里的"现存记录的字节数"原来是**实算**的
+   *      （`Buffer.byteLength(JSON.stringify(log.all()))`）——那是每次启动都对全部
+   *      活数据序列化一遍，唯一一处 O(数据量) 的热点。现在改用**快照文件的字节数**
+   *      （`log/<集合>.jsonl.snapshot` 的 stat）：快照就是"物化后的当前状态"，
+   *      差一个格式化开销，判"该不该压"完全够用，而且只花一次 stat。
    *
    * 为什么这么定：
    *   · 两个都是**比例**判据，几个集合的体量差三个数量级也能用同一个规则；
@@ -837,9 +863,12 @@ export class FileStore implements Store {
         const path = join(ws.root, 'log', `${name}.jsonl`)
         const before = await stat(path).then((s) => s.size).catch(() => 0)
         if (before === 0) continue
-        const liveBytes = Buffer.byteLength(JSON.stringify(log.all()))
+        // 只 stat，不序列化（D230）：快照字节数是"当前状态有多大"的够用近似
+        const snapshotBytes = await stat(`${path}.snapshot`)
+          .then((s) => s.size)
+          .catch(() => 0)
         const tooLong = log.pendingOps > Math.max(200, 3 * log.size)
-        const tooFat = before > Math.max(512 * 1024, 4 * liveBytes)
+        const tooFat = before > Math.max(512 * 1024, 4 * snapshotBytes)
         if (!tooLong && !tooFat) continue
         await log.compact()
         const after = await stat(path).then((s) => s.size).catch(() => 0)

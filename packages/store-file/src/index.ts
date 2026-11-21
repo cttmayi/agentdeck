@@ -14,6 +14,14 @@ export {
   type FileStoreOptions,
 } from './file-store.ts'
 export { JsonlLog, type LogEntry } from './log.ts'
+export {
+  MIGRATIONS,
+  MigrationLedger,
+  migrationsPath,
+  type MigrationKey,
+  type MigrationRecord,
+  type MigrationSpec,
+} from './migrations.ts'
 /** D228：`owner.kind === 'agent'` 那一种独有技能的目录（装配处要用它拼解析函数）。 */
 export { agentExclusiveSkillsDir } from './agent-dirs.ts'
 export { BlobStore } from './blobs.ts'

@@ -53,6 +53,7 @@
 ├── meta.json                     { formatVersion, instanceId }
 ├── lock                          { pid, startedAt } 单进程锁
 ├── device.json                   { id, name, createdAt, lastSeenAt }
+├── migrations.json               **迁移账本**（跑过哪些一次性迁移；§14）
 ├── workspaces.json               workspace 记录（普通 JSON 数组，**不是日志**，§6）
 │
 ├── agents/<agentId>/             ★ 一个智能体 = 一个目录（§3）
@@ -482,7 +483,7 @@ skill、`~/.claude.json` 的 `mcpServers` 会拉起 npx/浏览器，天然在任
 
 ---
 
-## 14. 迁移纪律
+## 14. 迁移纪律（含迁移账本 `migrations.json`，D230）
 
 - **幂等**：再跑一次不重复做。现存的三个启动迁移都在 `FileStore.open()` 里按序跑一次：
   `#migrateAgentsToDirs`（老 `log/agent.jsonl` → 目录）、`#migrateMemoryToAgentDirs`
@@ -494,6 +495,36 @@ skill、`~/.claude.json` 的 `mcpServers` 会拉起 npx/浏览器，天然在任
   回滚只需发旧版代码。真正删除由人确认（有过一次："可以删老 agent.jsonl 了"）。
 - **启动时点名**：迁了几条、哪条是坏的（半内置、编排引用不可引用的人），
   启动日志要说出来——只报不改。
+
+### 14.1 迁移账本（`<dataDir>/migrations.json`，D230）
+
+```
+{ "exclusive-skills-dir-case": { "v": 1, "at": 1795271524550 } }
+```
+
+一份普通 JSON：**跑过的迁移记一条**，之后启动只读这一个文件，再一条条 `has()` 都是内存判断。
+
+**哪一档用账本，有明规矩**（写在 `packages/store-file/src/migrations.ts` 的清单上方）：
+
+| 判据的代价 | 处理 | 现在属于这一档的 |
+|---|---|---|
+| **贵**（要 `readdir` 目录 / 读多个文件；成本随数据量涨） | **登记到账本、门住** | `exclusive-skills-dir-case`（D229：readdir 全部智能体 + 每人 1–2 次 stat） |
+| **便宜**（一次 `stat` / 一次内存遍历） | **不门住，每次跑** | 智能体目录化（`.migrated` 标记）、记忆目录化（每个工作区一次 stat）、技能落盘（内存遍历看有没有 `body`）、编排/定时任务/workspace 三处（"老文件还在吗"） |
+
+为什么便宜的**不能**门住：账本一旦被删、或者有人从备份恢复一份老数据，门住的那条就
+**再也不会为它跑一次**——那是把正确性押在一个可能被删的文件上。而账本自己的定位是
+**加速层**（迁移本身仍然幂等），所以：删掉 `migrations.json` = 让它们重跑一遍，最坏慢一次。
+
+三条纪律：
+1. **键一经发布不许改**（改了等于新迁移）；规则变了要重跑就把 `v` +1；
+2. **每条迁移跑完立刻落盘**（原子写）——迁移中途崩掉时，已经跑完的应该算数；
+3. **账本坏了当空、但要说话**（打一行日志），不能让存储打不开。
+
+> 实测（真数据拷贝，`FileStore.open()` 连开 5 次）：**30 / 15 / 18 / 14 / 13 ms**
+> （第一次含一次性迁移与压缩）。同一轮把 `#compactIfNeeded` 里唯一一处
+> `JSON.stringify(全部活记录)` 换成了**快照文件 stat**（判"该不该压"够用，只花一次 stat）——
+> 于是启动路径上**没有任何 O(数据量) 的迁移判断**了，剩下的 O(数据量) 只有
+> `JsonlLog.open()` 回放日志（那是加载状态，压缩过之后只剩快照 + 增量）。
 
 ---
 

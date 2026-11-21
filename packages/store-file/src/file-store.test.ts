@@ -425,6 +425,143 @@ describe('★ D227：日志回收（compact 终于有调用点）与迁移留档
   })
 })
 
+describe('★ D230：迁移账本（`migrations.json`）——判据贵的迁移不再每次启动都扫', () => {
+  /** 造一个"老名字"的独有技能目录（大写 SKILL），模拟 D229 之前的盘。 */
+  async function plantUpperSkillDir(dir: string, id: string): Promise<void> {
+    await mkdir(join(dir, 'agents', id, 'SKILL', 'legacy-skill'), { recursive: true })
+    await writeFile(join(dir, 'agents', id, 'SKILL', 'legacy-skill', 'SKILL.md'), '# 老的\n', 'utf8')
+    await writeFile(
+      join(dir, 'agents', id, 'agent.json'),
+      JSON.stringify({ id, workspaceId: String(WS), name: '老', skillIds: [], env: {}, createdAt: 1, updatedAt: 1 }),
+      'utf8',
+    )
+  }
+  const hasUpper = (dir: string, id: string): Promise<boolean> =>
+    readFile(join(dir, 'agents', id, 'SKILL', 'legacy-skill', 'SKILL.md'), 'utf8').then(
+      () => true,
+      () => false,
+    )
+
+  test('★★ 跑过一次就记账；账本在 ⇒ 第二次启动**不再扫**（新冒出来的老目录也不会被改）', async () => {
+    const d = await makeTempDir('mig-ledger')
+    try {
+      await plantUpperSkillDir(d, 'a-1')
+      const infos: string[] = []
+      const a = await FileStore.open({ dataDir: d, fsync: false, onInfo: (m) => infos.push(m) })
+      await a.close()
+      assert.ok(infos.some((m) => m.includes('独有技能目录已改为小写')), '第一次要真的迁')
+      assert.equal(await hasUpper(d, 'a-1'), false, '已经改小写')
+
+      const ledger = JSON.parse(await readFile(join(d, 'migrations.json'), 'utf8')) as Record<
+        string,
+        { v: number; at: number }
+      >
+      assert.equal(ledger['exclusive-skills-dir-case']?.v, 1, '账本里要有这条')
+
+      /*
+       * ★ 这条量的是"跳过"：账本说跑过了，就**不再扫** agents 目录。
+       *   所以事后冒出来的 `SKILL/` 不会被改——这正是"启动成本与迁移条数脱钩"的代价，
+       *   要重跑就删掉 migrations.json（迁移本身幂等，见下一条）。
+       */
+      await plantUpperSkillDir(d, 'a-2')
+      const b = await FileStore.open({ dataDir: d, fsync: false })
+      await b.close()
+      assert.equal(await hasUpper(d, 'a-2'), true, '账本说跑过了 ⇒ 不再扫（这条迁移被门住了）')
+    } finally {
+      await cleanup(d)
+    }
+  })
+
+  test('★★ 账本被删/坏掉 ⇒ 当作没记过，迁移重跑一遍（幂等是正确性来源，账本只是加速）', async () => {
+    const d = await makeTempDir('mig-ledger-lost')
+    try {
+      await plantUpperSkillDir(d, 'a-1')
+      const a = await FileStore.open({ dataDir: d, fsync: false })
+      await a.close()
+
+      // 删掉账本 + 再造一个"老目录"（模拟从备份恢复回来的老数据）
+      await rm(join(d, 'migrations.json'), { force: true })
+      await plantUpperSkillDir(d, 'a-3')
+      const b = await FileStore.open({ dataDir: d, fsync: false })
+      await b.close()
+      assert.equal(await hasUpper(d, 'a-3'), false, '账本没了 ⇒ 迁移照跑')
+      // 账本被重建
+      const rebuilt = JSON.parse(await readFile(join(d, 'migrations.json'), 'utf8')) as Record<
+        string,
+        { v: number }
+      >
+      assert.equal(rebuilt['exclusive-skills-dir-case']?.v, 1)
+
+      // 坏掉的账本：当空处理 + 要说话，不能让存储打不开
+      await writeFile(join(d, 'migrations.json'), '{坏', 'utf8')
+      const infos: string[] = []
+      const c = await FileStore.open({ dataDir: d, fsync: false, onInfo: (m) => infos.push(m) })
+      await c.close()
+      assert.ok(
+        infos.some((m) => m.includes('迁移账本')),
+        `账本坏了要报出来：${infos.join(' / ')}`,
+      )
+    } finally {
+      await cleanup(d)
+    }
+  })
+
+  test('★★ 判据便宜的迁移**不门住**：账本跑过之后，老数据仍然会被迁（备份恢复的场景）', async () => {
+    const d = await makeTempDir('mig-cheap-not-gated')
+    try {
+      const a = await FileStore.open({ dataDir: d, fsync: false })
+      await a.insertWorkspace({
+        executeTemplate: '', reviewTemplate: '', chatTemplate: '',
+        defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1,
+      })
+      await a.close()
+      assert.ok(await readFile(join(d, 'migrations.json'), 'utf8').then(() => true, () => false),
+        '第一次开库会写账本（D229 那条）')
+
+      /*
+       * 模拟"账本已经记过之后，又出现一条老格式技能记录"（备份恢复/手工放回）。
+       * `skills-to-disk` 的判据是内存里看记录有没有 body——便宜，所以**不门住**，
+       * 它应该照常把正文落盘。这条与上一条成对：贵的不扫、便宜的照跑。
+       */
+      const logDir = join(d, 'workspaces', String(WS), 'log')
+      await mkdir(logDir, { recursive: true })
+      await writeFile(
+        join(logDir, 'skill.jsonl'),
+        JSON.stringify({
+          seq: 1,
+          at: 1,
+          op: 'put',
+          id: 'late-legacy',
+          value: {
+            id: 'late-legacy',
+            workspaceId: String(WS),
+            slug: 'late-legacy',
+            name: '迟到的老技能',
+            description: '',
+            body: '# 迟到的老技能\n',
+            source: 'local',
+            sourceRef: null,
+            verdictSchemaVersion: 1,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        }) + '\n',
+        'utf8',
+      )
+      const b = await FileStore.open({
+        dataDir: d,
+        fsync: false,
+        // 正文落盘：用默认 skillsRoot（<dataDir>/skills）
+      })
+      const body = await readFile(join(d, 'skills', 'late-legacy', 'SKILL.md'), 'utf8').catch(() => null)
+      assert.equal(body, '# 迟到的老技能\n', '便宜判据的迁移不门住 ⇒ 迟到的老记录仍会落盘')
+      await b.close()
+    } finally {
+      await cleanup(d)
+    }
+  })
+})
+
 describe('★ 分批第 72 批：listRuns 的 order（"最近的一页"）', () => {
   /*
    * 这个方向是**被一个真 bug 逼出来的**：翻页是"按 id 升序取前 limit 条"，而 run 的
