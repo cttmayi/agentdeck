@@ -23,7 +23,7 @@
 | **一条 run 实际是怎么跑起来的**（命令行、注入、收尾） | [`./runtime/pipeline.md`](./runtime/pipeline.md) |
 | **skill 是什么、住在哪、怎么装**（来源、磁盘落点、注入、限额） | [`./reference/skills.md`](./reference/skills.md) |
 | ~~**工具包怎么开发、住在哪**~~ 🛑 **已退场（D123，2026-11）**：工具包与动作能力整个删掉了，那份手册只剩历史查询价值 | [`./reference/tools.md`](./reference/tools.md) |
-| **界面风格规则（控件类体系、字号/间距令牌、怎么加新控件）** | [`./design/ui-style.md`](./design/ui-style.md)（批 300 落地；**新建页面从文首「开工清单」十步开始**，看得见的那一半是 [`./design/ui-demo.html`](./design/ui-demo.html)；**现状体检与迁移计划**在 [`./design/style-audit.md`](./design/style-audit.md)） |
+| **界面风格规则（控件类体系、字号/间距令牌、怎么加新控件）** | [`./design/ui-style.md`](./design/ui-style.md)（批 300 落地；**给使用者的唯一入口：「参考 ui-style，新增/调整 XX 页」**——展开是文首「开工清单」十步，看得见的那一半是 [`./design/ui-demo.html`](./design/ui-demo.html)；**现状体检与迁移计划**在 [`./design/style-audit.md`](./design/style-audit.md)） |
 | 端到端走查与边界情况 | [`./reference/scenarios.md`](./reference/scenarios.md) |
 | ~~**智能体组是怎么工作的**~~ 🛑 **已退场（D126，2026-11）**：智能体组整条删掉，那份手册只剩历史查询价值 | [`./reference/agent-group-workflow.md`](./reference/agent-group-workflow.md) |
 | **要装到 Windows 上跑 / 有人报"Windows 上跑不起来"** | [`./reference/windows-compat.md`](./reference/windows-compat.md)（先看「现在的状态」，再看「下一步」与「最小验收清单」） |
@@ -139,6 +139,7 @@ pnpm run dev:web            # 界面开发模式：Vite(5173) 把 /api 代理到
 
 | 线索 | 状态 | 去哪看 |
 |---|---|---|
+| **参考资料收成一个名字（D213）**（2026-11，✅ 已完成） | 使用者："我只想简单表述让你『参考 XX 资料，新增 XX 页』"。收成 **`ui-style` 一个名字**：`ui-style.md` 顶部写「参考 ui-style，新增/调整 XX 页」+ `ui-demo.html`（看得见的那一半）链接 + 一张"我说这句话我会读什么"的展开表；`ui-demo.html`/`app.css`/`LIST_PAGES` 明确降级为"我这一侧的资料，你不用记"。**没有新增 md 文件**——多一个名字就多一份要记 | [`./srs/requirements.md`](./srs/requirements.md) §16 的 **D213**；入口在 [`./design/ui-style.md`](./design/ui-style.md) 顶部 |
 | **演示稿改名（D211）**（2026-11，✅ 已完成） | `docs/design/list-page-demo.html` → **`ui-demo.html`**（它早就不只是"列表页范例"：还有排版七条速查、三种错的样子、目录弹层）；同步脚本 `sync-list-demo.mjs` → **`sync-demo.mjs`**。全仓 60 处引用一次改完、`grep` 零残留，文件头写明"旧名字指的就是这一份"。`check` 2165 全绿、`probe:layout` 597 全绿、demo（新路径）24/24 + 8/8 | [`./srs/requirements.md`](./srs/requirements.md) §16 的 **D211** |
 | **死类名残留（D210）**（2026-11，✅ 已完成） | 使用者：「『浏览』被和编辑框分成了 2 行」。根因不是最近的排版改动，而是 **`.workdir-row` 在 D174 已并入 `.field-row`、规则删了但演示稿里还留着 3 处该类名** ⇒ 那几行退化成普通块（`<input>` 吃全局 `width:100%` 占满整行、按钮被挤到下一行）。实测改前 `输入宽 == 行宽`（铁证），改回 `.field-row` 后单行。新增判据「退场的类名不许再出现在标记里」（8 个退场类名双向校验：CSS 里确实没规则 + 标记里不许用），**扫范围必须含 `docs/`**（第一版漏了，变异验证没红）。`check` **2165 全绿**、`probe:layout` 597 全绿、demo 24/24 + 8/8 | [`./srs/requirements.md`](./srs/requirements.md) §16 的 **D210**；规则在 [`./design/ui-style.md`](./design/ui-style.md) §2.1.1.5 |
 | **Markdown 不设宽度上限（D209）**（2026-11，✅ 已完成） | 使用者报"聊天 agent 输出太窄 / 任务里 MD 太窄"，查下来同一根因：**D186 的 `--measure` 640px** 被加在 `.markdown`（全局）与 `.bubble.agent` 上。实测消息流 958 里气泡只有 640、`modal.wide`(≈1184) 里 markdown 只有 640。按使用者：「不用约束 MD 的宽度，如果需要换行，原文自己回车」⇒ 删掉这两处上限，`--measure` 只留给页头说明段。聊天气泡 **640 → 900**。判据反向同步（探针 `type.measure` + 演示第 ⑤ 条：从"被 640 挡住"改成"`max-width:none` 且等于所在栏内容盒"）。`check` 2164 全绿、`probe:layout` 597 全绿、demo 24/24 + 8/8 | [`./srs/requirements.md`](./srs/requirements.md) §16 的 **D209**；规则在 [`./design/ui-style.md`](./design/ui-style.md) §2.9.2 |
