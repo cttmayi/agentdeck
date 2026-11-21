@@ -190,8 +190,9 @@ describe('★★ 真跑一遍：内置成员齐了、owner/entries 写进了数�
   test('★ 编排引用了平台成员时要**点名**（只报不改）', async () => {
     await withStore(async (store) => {
       const warnings: string[] = []
-      // ⚠️ 编排**不在 store 里**（它是数据目录下的一个文件，由 `loadWorkflows` 读），
-      //    所以这里传一份数组进去，并断言它**一个字节都没被动过**——"只报不改"。
+      // ⚠️ 编排**不在 store 里**（它是数据目录下**自己的目录**，由 `loadWorkflows` 读：
+      //    `workflows/<id>/workflow.json` + `main.js`，D224），所以这里传一份数组进去，
+      //    并断言它**一个字节都没被动过**——"只报不改"。
       const workflows = [
         { name: '老编排', code: "await flow([agent('沉淀起草者')], '{{task}}')" },
       ]

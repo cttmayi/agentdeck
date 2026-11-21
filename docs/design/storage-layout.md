@@ -1,7 +1,7 @@
 # 落盘格式（存储地图）
 
 > 这份文档回答一件事：**东西到底存在哪个文件里、哪个文件说了算、能不能直接改**。
-> 讲的是"现在程序真会写出来的形状"，不是设想。凡是还没落地的（编排的目录化）单独标出。
+> 讲的是"现在程序真会写出来的形状"，不是设想。还没落地的功能会在对应小节末尾单独标出（今天只有编排内建智能体）。
 >
 > 相关文档：[`architecture.md`](./architecture.md) §5（存储端口与适配器）、
 [`agent-directory.md`](./agent-directory.md)（智能体目录化的设计与理由）、
@@ -55,8 +55,8 @@
 ├── workspaces.jsonl              workspace 记录（全局，量小）
 ├── agents/<agentId>/             ★ 一个智能体 = 一个目录（§3）
 ├── memory/<agentId>/MEMORY.md    记忆的**人可读镜像**；`memory/` 整个根是一个 git 仓库
-├── workflows.json                编排定义（**将改成目录**，§6）
-├── workflow-runs.json            编排运行记录（同上）
+├── workflows/<workflowId>/       ★ 一条编排 = 一个目录（§6）：workflow.json + main.js
+├── workflow-runs/<runId>.json    编排运行记录：一条运行一个文件
 ├── schedules.json                定时任务
 ├── claude-config/                claude 的受管配置目录（D78，§9）
 ├── codex-config/                 codex 的受管 CODEX_HOME（§9）
@@ -181,54 +181,48 @@
 
 ---
 
-## 6. 编排 —— 现状 vs 目标
-
-### 6.1 现状（本文写作时的代码）
-
-```
-~/.agentdeck/data/workflows.json        全部编排定义，一个数组（真机上 1 条 / 848 B）
-~/.agentdeck/data/workflow-runs.json    全部运行记录，一个数组（真机上 23 条 / 47 KB，每步 prompt 全文在内）
-```
-
-每条编排的形状（`apps/daemon/src/workflows.ts` 的 `Workflow`）：
-`id` / `workspaceId` / `name` / `code`（**代码就存在 json 字符串里**）/ `source` /
-`templateKey` / `inlineAgents`（**死字段，永远是 `[]`**）/ `createdAt` / `updatedAt`。
-
-写入是**整文件**原子替换（tmp + rename）；读取失败时 `catch { return [] }`——
-**一个坏字节 = 编排页全空，而且不说原因**。运行记录同理，23 条挤在一个文件里。
-
-### 6.2 目标形状（与智能体同形，已定，代码未迁）
+## 6. 编排 —— `workflows/<id>/`（D224，2026-11 已落地）
 
 ```
 ~/.agentdeck/data/workflows/<workflowId>/
-├── workflow.json        结构化（id / name / source / templateKey / 时间）——**不含代码**
-├── main.js              编排代码本体（纯文本）——与 instructions.md 同一个角色
-└── agents/<agentId>/    编排内建智能体（只在编排里有效），**与 agents/<id>/ 同形**
-    ├── agent.json       name / runtimeKey / skillIds …（不含指令）
-    └── instructions.md  它的话
+├── workflow.json     结构化（id / name / source / templateKey / inlineAgents / 时间）——**不含代码**
+└── main.js           编排代码本体（纯文本）——与 instructions.md 同一个角色
 
-~/.agentdeck/data/workflow-runs/<runId>.json    一条运行一个文件（**兄弟目录**，不进编排目录）
+~/.agentdeck/data/workflow-runs/<runId>.json    一条运行一个文件
 ```
 
-| 智能体（现在就有） | 编排（目标） | 作用 |
+**改了之前是什么**：`workflows.json` / `workflow-runs.json` 各是一个大数组（真机上 1 条 /
+848 B 与 23 条 / 47 KB），整文件原子替换；读失败是 `catch { return [] }`——
+**一个坏字节 = 编排页全空，而且日志里一个字都没有**。
+
+| 智能体 | 编排 | 作用 |
 |---|---|---|
 | `agents/<id>/agent.json`（不含正文） | `workflows/<id>/workflow.json`（不含代码） | 机器读的结构化信息 |
 | `agents/<id>/instructions.md` | `workflows/<id>/main.js` | 人读的正文，磁盘为准 |
-| `agents/<id>/SKILL/<slug>/` | `workflows/<id>/agents/<agentId>/` | 一条一个目录 |
 
-三条照抄过来的纪律：**正文不塞进 json**；**读写只有一处**（新建 `workflows-dirs.ts`，
-形状照 `agent-dirs.ts`，复用 `fs-utils` 的 `atomicWrite` / `ensureDir` /
-`readJsonOrNull` / `removeQuietly`）；**坏文件要说话**（逐条读、逐条报，坏的那条点名，
-其余照常——而不是整页变空）。
+三条随之而来的行为（都在 `apps/daemon/src/workflows-dirs.ts`）：
 
-**运行记录为什么放兄弟目录**：`DELETE /api/workflows/:id` 现在只删定义、保留历史。
-若把运行记录挂在编排目录下面，删一条编排就把它 23 条运行历史一起埋了——那是**行为改变**，
-不是存储搬家。
+1. **写**：`saveWorkflow()` 写这一条的两份文件（都原子写）；`saveWorkflowRun(run)` 只写
+   **这条运行**的那个文件——引擎每步都会 persist 一次，以前每次都重写全部 23 条。
+2. **读**：**逐条读、逐条报**。`workflow.json` 坏掉 ⇒ 那一条跳过 + 报错误，其余照常；
+   `main.js` **缺了** ⇒ 那一条**照样列出**（代码为空）+ 报错误——"元数据在、代码丢了"
+   必须让使用者看见（列出来他才知道该把代码贴回去），而不是让编排悄悄从页面上消失。
+   启动日志把迁移条数与每一条错误都打出来（`info` / `warn`）。
+3. **删**：`DELETE /api/workflows/:id` 删的是**定义目录**；运行记录在**另一棵目录**，
+   刻意不跟着删（任务页里那条 issue 还指着它的运行记录）。
 
-**迁移**：老 `workflows.json` / `workflow-runs.json` 一次性拆进目录，原文件改名
-`.migrated` 保留（可回滚）；再跑不重复（幂等）；启动日志点名迁了几条。
+**迁移**（`migrateLegacyWorkflows` / `migrateLegacyWorkflowRuns`，启动时自动跑一次）：
+老文件里的每条落成目录（目录已存在就跳过），然后把老文件改名 `.migrated`（已存在就带时间戳）
+**留档不删**——回滚只需发旧版代码 + 改回原名。老文件是坏 JSON ⇒ **报错、不改名、不删**
+（迁移不许掩盖坏数据）。幂等：跑完就没有原名文件了，再跑直接返回 `null`。
 
----
+> 实测（真数据的一份拷贝）：1 条编排 + 23 条运行 → `workflows/01M7DP…/` 一个目录
+> （`workflow.json` 无 code、`main.js` 339 字）+ `workflow-runs/` 23 个文件；
+> 老文件变 `workflows.json.migrated` / `workflow-runs.json.migrated`；第二次跑 `migrated: null`。
+
+**还没做**：编排内建智能体（`Workflow.inlineAgents`，现在恒为 `[]`）。它落地时按
+`agents/<id>/` 的形状在编排目录里加 `agents/<agentId>/{agent.json,instructions.md}`——
+**现在不建空目录**（那叫造死结构）。
 
 ## 7. run、消息流、会话
 
@@ -340,7 +334,7 @@ skill、`~/.claude.json` 的 `mcpServers` 会拉起 npx/浏览器，天然在任
 | `agent.json` 不含指令、`instructions.md` 存组装前正文、缺文件不炸 | `packages/store-file/src/agent-dirs.test.ts` |
 | 技能正文落盘、`skillsRoot` 落点、覆盖安装清空旧支持文件、拒绝越界路径 | `packages/store-file/src/file-store.test.ts`、`apps/daemon/src/skills-install.test.ts`、`apps/daemon/src/skill-exec-check.test.ts` |
 | 日志 append-only、patch 绝对赋值、compact 顺序 | `packages/store-file/src/file-store.test.ts` |
-| 编排的存储与运行记录（现状：单文件；迁移后：目录） | `apps/daemon/src/workflows.test.ts`、`template-e2e.test.ts`、`startup-reconcile.test.ts` |
+| 编排的目录形状、逐条报错、缺 `main.js` 仍列出、老文件迁移与幂等、删除只删定义 | `apps/daemon/src/workflows.test.ts`；端上另有 `template-e2e.test.ts`、`startup-reconcile.test.ts` |
 | 记忆目录化与镜像 | `apps/daemon/src/{memory,memory-files}.test.ts` |
 | 注入的归属清单（`.agentdeck-managed.json`） | `packages/agent-core/src/skill-injection.test.ts` |
 | 测试不许写进真实家目录 | `tests/test-safety.test.ts`（禁 `tmpdir()`、禁对危险目录递归删） |

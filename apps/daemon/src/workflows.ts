@@ -6,10 +6,12 @@
  * 本模块做四件事：类型、存储、引擎状态机、原语定义
  * ══════════════════════════════════════════════════════════════════
  *
- * · 存储是**独立 JSON 文件**（`<dataDir>/workflows.json`），不进 domain 的 store：
- *   编排是 daemon 的"外挂功能"——每步的 run 全部走既有链路（submitRunRequest /
- *   issue / 审核），它自己只是"把几个组串起来跑"的计划，不值得为此动
+ * · 存储是**自己的目录**（`<dataDir>/workflows/<id>/` + `<dataDir>/workflow-runs/<runId>.json`），
+ *   不进 domain 的 store：编排是 daemon 的"外挂功能"——每步的 run 全部走既有链路
+ *   （submitRunRequest / issue），它自己只是"把几步串起来跑"的计划，不值得为此动
  *   protocol/domain/store 协议层（判据与 D34 同一句：能不动的层就不动）。
+ *   ⚠️ 2026-11（D224）：原来是 `workflows.json` / `workflow-runs.json` 两个大数组文件，
+ *   现在改成一实体一目录（形状见 `workflows-dirs.ts` 头注释）——一条坏掉不再毁掉全部。
  *
  * · 引擎是**代码重跑 + 步骤幂等**：
  *   编排代码被包进一个 async 函数（注入原语）执行；每个原语调用按顺序登记一个
@@ -25,10 +27,23 @@
  *   只能"用已配置的组跑"，不能开放代码执行入口。
  */
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
-import type { RunId, WorkspaceId } from '@agentdeck/protocol'
+import type { WorkspaceId } from '@agentdeck/protocol'
 import type { WorkflowRun, WorkflowStep } from '@agentdeck/orchestration'
+import {
+  legacyWorkflowRunsPath,
+  legacyWorkflowsPath,
+  listWorkflowDirs,
+  listWorkflowRunFiles,
+  migrateLegacyWorkflowRuns,
+  migrateLegacyWorkflows,
+  removeWorkflowDir,
+  writeWorkflowDir,
+  writeWorkflowRunFile,
+  workflowsRoot,
+  workflowDirPath,
+  workflowRunPath,
+  workflowRunsRoot,
+} from './workflows-dirs.ts'
 
 /* ══════════════════════════════════════════════════════════════════
  * 类型
@@ -206,61 +221,70 @@ await gate('可以发布了吗')`.trimEnd(),
 ]
 
 /* ══════════════════════════════════════════════════════════════════
- * 存储（独立 JSON，仿 schedules.json）
+ * 存储（一实体一目录——落盘形状在 `workflows-dirs.ts`）
  * ══════════════════════════════════════════════════════════════════ */
 
-/** 存储路径（`<dataDir>/workflows.json`）。 */
-export function workflowsPath(dir: string): string {
-  return join(dir, 'workflows.json')
+/*
+ * 下面这一组是**读写的门面**：server 只认这五个名字，形状全在 `workflows-dirs.ts`。
+ *
+ * 为什么读要返回 `{ …, errors }` 而不是直接给数组：2026-11 之前是
+ * `catch { return [] }`——一个坏文件让编排页变空，而日志里一个字都没有。
+ * 现在**逐条读、逐条报**：坏的那条点名，其余照常（使用者的编排不会因为邻居坏了而消失）。
+ */
+
+/** 读全部编排（顺带把老的 `workflows.json` 迁成目录，幂等）。 */
+export async function loadWorkflows(dir: string): Promise<{
+  workflows: Workflow[]
+  errors: string[]
+  migrated: { migrated: number; skipped: number; errors: string[] } | null
+}> {
+  const migrated = await migrateLegacyWorkflows(dir)
+  const { workflows, errors } = await listWorkflowDirs(dir)
+  return { workflows, errors, migrated }
 }
 
-/** 读编排列表；没有文件（从没建过）= 空数组；坏 JSON = 空数组（不炸）。 */
-export async function loadWorkflows(dir: string): Promise<Workflow[]> {
-  try {
-    const raw = await readFile(workflowsPath(dir), 'utf8')
-    const parsed = JSON.parse(raw) as Workflow[]
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
+/** 写一条编排（`workflow.json` + `main.js`，两份都原子写）。 */
+export async function saveWorkflow(dir: string, workflow: Workflow): Promise<void> {
+  await writeWorkflowDir(dir, workflow)
 }
 
-/** 原子写（先写临时文件再 rename，仿 schedules.ts）。 */
-export async function saveWorkflows(dir: string, list: readonly Workflow[]): Promise<void> {
-  const path = workflowsPath(dir)
-  await mkdir(dirname(path), { recursive: true })
-  // ⚠️ tmp 名带随机后缀：并发写（编排引擎里 persist 可能在多处 await 交错）
-  // 时，两个同毫秒的 Date.now() 会撞名——先 rename 的移走源文件，后者 ENOENT。
-  const tmp = `${path}.tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  await writeFile(tmp, JSON.stringify(list, null, 2), 'utf8')
-  await rename(tmp, path)
+/** 删一条编排（整个目录，含代码）。运行记录**不删**——历史是历史。 */
+export async function removeWorkflow(dir: string, id: string): Promise<void> {
+  await removeWorkflowDir(dir, id)
 }
 
-/** 运行实例的存储路径（`<dataDir>/workflow-runs.json`）。 */
-export function workflowRunsPath(dir: string): string {
-  return join(dir, 'workflow-runs.json')
+/** 读全部运行记录（顺带把老的 `workflow-runs.json` 迁成目录，幂等）。 */
+export async function loadWorkflowRuns(dir: string): Promise<{
+  runs: WorkflowRun[]
+  errors: string[]
+  migrated: { migrated: number; skipped: number; errors: string[] } | null
+}> {
+  const migrated = await migrateLegacyWorkflowRuns(dir)
+  const { runs, errors } = await listWorkflowRunFiles(dir)
+  return { runs, errors, migrated }
 }
 
-/** 读运行实例列表（幂等存储：引擎每步 persist 一次，挂 issue 的索引也在这）。 */
-export async function loadWorkflowRuns(dir: string): Promise<WorkflowRun[]> {
-  try {
-    const raw = await readFile(workflowRunsPath(dir), 'utf8')
-    const parsed = JSON.parse(raw) as WorkflowRun[]
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
+/**
+ * 写**一条**运行记录。
+ *
+ * 为什么是"一条"而不是"整表"：引擎每步都会 persist 一次。以前每次都是把**全部**运行
+ * （真机上 23 条 / 47 KB）重写一遍；现在是它自己那个文件（几 KB 以内），
+ * 而且一条坏掉不会牵连别的运行。
+ */
+export async function saveWorkflowRun(dir: string, run: WorkflowRun): Promise<void> {
+  await writeWorkflowRunFile(dir, run)
 }
 
-export async function saveWorkflowRuns(dir: string, list: readonly WorkflowRun[]): Promise<void> {
-  const path = workflowRunsPath(dir)
-  await mkdir(dirname(path), { recursive: true })
-  // ⚠️ tmp 名带随机后缀：并发写（编排引擎里 persist 可能在多处 await 交错）
-  // 时，两个同毫秒的 Date.now() 会撞名——先 rename 的移走源文件，后者 ENOENT。
-  const tmp = `${path}.tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  await writeFile(tmp, JSON.stringify(list, null, 2), 'utf8')
-  await rename(tmp, path)
+/** 落盘路径（给启动日志与测试用；别在别处自己拼路径）。 */
+export {
+  legacyWorkflowsPath,
+  legacyWorkflowRunsPath,
+  workflowsRoot,
+  workflowDirPath,
+  workflowRunPath,
+  workflowRunsRoot,
 }
+
 /* ══════════════════════════════════════════════════════════════════
  * 审核前置判据（纯函数——server 用、单测直接量）
  * ══════════════════════════════════════════════════════════════════ */

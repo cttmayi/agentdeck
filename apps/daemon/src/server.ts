@@ -91,8 +91,10 @@ import {
   executeWorkflow,
   loadWorkflowRuns,
   loadWorkflows,
-  saveWorkflowRuns,
-  saveWorkflows,
+  removeWorkflow,
+  saveWorkflow,
+  saveWorkflowRun,
+  workflowsRoot,
   type EngineHooks,
   type Workflow,
   type GateVerdict,
@@ -1364,14 +1366,43 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   // ══════════════════════════════════════════════════════════════════
   // ── 编排（2026-11，使用者立项）──
   // ══════════════════════════════════════════════════════════════════
-  // 存储是独立 JSON（`<dataDir>/workflows.json` / `workflow-runs.json`），
-  // 不进 domain store——判据写在 `workflows.ts` 顶部。内存数组是唯一权威
-  // （routes 与引擎都改它，每次变更落盘一次）。
-  const workflows: Workflow[] = await loadWorkflows(options.dataDir)
-  const workflowRuns: WorkflowRun[] = await loadWorkflowRuns(options.dataDir)
+  // ★ 2026-11（D224）：存储改成**一实体一目录**（`<dataDir>/workflows/<id>/` +
+  //   `<dataDir>/workflow-runs/<runId>.json`），形状见 `workflows-dirs.ts`；不进
+  //   domain store——判据写在 `workflows.ts` 顶部。内存数组仍是运行期的唯一权威
+  //   （routes 与引擎都改它），但落盘是**逐条**写：改哪条写哪条。
+  const wfLoaded = await loadWorkflows(options.dataDir)
+  const workflows: Workflow[] = wfLoaded.workflows
+  const wrLoaded = await loadWorkflowRuns(options.dataDir)
+  const workflowRuns: WorkflowRun[] = wrLoaded.runs
 
-  async function persistWorkflowRuns(): Promise<void> {
-    await saveWorkflowRuns(options.dataDir, workflowRuns)
+  /*
+   * 迁移与读盘的问题**要说出来**（这是这一轮改存储的一半目的）：以前的
+   * `catch { return [] }` 让"一个坏文件"表现为"编排页是空的"，日志里什么都没有。
+   * 现在启动时逐条报，使用者/我们能知道是哪一条坏了、迁了几条。
+   */
+  if (wfLoaded.migrated) {
+    const m = wfLoaded.migrated
+    info(
+      `编排存储已迁移到目录形状：${m.migrated} 条迁入 ${workflowsRoot(options.dataDir)}` +
+        (m.skipped > 0 ? `，${m.skipped} 条目录里已有（跳过）` : '') +
+        '；老文件改名为 `.migrated` 留档',
+    )
+    for (const e of m.errors) warn(`编排迁移：${e}`)
+  }
+  if (wrLoaded.migrated) {
+    const m = wrLoaded.migrated
+    info(
+      `编排运行记录已迁移到目录形状：${m.migrated} 条` +
+        (m.skipped > 0 ? `，${m.skipped} 条已有（跳过）` : ''),
+    )
+    for (const e of m.errors) warn(`运行记录迁移：${e}`)
+  }
+  for (const e of wfLoaded.errors) warn(`编排读取：${e}`)
+  for (const e of wrLoaded.errors) warn(`运行记录读取：${e}`)
+
+  /** 落盘一条运行记录（引擎每步会调它——只写这一条的那个文件）。 */
+  async function persistWorkflowRun(run: WorkflowRun): Promise<void> {
+    await saveWorkflowRun(options.dataDir, run)
   }
   function workflowById(id: string): Workflow | undefined {
     return workflows.find((w) => w.id === id)
@@ -2458,7 +2489,7 @@ async function injectedSkillsOf(
           if (!wf) {
             run.status = 'failed'
             run.error = '编排不存在或已被删除'
-            await persistWorkflowRuns()
+            await persistWorkflowRun(run)
             return
           }
           /*
@@ -2600,8 +2631,14 @@ async function injectedSkillsOf(
           }
 
           const hooks: EngineHooks = {
-            persist: async () => {
-              await persistWorkflowRuns()
+            /*
+             * ⚠️ 引擎每步都调它一次（步骤状态变化）。以前这里是把**全部**运行
+             *   重写一遍（真机上 23 条 / 47 KB）；现在只写这条 run 自己的文件。
+             *   它传进来的 `r` 就是当前 run，用它的引用而不是闭包里那个——
+             *   两者是同一个对象，但按签名走更不容易在将来的重构里跑偏。
+             */
+            persist: async (r) => {
+              await persistWorkflowRun(r)
             },
             waitIfPaused: () =>
               run.status === 'paused'
@@ -2626,7 +2663,7 @@ async function injectedSkillsOf(
                 await store.transitionIssue(issue.id, issue.status, 'done')
               }
             }
-            await persistWorkflowRuns()
+            await persistWorkflowRun(finished)
           }).catch((err: unknown) => {
             // ⚠️ 不能让它变成 unhandled rejection——Node 会直接打崩进程（实测踩过）。
             warn(`编排运行收尾失败：${String(err)}`)
@@ -5248,7 +5285,8 @@ async function injectedSkillsOf(
         updatedAt: now,
       }
       workflows.push(wf)
-      await saveWorkflows(options.dataDir, workflows)
+      // ★ D224：落盘是**这一条**（`workflows/<id>/workflow.json` + `main.js`）
+      await saveWorkflow(options.dataDir, wf)
       sendJson(res, 201, { workflow: wf })
       return
     }
@@ -5272,7 +5310,7 @@ async function injectedSkillsOf(
       if (typeof body.name === 'string' && body.name.trim() !== '') wf.name = body.name.trim()
       if (typeof body.code === 'string' && body.code !== '') wf.code = body.code
       wf.updatedAt = Date.now()
-      await saveWorkflows(options.dataDir, workflows)
+      await saveWorkflow(options.dataDir, wf)
       sendJson(res, 200, { workflow: wf })
       return
     }
@@ -5282,8 +5320,13 @@ async function injectedSkillsOf(
         sendJson(res, 404, { error: '编排不存在', code: 'workflow_not_found' })
         return
       }
-      workflows.splice(idx, 1)
-      await saveWorkflows(options.dataDir, workflows)
+      const [gone] = workflows.splice(idx, 1)
+      /*
+       * 删的只有**定义目录**（`workflows/<id>/`）。运行记录是**另一棵目录**
+       * （`workflow-runs/<runId>.json`）——刻意不跟着删：历史是历史，而且
+       * 任务页里那条 issue 还指着它的运行记录（`Tasks.svelte` 按 issueId 反查）。
+       */
+      if (gone) await removeWorkflow(options.dataDir, gone.id)
       sendJson(res, 200, { ok: true })
       return
     }
@@ -5327,7 +5370,7 @@ async function injectedSkillsOf(
         updatedAt: now,
       }
       workflowRuns.push(run)
-      await persistWorkflowRuns()
+      await persistWorkflowRun(run)
       // 后台执行（不 await——请求立即返回；前端轮询 run 状态看进度）
       void launchWorkflowRun(run)
       sendJson(res, 201, { run, issueId: issue.id })
@@ -5364,7 +5407,7 @@ async function injectedSkillsOf(
         }
         run.status = 'paused'
         run.updatedAt = Date.now()
-        await persistWorkflowRuns()
+        await persistWorkflowRun(run)
         sendJson(res, 200, { ok: true, run })
         return
       }
@@ -5375,7 +5418,7 @@ async function injectedSkillsOf(
         }
         run.status = 'running'
         run.updatedAt = Date.now()
-        await persistWorkflowRuns()
+        await persistWorkflowRun(run)
         // 放行引擎（步骤边界的 waitIfPaused 挂起在这里被解除）
         for (const resolve of resumeWaiters) resolve()
         resumeWaiters.clear()
@@ -5395,7 +5438,7 @@ async function injectedSkillsOf(
         gateStep.finishedAt = Date.now()
         run.status = 'running'
         run.updatedAt = Date.now()
-        await persistWorkflowRuns()
+        await persistWorkflowRun(run)
         const release = gateWaiters.get(run.id)
         if (release) {
           gateWaiters.delete(run.id)
@@ -5424,7 +5467,7 @@ async function injectedSkillsOf(
         run.gateFeedback = feedback
         run.status = 'running'
         run.updatedAt = Date.now()
-        await persistWorkflowRuns()
+        await persistWorkflowRun(run)
         const release = gateWaiters.get(run.id)
         if (release) {
           gateWaiters.delete(run.id)
@@ -5449,7 +5492,7 @@ async function injectedSkillsOf(
         run.status = 'running'
         run.error = null
         run.updatedAt = Date.now()
-        await persistWorkflowRuns()
+        await persistWorkflowRun(run)
         void launchWorkflowRun(run)
         sendJson(res, 200, { ok: true, run })
         return
@@ -8195,7 +8238,7 @@ async function injectedSkillsOf(
         updatedAt: Date.now(),
       }
       workflows.push(wf)
-      await saveWorkflows(options.dataDir, workflows)
+      await saveWorkflow(options.dataDir, wf as Workflow)
       sendJson(res, 201, { workflow: wf, unverifiable: check.unverifiable })
       return
     }

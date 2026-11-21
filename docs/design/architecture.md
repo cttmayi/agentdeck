@@ -455,6 +455,13 @@ proposed ──┬──▶ auto_approved ──▶ executing ──┬──▶
 ├── lock                    单实例锁（"不存在才创建"，陈旧锁可接管）
 ├── device.json             本机 device 标识
 ├── workspaces.jsonl        workspace 记录（全局，量小）
+├── agents/<agentId>/       ★ 一个智能体 = 一个目录（D111）：agent.json + instructions.md + memory.jsonl + SKILL/
+├── memory/<agentId>/MEMORY.md  记忆的**人可读镜像**（`memory/` 整个根是 git 仓库；权威仍是 store）
+├── workflows/<workflowId>/ ★ 一条编排 = 一个目录（D224）：workflow.json + main.js
+├── workflow-runs/<runId>.json  编排运行记录（一条运行一个文件）
+├── schedules.json          定时任务
+├── claude-config/          claude 的受管配置目录（D78：`CLAUDE_CONFIG_DIR` 指过来）
+├── codex-config/           codex 的受管 `CODEX_HOME`
 ├── tool-tmp/               脚本动作的临时目录（每次执行一个子目录，跑完即删）
 └── workspaces/<workspaceId>/
     ├── blobs/<前两位>/<sha256>            内容寻址 blob
@@ -462,6 +469,9 @@ proposed ──┬──▶ auto_approved ──▶ executing ──┬──▶
     ├── log/<collection>.jsonl.snapshot    压缩后的物化快照
     └── runs/<runId>/messages.jsonl        这条 run 的消息流（带 seq）
 ```
+
+> **每个文件里放什么、谁说了算、能不能直接改**：见 [`storage-layout.md`](./storage-layout.md)
+> （智能体 / 技能 / 记忆 / 编排的落盘形状、写盘与迁移纪律、哪些集合已经退场但文件还在）。
 
 `<collection>` 共 **12** 个：`agent` / `skill` / `tool` / `issue` / `comment` / `run` /
 `report` / `verdict` / `action` / `artifact` / `audit` / `inbox`。
