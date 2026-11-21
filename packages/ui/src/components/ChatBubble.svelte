@@ -124,6 +124,10 @@
 
   .bubble.agent {
     background: var(--surface);
+    /* ★ D186：agent 的答复是"一段连续文字"⇒ 跟正文同一个行宽上限（`--measure`）。
+       气泡的底色跟着文字走（气泡宽度 = 内容宽度），所以看起来仍然是"这一段话"，
+       而不是"一条横贯整栏的色带 + 左边一截字"。用户气泡不动：它本来就有 85% 上限。 */
+    max-width: var(--measure);
   }
 
   .bubble.pending {

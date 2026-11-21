@@ -5989,6 +5989,31 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
              *   量"行高真的等于令牌那个数"，这样改 `--list-row-min-h` 时三页一起动，
              *   而不是某一页偷偷写了个 56px。
              */
+            /**
+             * ★★ D186：**一段连续文字的行宽上限**（`--measure` 40rem = 640px）。
+             *   量到的原样：宽屏下任务详情栏 1658px、正文一行 ≈ 115 个汉字。
+             *   这里量"正文真的被这个上限挡住"：往真实的 `.pane-body` 里插一个与
+             *   渲染器同构的 `.markdown` 宿主，量它的宽度与 `max-width`。
+             */
+            facts['type.measure'] = (() => {
+              const host = d().createElement('div')
+              host.className = 'markdown'
+              host.setAttribute('data-probe-measure', '')
+              host.textContent = '中文字符宽度取样，用来算一行能放多少字。'.repeat(40)
+              const body = d().querySelector('.detail-pane .pane-body') ?? d().body
+              body.appendChild(host)
+              const w = Math.round(host.getBoundingClientRect().width)
+              const maxW = cs(host).maxWidth
+              const fs = parseFloat(cs(host).fontSize)
+              host.remove()
+              return {
+                宽: w,
+                上限: maxW,
+                字号: `${fs}px`,
+                每行汉字: fs ? Math.round(w / fs) : null,
+                栏宽: Math.round((d().querySelector('.detail-pane')?.getBoundingClientRect().width ?? 0)),
+              }
+            })()
             facts['density.listRow'] = (() => {
               const rows = [...d().querySelectorAll('.list-row')].slice(0, 4)
               if (!rows.length) return null

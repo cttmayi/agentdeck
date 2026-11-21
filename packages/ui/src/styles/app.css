@@ -119,6 +119,19 @@
    */
   --pad-cell: var(--sp-3);
   --pad-cell-head: var(--sp-2) var(--sp-3);
+
+  /**
+   * ★★ D186：**一段话的行宽上限**（`--measure`）。量到的样子：2200px 窗口下
+   *   任务详情栏 **1658px**、正文一行 ≈ **115 个汉字**——眼睛换行时会串行。
+   *   40rem = 640px ⇒ 14px 字下一个中文行约 **45 字**（西文约 90 个字符缩排处），
+   *   这是"一段连续文字"的舒适上限。
+   *
+   * ⚠️ 只管**连续成段的文字**（`.markdown` 正文、页头说明、agent 的气泡）；
+   *   不管表格 / 列表 / 卡片 / 表单——那些是"一排排东西"，宽度要跟栏走。
+   *   也不居中：正文列靠左，右侧留白由栏自己承担（居中会让"这段文字"看起来像
+   *   一个独立的东西，而它只是面板里的内容）。
+   */
+  --measure: 40rem;
   --radius: 8px;
   --radius-lg: 12px;
 
@@ -1727,6 +1740,8 @@ hr {
   margin: 0;
   color: var(--text-dim);
   font-size: var(--fs-sm);
+  /* ★ D186：说明段也是"一段连续文字"，跟着同一个行宽上限 */
+  max-width: var(--measure);
 }
 
 /* ══════════════ 控件 ══════════════ */
@@ -2768,6 +2783,8 @@ a > button { width: 100%; }
     font-size: var(--fs-base);
     line-height: 1.7;
     word-break: break-word;
+    /* ★ D186：一段连续文字的行宽上限（见 `--measure` 的注释） */
+    max-width: var(--measure);
   }
 
 .markdown h1,
