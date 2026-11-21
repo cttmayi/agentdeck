@@ -729,6 +729,11 @@ D186 量到「2200px 窗口下任务详情栏 1658px、正文一行约 115 个�
 
 - 列表栏的 `.pane-body` 横向只有 8px（`list-stack` 的行要贴边，行内自带 padding）；
 - 新建任务那一栏是 `.pane-body.create-body` + `.detail-head.create-head`（`padding: 0` 起手，左右留白统一由 `--create-pad-x` 一个变量给，理由写在 `Tasks.svelte` 里：那一栏要"提交栏横贯可滚区"）。
+  ⚠️ **D214 修的真 bug**：这个变量原来定义在 `.pane-body.create-body` 上，而**栏头是它的兄弟**——
+  自定义属性只沿子树继承，兄弟读不到 ⇒ `padding: … var(--create-pad-x) …` 整条声明在计算时被丢弃
+  ⇒ **栏头内距塌成 0**（实测 `0px/0px/0px/0px`、高 47px，而另外三个"新建"视图是 `16/24/12`、高 63px）。
+  现在定义在共同祖先 `.detail-pane:has(> .pane-body.create-body)` 上。教训：**一个 `var()` 只写在
+  声明里、却在别处定义，第一件要确认的事就是"定义点是不是它的祖先"**。
 
 判据：探针 `frame.paddingSame` —— 模态框的头/体/脚内距**与同页面板级逐条相等**（头与栏头相同、体竖 16、脚 12）。量的不是"各自等于某个数"，而是"同级真的同一套"。
 
@@ -788,7 +793,7 @@ D186 量到「2200px 窗口下任务详情栏 1658px、正文一行约 115 个�
 | 三栏壳 | `.shell` + `.topbar` / `.sidebar` / `.main` | 顶栏高度 `--topbar-h`、侧栏宽 `--sidebar-w` |
 | 列表 + 详情 | `.split-layout`（`.board` 看板 / `.with-detail` / `.with-artifact`） | 窄屏自动退成"列表 → 详情"两层 |
 | 列表栏 | `.pane`, `.pane-head`, `.pane-body`, `.pane-foot`, `.pane-actions` | 栏头不放标题（D64） |
-| 主区面板（设置这类） | `.main-panel` + `.main-panel-head`（`h2` + `.panel-back`）+ `.main-panel-body` + `.main-panel-foot`（分段用 `.drawer-section`） | **所有"整块换掉右栏"的面板都长这样**；设置**页**（`views/Settings.svelte`）的三张卡也是同一个壳（D174：原来是页面私有的 `.set-card` / `.set-block`，边框还误用填充档 `--surface-2`）。**主操作在这一族的底栏**（`.main-panel-foot`），栏头只放 ghost——见 §2.6.1.1「主操作放哪」 |
+| 主区面板（设置这类） | `.main-panel` + `.main-panel-head`（`h2` + `.panel-back`）+ `.main-panel-body` + `.main-panel-foot`（分段用 `.drawer-section`） | **所有"整块换掉右栏"的面板都长这样**："设置"三处（`WorkspaceSettings` / `ChatSettings` / `CrystallizeSettings`）+ **「新建智能体」**（D214 才补上——之前它是一个裸表单，进来不知道自己在哪、也没有回去的出口）。统一走共享外壳 `SettingsPanel`。设置**页**（`views/Settings.svelte`）的三张卡也是同一个壳（D174）。**主操作在这一族的底栏**（`.main-panel-foot`），栏头只放 ghost——见 §2.6.1.1「主操作放哪」 |
 | 目录选择 | 组件 `DirPicker`（「浏览…」打开它，`bind:open` + `bind:value` 与表单输入框同一个值） | 路径行 + 导航行 + 列表（目录可进、文件只作佐证）+ 底部「选这个目录」；输入框始终留着，手打永远可用。**不要**自己再搭一个目录弹层 |
 | 详情头 | `.detail-head` + `.detail-sub` + `.detail-actions`（**主操作在栏头**，见 §2.6.1.1） | 动作按钮 ≥2 个时自动画分组轨道。所有「标题 + 元信息 + 动作」的头都用它（聊天栏头 313 批已并入，不要再自己写 flex 补丁） |
 | 加载 | `.skeleton`（单行 1.1rem）/ `.skeleton.skeleton--block`（一块 4rem） | 只有两档形状、宽度 100%、**不许内联尺寸**；叠两行自动留距（见 §2.8.2） |
@@ -817,6 +822,12 @@ D174 归位的三件（代码里还看到就是没迁移完）：
   两页卡片网格用全局 `.card-grid`——见 §2.9.1）；
 - 一行并排的**控件行**一律 `.field-row`（不要再写 `.voice-row` / `.proxy-row` / `.workdir-row`，
   也不要内联 `display:flex;gap`）。
+
+D214 归位的一件：
+- **「新建智能体」也走 `SettingsPanel`**（与三个设置面板**同一份**头/体/底）。原来它是
+  `MainArea` 正文里的一个裸 `<form class="agent-form">`：没有标题、没有返回、主操作在表单底部
+  ——而 `ui-style.md` §2.4 对"整块换掉右栏"的面板早就有规矩。判据：探针 `template.panelHead`
+  （标题 / 返回 / 内距 16/24/12 必须逐条成立）+ `heads.sweep`（四个"新建"视图的栏头内距都不许为 0）。
 
 D179 归位的两件：
 - 标题：四级 + 一档标签，字号只在 `app.css`（**组件不许写 `h2`/`h3`/`h4` 的 `font-size`**），

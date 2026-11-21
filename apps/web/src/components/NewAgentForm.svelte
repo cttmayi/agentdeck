@@ -3,6 +3,7 @@
   import type { ReviewStandard } from '../lib/api.ts'
   import { showToast } from '../lib/view.ts'
   import PromptField from './PromptField.svelte'
+  import SettingsPanel from './SettingsPanel.svelte'
   import { USER_ENTRY_CHOICES, USER_ENTRY_LABEL_KEYS, hasAnyEntry } from '../lib/members.ts'
   import { t, tx } from '../lib/i18n.ts'
 
@@ -166,10 +167,20 @@
 
 <!--
   ══════════════════════════════════════════════════════════════════
-  ★ 2026-10（与智能体详情页同款布局）：没有 hero 头——进来就是表单卡片，
-  主操作（创建 / 取消）在底部 `.form-actions`。
+  ★★ 2026-11（D214，使用者：「新建智能体 就没有行头」）：**这一页原来没有栏头**。
+
+  它是"整块换掉右栏"的面板，而 `ui-style.md` §2.4 对这种面板的规矩是固定的：
+  `.main-panel` + 头（`h2` + 返回）+ 体 + 底栏，**主操作在底栏**——两个设置面板
+  （`WorkspaceSettings` / `ChatSettings` / `CrystallizeSettings`）早就这样了，
+  只有新建智能体是一个"裸表单"，进来不知道自己在哪、也没有"回哪去"的出口。
+
+  现在它套进共享外壳 `SettingsPanel`（与设置面板**同一份**头/体/底），
+  按钮用 `form="new-agent-form"` 关联到体内那个 `<form>`（HTML 原生做法，
+  底栏在 form 元素外面也能提交）。
   ══════════════════════════════════════════════════════════════════
 -->
+<SettingsPanel title={$t('agents.newTitle')} onback={onclose} ariaLabel={$t('agents.newTitle')}>
+  {#snippet body()}
 <form onsubmit={submit} class="agent-form" id="new-agent-form">
   {#if error}
     <!-- ★ 与其它页面的保存失败同一呈现（`.notice bad`） -->
@@ -293,23 +304,26 @@
       -->
     </section>
 
-  <!-- 主操作在底部（与组页同款）：创建 / 取消 -->
-  <div class="form-actions">
+</form>
+  {/snippet}
+  {#snippet foot()}
     <!--
       ★ 2026-11（D146）：`!hasAnyEntry(...)` 与"名字空"同一档——都只是**挡住提交**，
          理由分别写在各自那一格下面（不是弹一个笼统的错误）。
+      ★ D214：底栏与 `.main-panel-foot` 同族 ⇒ 主操作（创建）在这里，取消在它旁边；
+         `form="new-agent-form"` 把它关联到体内那个表单（点它等于 submit 那个 form）。
     -->
     <button
       type="submit"
+      form="new-agent-form"
       class="btn btn--primary"
       disabled={busy || !name.trim() || !hasAnyEntry(selectedEntries)}
     >
       {busy ? $t('common.creating') : $t('common.create')}
     </button>
     <button type="button" class="btn btn--ghost" onclick={onclose}>{$t('common.cancel')}</button>
-  </div>
-
-</form>
+  {/snippet}
+</SettingsPanel>
 
 <style>
   .agent-form {
@@ -319,12 +333,6 @@
     gap: var(--sp-4);
   }
 
-  /* 主操作在底部（与组页同款） */
-  .form-actions {
-    display: flex;
-    gap: var(--sp-2);
-    align-items: center;
-  }
 
 /**
    * ⚠️ 这里曾经有一个 `max-width: 46rem`：它在 416px 宽的 flex 行里不会收缩，
@@ -341,12 +349,6 @@
     box-sizing: border-box;
   }
 
-  /* 主操作在底部（与组页同款） */
-  .form-actions {
-    display: flex;
-    gap: var(--sp-2);
-    align-items: center;
-  }
 
 
   /**

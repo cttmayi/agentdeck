@@ -1342,20 +1342,29 @@ import ListRow from '../components/ListRow.svelte'
      双类选择器特异性升到 (0,2,0)，与出现顺序无关地稳压。 */
   :global(.pane-body.create-body) {
     padding: 0;
-    /**
-     * ★ 这一栏的左右留白**只有一个出处**：`--create-pad-x`。
-     *
-     * 三个地方读它：这一栏的标题（下面）、表单的 `.form-frame`（它自带留白）、
-     * 以及提交栏那两个负外边距（要抵消掉同一份留白才横贯整栏）。自定义属性会继承，
-     * 所以表单里读得到——而"三处各写一份 var(--sp-6)"就是三个会漂移的常量：
-     * 我第一版在窄屏那条断点里只改了两处，提交栏比容器宽 32px、整张表单横向溢出。
-     */
+  }
+
+  /**
+   * ★ 这一栏的左右留白**只有一个出处**：`--create-pad-x`。
+   *
+   * 三个地方读它：栏头（`.detail-head.create-head`）、表单的 `.form-frame`、
+   * 以及提交栏那两个负外边距（要抵消掉同一份留白才横贯整栏）。
+   *
+   * ⚠️⚠️ **D214：这个变量原来定义在 `.pane-body.create-body` 上，而栏头是它的兄弟**
+   *   ——自定义属性只沿**子树**继承，兄弟读不到 ⇒ `.detail-head.create-head` 里那句
+   *   `padding: … var(--create-pad-x) …` 变成"无效值"，整条声明在计算时被丢弃，
+   *   **栏头内距塌成 0**（实测 `0px/0px/0px/0px`，标题贴着栏边；而其它三个"新建"
+   *   视图都是 16/24/12）。
+   *   现在定义在**共同祖先** `.detail-pane` 上（用 `:has()` 定位到"这一栏正在新建"），
+   *   栏头与正文同时继承到同一个值，断点也只改一处。
+   */
+  :global(.detail-pane:has(> .pane-body.create-body)) {
     --create-pad-x: var(--sp-6);
   }
 
   /* 与 `.main` 同一条断点、同一个值（窄窗口下平台各处都收一档留白） */
   @media (width < 60rem) {
-    :global(.pane-body.create-body) {
+    :global(.detail-pane:has(> .pane-body.create-body)) {
       --create-pad-x: var(--sp-4);
     }
   }

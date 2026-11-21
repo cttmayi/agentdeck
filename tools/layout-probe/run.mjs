@@ -3551,11 +3551,25 @@ const CHECKS = [
   },
   {
     view: '新建表单 / 设置',
-    key: 'template.detailHeadHeight',
-    label: '★ 右栏**栏头**没有被表单撑开（有栏头时量到 < 200px；这一页的右栏本来就没有栏头'
-      + '——页名在顶栏一字不差——那时如实记 null 并算通过，不假装量到一个 0）',
-    ok: (v) => v === null || (typeof v === 'number' && v < 200),
-    show: (v) => (v === null ? '这一页右栏没有栏头（如实记 null）' : `${v}px`),
+    key: 'template.panelHead',
+    /**
+     * ★★ D214（使用者：「新建智能体 就没有行头」）：**这一页必须是有栏头的面板**。
+     *
+     * 原来这条允许 `null`——因为那时右栏真的没有栏头，只有一个裸表单：进来不知道
+     * 自己在哪、也没有"回哪去"的出口。而 `ui-style.md` §2.4 对"整块换掉右栏"的面板
+     * 规矩是固定的（`.main-panel` + 头 + 体 + 底栏，主操作在底栏）。现在改成必须量到：
+     * 标题 = 新建智能体、有「← 返回」、内距 = 16/24/12、高度 < 200（没被撑开）。
+     */
+    label: '★★ 新建智能体**有栏头**（面板头：标题 + 返回 + 内距 16/24/12），不是裸表单',
+    ok: (v) =>
+      v !== null &&
+      v['标题'] === '新建智能体' &&
+      typeof v['返回'] === 'string' &&
+      v['返回'] !== '' &&
+      v['内距'] === '16px/24px/12px/24px' &&
+      typeof v['高'] === 'number' &&
+      v['高'] < 200,
+    show: (v) => (v === null ? '没有面板头（裸表单）' : `${String(v['标题'])} · 返回「${String(v['返回'])}」 · 内距 ${String(v['内距'])} · 高 ${String(v['高'])}px`),
   },
   {
     view: '新建表单 / 设置',
@@ -3575,7 +3589,12 @@ const CHECKS = [
     label: '主操作常驻在视口内（表单长也不用先滚到底）',
     ok: (v) => v === true,
   },
-  { view: '新建表单 / 设置', key: 'template.footPrimaryLabel', label: '底部主操作是「创建」', ok: (v) => v === '创建' },
+  {
+    view: '新建表单 / 设置',
+    key: 'template.footPrimaryLabel',
+    label: '★★ 主操作在**面板底栏**且是「创建」（D214 起与两个设置面板同一套骨架）',
+    ok: (v) => v === '创建',
+  },
   {
     view: '新建表单 / 设置',
     key: 'template.formEntryOptions',
@@ -4618,6 +4637,20 @@ const CHECKS = [
     show: (v) =>
       `${v.pages.join(' ')} · 见到的字形/字号：${Object.keys(v.seen).join(' ')}` +
       (v.unexpected.length ? ` · ✗ 不统一 ${v.unexpected.slice(0, 5).join(' ')}` : ''),
+  },
+  {
+    key: 'heads.sweep',
+    /**
+     * ★★ D214：**每个"换掉右栏"的视图都量到了栏头，且内距不为 0**。
+     *
+     * 抓的是"整条 padding 被静默丢弃"这一类：`Tasks` 的新建议视图里
+     * `padding: … var(--create-pad-x) …` 而那个变量定义在**兄弟**元素上 ⇒ 取不到值
+     * ⇒ 整条声明失效 ⇒ 栏头内距塌成 0（标题贴栏边）。四个"新建"视图一起量：
+     * 允许面板级 `16/24/12`，或「新建任务」那一档 `16/32/0`（文档写明的例外）。
+     */
+    label: '★★ 四个"新建"视图的栏头内距都不为 0（面板级 16/24/12，或新建任务的 16/32/0）',
+    ok: (v) => !!v && Array.isArray(v.bad) && v.bad.length === 0 && Array.isArray(v.seen) && v.seen.length >= 3,
+    show: (v) => (v ? `${v.seen.join(' · ')}` + (v.bad.length ? ` · ✗ ${v.bad.join('；')}` : '') : '没量到'),
   },
   {
     key: 'focus.rings',

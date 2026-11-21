@@ -220,6 +220,31 @@
     }
 
       /**
+       * ★★ D214：**每个"换掉右栏"的视图都得有栏头，且栏头内距不能是 0**。
+       *
+       * 为什么单独量这一条：`Tasks` 的「新建任务」用 `--create-pad-x` 给左右留白，
+       * 而那个变量原来定义在 `.pane-body.create-body` 上——**栏头是它的兄弟**，
+       * 自定义属性不跨兄弟继承 ⇒ `padding: … var(--create-pad-x) …` 变成无效值、
+       * 整条声明被丢弃 ⇒ **栏头内距塌成 0**（实测 0/0/0/0，标题贴着栏边，
+       * 而另外三个"新建"视图都是 16/24/12）。这类"整条声明被静默丢弃"的错，
+       * 读样式表看不出来，只有量 computed 才会露。
+       */
+      function sweepHead(label) {
+        const doc = d()
+        const acc = facts['heads.sweep'] ?? { seen: [], bad: [] }
+        const head = doc.querySelector('.detail-pane .detail-head, .detail-pane .main-panel-head')
+        if (!head) return
+        const c = f.contentWindow.getComputedStyle(head)
+        const pad = [c.paddingTop, c.paddingRight, c.paddingBottom, c.paddingLeft].join('/')
+        const h = Math.round(head.getBoundingClientRect().height)
+        acc.seen.push(`${label}=${pad}·${String(h)}px`)
+        // 面板级 16/24/12，或「新建任务」那一档 16/32/0（文档里写明的例外）
+        const ok = pad === '16px/24px/12px/24px' || pad === '16px/32px/0px/32px'
+        if (!ok || h < 50) acc.bad.push(`${label}：内距 ${pad}、高 ${String(h)}px`)
+        facts['heads.sweep'] = acc
+      }
+
+      /**
        * ★★ D203：**字符图标（▸ ▾ ⋯ × ✓ ✗ ⚠）字号只有一档**（`--fs-sm` = 13px），
        *   只有"行内动作里那个 ×"登记为 17px（它是 28px 格子里唯一的内容）。
        *
@@ -2762,6 +2787,7 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
           const ntRowsBeside = d().querySelectorAll('.list-pane .task-row').length
           const ntListVisible = cs(d().querySelector('.list-pane')).display !== 'none'
           facts['tasks.createActionReachesForm'] = reached
+          sweepHead('新建任务')
           facts['tasks.createKeepsListBeside'] = reached && ntListVisible && ntRowsBeside > 0
           facts['tasks.createPaneFormPresent'] = !!d().querySelector(
             '.detail-pane .create-body .newtask-form',
@@ -3997,6 +4023,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           return true
         })()
 
+        sweepHead('新建定时任务')
         facts['schedules.cancelCloses'] = await (async () => {
           const cancel = [...d().querySelectorAll('.detail-pane button')].find(
             (b) => text(b) === '取消',
@@ -4410,6 +4437,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         })()
 
         // ② 栏头带：**计数 + 搜索**，**没有标题**（D61~D66；页名已经在顶栏）
+        sweepHead('新建编排')
         facts['workflows.listHead'] = (() => {
           const head = d().querySelector('.list-pane .pane-head')
           if (!head) return null
@@ -4862,6 +4890,12 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           // 表单的根是 `#new-agent-form.agent-form`（钉一个 id：这一页有编辑态的表单，
           // 按 class 认会匹到另一个）
           const ntForm = () => d().querySelector('#new-agent-form')
+          /**
+           * ★★ D214：这一页现在是**共享外壳 `SettingsPanel`**（`.main-panel`：头 + 体 + 底栏）。
+           * ⚠️ 这个 helper 必须定义在**本块最前面**：它被 `formFillsPane` 等**更早**的片段用，
+           *    放后面会踩 TDZ（`Cannot access 'agentPanel' before initialization`，踩过两次）。
+           */
+          const agentPanel = () => d().querySelector('[data-settings-panel]')
           facts['template.formOpened'] = await until(() => !!ntForm(), 60)
           await wait(400)
           const form = ntForm()
@@ -4903,11 +4937,19 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           facts['template.formWidthPx'] = formBox ? Math.round(formBox.w) : null
           // ★ 与**编辑态同一个宽度**：填满右栏正文（不是某个固定抽屉宽度 416/480）
           facts['template.formFillsPane'] = (() => {
-            const pane = mainPane()
-            const body = pane && pane.querySelector('.pane-body')
+            /**
+             * ★ D214：表单现在住在 `.main-panel-body` 里（面板有头/体/底）⇒ 比的是
+             *   "表单 = 面板正文的内容盒"，不是"表单 = 整个 pane-body"。
+             *   拿 pane-body 比会永远差一圈内距（实测 0.87，判据要求 ≥0.90 ⇒ 假红）。
+             */
+            const body = agentPanel()?.querySelector('.main-panel-body') ?? mainPane()?.querySelector('.pane-body')
             if (!formBox || !body) return null
-            const w = box(body)
-            return w && w.w > 0 ? formBox.w / w.w : null
+            const bs = f.contentWindow.getComputedStyle(body)
+            const w =
+              body.clientWidth -
+              parseFloat(bs.paddingLeft || '0') -
+              parseFloat(bs.paddingRight || '0')
+            return w > 0 ? formBox.w / w : null
           })()
           facts['template.formOverflowX'] = form ? form.scrollWidth - form.clientWidth : null
           // ★ 第一件事是**选角色**（执行者 / 审核者）——新建表单的核心问题
@@ -4923,27 +4965,50 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             ? (text(form) ?? '').includes('智能体组')
             : null
           // ★ 底部主操作：是「创建」，而且**常驻视口内**（表单长也不用先滚到底）
+          /**
+           * ★★ D214（使用者：「新建智能体 就没有行头」）：**这一页现在是有栏头的面板**。
+           *   骨架 = 共享外壳 `SettingsPanel`（`.main-panel` + 头 + 体 + 底栏），
+           *   主操作（创建）在**底栏**，与两个设置面板同一套。
+           *   ⇒ 下面三条从"在原表单里找 .form-actions"改成"在面板底栏里找"。
+           */
+          facts['template.panelHead'] = (() => {
+            const panel = agentPanel()
+            if (!panel) return null
+            const head = panel.querySelector('.main-panel-head')
+            if (!head) return null
+            const h = getComputedStyle(head)
+            return {
+              标题: text(head.querySelector('h2')),
+              返回: text(head.querySelector('.panel-back')),
+              内距: [h.paddingTop, h.paddingRight, h.paddingBottom, h.paddingLeft].join('/'),
+              高: Math.round(head.getBoundingClientRect().height),
+            }
+          })()
           facts['template.footPrimaryLabel'] = need('底部主操作', () =>
-            text(form.querySelector('.form-actions button[type=submit]')),
+            text(agentPanel()?.querySelector('.main-panel-foot button[type=submit]')),
           )
-          facts['template.footSecondaryLabel'] = form
-            ? text([...form.querySelectorAll('.form-actions button')].find((b) => b.type === 'button'))
-            : null
+          facts['template.footSecondaryLabel'] = (() => {
+            const btns = agentPanel()?.querySelectorAll('.main-panel-foot button') ?? []
+            return text([...btns].find((b) => b.textContent.trim() !== '' && b.getAttribute('type') === 'button'))
+          })()
           facts['template.footVisible'] = (() => {
-            const foot = form && form.querySelector('.form-actions button')
+            const foot = agentPanel()?.querySelector('.main-panel-foot button')
             if (!foot) return false
             const r = foot.getBoundingClientRect()
             return r.top >= 0 && r.bottom <= f.contentWindow.innerHeight + 1
           })()
           facts['template.formHasNoTemplateField'] = !(form && form.querySelector('.tpl-text'))
+          sweepHead('新建智能体')
           // ★★★ 开表单**不许**动顶栏与侧边栏（2026-09 那次事故：表单被渲染进栏头，
           //   栏头从 167px 被撑到 1070px，整垮主从布局——那时这条是靠"抽屉是浮层"
           //   守住的；现在表单就住在正文里，所以改成直接量那两块有没有动）
           facts['template.chromeStaysPut'] = chromeSnapshot() === chromeBefore
-          // ⚠️ 这一页的右栏**没有栏头**（没有标题：页名在顶栏一字不差）⇒ 如实记 null，
-          //    别记 0（0 会被读成"量到了、高度是 0"，那是**假通过**）
+          /**
+           * ★ 2026-11（D214）：这一页**原来没有栏头**（只有顶栏页名）；现在它是 `.main-panel`，
+           *   所以这条改量面板头——记 null 等于"没量到"，判据会红，正好挡住回退。
+           */
           facts['template.detailHeadHeight'] = (() => {
-            const head = d().querySelector('.detail-head, .detail-pane .pane-head')
+            const head = agentPanel()?.querySelector('.main-panel-head')
             return head ? Math.round(box(head).h) : null
           })()
 
@@ -4981,8 +5046,16 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           })()
 
           // Esc 关掉（抽屉由 Drawer 组件统一处理）——表单在正文里，走自己的「取消」
-          const ntCancel = form
-            ? [...form.querySelectorAll('.form-actions button')].find((b) => b.type === 'button')
+          /**
+           * ★ D214：取消在**面板底栏**（`.main-panel-foot`），不在表单里了。
+           * ⚠️ 这一段在 `agentPanel` 那个 `const` **之前**执行（TDZ：Cannot access
+           *   'agentPanel' before initialization）⇒ 这里自己查，别复用后面的变量。
+           */
+          const cancelPanel = d().querySelector('[data-settings-panel]')
+          const ntCancel = cancelPanel
+            ? [...cancelPanel.querySelectorAll('.main-panel-foot button')].find(
+                (b) => b.getAttribute('type') === 'button',
+              )
             : null
           if (ntCancel) {
             click(ntCancel)
