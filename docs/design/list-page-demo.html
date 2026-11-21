@@ -4164,7 +4164,7 @@ a > button { width: 100%; }
             ruleBad.length === 0
               ? '<b>排版七条自检通过 ' + ruleChecks.length + '/' + ruleChecks.length + '</b>：' +
                 '控件同高、面板与浮层内距逐条相等、表格紧凑档、并排两列一条规则、' +
-                '正文档 14px + 行宽 640px、主操作一个长相、设置页层级两档（现状同值 / 候选差 2px）。'
+                '正文档 14px + 行宽 640px、主操作一个长相、标题三档 17/15/13 两两差 2px。'
               : '<b>排版七条自检未通过（' + ruleBad.length + ' 项）</b>：' + ruleBad.join('、')
         }
         const bad = checks.filter(([, ok]) => !ok).map(([name]) => name)
