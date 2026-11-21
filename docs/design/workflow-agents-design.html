@@ -12,10 +12,16 @@
       2026-11 设计稿：把 **编排内建智能体**（D234 的存储与接口都已落地，界面还没有
       落点）画成看得见的样子，供拍板用。
 
-      一句话方案：**在编排详情右栏、代码编辑器下面加一节「本编排的智能体」**——
-      列表 + 就地编辑（名字 / 指令 / 技能）。它不是新页面、不是新抽屉：内建智能体
-      与编排代码是**同一份定义**（就住在 `workflows/<id>/agents/<名字>/` 里），
-      "改代码"和"配它用谁"本来就该在同一屏。
+      方案（使用者拍板"编辑要像设置那样跳过去、还能返回"）：
+
+        · **列表**在编排详情右栏、代码编辑器下面（一节「本编排的智能体」）；
+        · **编辑**跳到**独立视图**（地址 `#/workflows/agents/<编排id>/<智能体id|new>`），
+          栏头「← 返回编排」，与「运行画面」同一个做法（跳过去、能返回、刷新还在、
+          地址能分享）。
+
+      为什么不就地展开：编辑要放得下**指令**（多行）与**技能多选**，挤在代码编辑器
+      下面会变成一列很长的窄条；而"跳过去 + 一步返回"既给足了宽度，又不丢上下文
+      （返回回到**同一条**编排的详情）。
 
       ⚠️ 这是设计稿，不是产品页面。下面第一段 <style> 是从 app.css 逐字嵌入的
       （`tests/ui-style.test.ts` 盯着两段逐字相同），第二段是 ListPane/ListRow 的
@@ -3307,9 +3313,9 @@ a > button { width: 100%; }
     <div class="doc">
       <h2>2. 界面（1:1）——屏 ①：详情 + 这一节（有两条内建智能体）</h2>
       <p class="faint fs-xs">
-        左栏 / 栏头 / 动作 / 代码编辑器都是**今天的样子**，下面那一节是新增的。
-        注意：代码里的 <code class="mono">agent('写作员')</code> 与这一节里的行是同一样东西——
-        名字对得上，所以配完不用去别处"挂载"。
+        左栏 / 栏头 / 动作 / 代码编辑器都是**今天的样子**，下面那一节是新增的（它只是**列表**：
+        点「编辑」会跳到独立视图——见屏 ②）。代码里的 <code class="mono">agent('写作员')</code>
+        与这一节里的行是同一样东西：名字对得上，所以配完不用去别处"挂载"。
       </p>
       <div class="mock-frame">
         <div class="split-layout with-detail">
@@ -3406,132 +3412,75 @@ a > button { width: 100%; }
             </section>
           </div>
         </div>
-      <h2>3. 屏 ②：就地编辑一条（含"与智能体页同名"的提示与重名错误）</h2>
+      <h2>3. 屏 ②：点「编辑」⇒ <b>跳到编辑页</b>（不是就地展开），栏头有「← 返回编排」</h2>
       <p class="faint fs-xs">
-        点「编辑」⇒ 这一行展开成表单（**不跳页、不弹框**）。名字改了目录会跟着搬
-        （D232 同一套做法），所以输入框旁边只说清"它现在叫什么"；与智能体页同名时
-        才会多出一句——那句是**条件出现**的，不是常驻说明文字。
+        编辑是一条**独立视图**（地址 <code class="mono">#/workflows/agents/&lt;编排id&gt;/&lt;智能体id｜new&gt;</code>），
+        与「运行画面」同一个做法：跳过去、能返回、刷新还在、地址能分享。
+        这样编辑时有一整栏放指令与技能（不用挤在代码编辑器下面），而返回是一步（回到**同一条**编排的详情）。
       </p>
       <div class="mock-frame">
-        <div class="split-layout with-detail">
+        <div class="pane detail-pane" style="height:100%">
+          <header class="detail-head">
+            <div class="detail-head-main">
+              <!-- 返回按钮**常驻**：这一页是把编排详情整块换掉的（不是主从布局），
+                   所以不能用 `.back-to-list`（它在宽屏是 display:none）——与运行画面
+                   同一个做法：`btn btn--ghost`，放在标题上方（栏头仍是"标题 | 动作"两列）。 -->
+              <p class="detail-sub" style="margin:0 0 var(--sp-1)">
+                <button type="button" class="btn btn--ghost">← 返回编排</button>
+              </p>
+              <h2>审稿员</h2>
+              <p class="detail-sub">
+                <span class="badge">本编排的智能体</span>
+                <span class="faint">周报流水线</span>
+              </p>
+            </div>
+            <div class="detail-actions">
+              <button type="button" class="btn btn--danger">删除</button>
+              <button type="button" class="btn btn--primary">保存</button>
+            </div>
+          </header>
+          <div class="pane-body detail-scroll">
 
-            <section class="pane list-pane">
-              <div class="pane-head list-toolbar">
-                <span class="faint fs-xs">3 个编排</span>
-                <input placeholder="搜索编排" autocomplete="off" style="max-width:16rem;align-self:center" />
-              </div>
-              <div class="pane-body">
-                <ul class="list-stack">
-                  <li class="list-row active">
-                    <button type="button" class="list-row-main">
-                      <span class="wf-title ellipsis" style="font-weight:600">周报流水线</span>
-                      <span class="faint fs-xs">手动 · 5 分钟前</span>
-                    </button>
-                  </li>
-                  <li class="list-row">
-                    <button type="button" class="list-row-main">
-                      <span class="wf-title ellipsis" style="font-weight:600">写完自动复查</span>
-                      <span class="faint fs-xs">手动 · 2 小时前</span>
-                    </button>
-                  </li>
-                  <li class="list-row">
-                    <button type="button" class="list-row-main">
-                      <span class="wf-title ellipsis" style="font-weight:600">并行调研</span>
-                      <span class="faint fs-xs">我的模板 · 昨天</span>
-                    </button>
-                  </li>
-                </ul>
-              </div>
-            </section>
-            <!-- 列表与详情之间的把手：真页面由 `paneResize` 动作插进网格第 2 列，
-                 设计稿里照原样写一个（少了它详情会掉进那一列，被压成 6px 宽） -->
-            <button type="button" class="split-grip" role="separator" aria-orientation="vertical" aria-label="拖拽调整列表宽度"></button>
-            <section class="pane detail-pane">
+            <div class="field">
+              <label for="ag-name-edit">名字</label>
+              <input id="ag-name-edit" value="审稿员" autocomplete="off" />
+              <p class="hint fs-xs">智能体页里也有叫「审稿员」的——代码里写这个名字时用的是这一条。</p>
+            </div>
 
-            <header class="detail-head">
-              <!-- 窄屏（<72rem）才出现的返回按钮（真页面由 MainArea 渲染）：设计稿里放着，
-                   宽屏看不见、窄屏才显形——与产品同一份 CSS -->
-              <button type="button" class="btn btn--ghost btn--sm back-to-list">← 返回列表</button>
-              <div class="detail-head-main">
-                <h2>周报流水线</h2>
-                <p class="detail-sub"><span class="badge">手动</span><span class="faint">5 分钟前</span></p>
-              </div>
-              <div class="detail-actions">
-                <button type="button" class="btn btn--secondary">运行</button>
-                <button type="button" class="btn btn--danger">删除</button>
-                <button type="button" class="btn btn--primary">保存</button>
-              </div>
-            </header>
+            <div class="field">
+              <label for="ag-ins-edit">指令</label>
+              <textarea id="ag-ins-edit" rows="8" spellcheck="false">你是这个编排的审稿人：只看三件事——事实有没有来源、结论有没有代价、下一步能不能直接执行。按这三条逐段挑，别重写。</textarea>
+            </div>
 
-              <div class="pane-body detail-scroll">
-                <div class="fold-section" data-mock="wf-agents-editing">
-                  <button type="button" class="fold-head" aria-expanded="true">
-                    <span class="chevron">▾</span>
-                    <span class="fold-title">本编排的智能体</span>
-                    <span class="badge">2</span>
-                    <span class="fold-summary">写作员、审稿员</span>
-                  </button>
-                  <div class="fold-body">
-                    <div class="ag-row">
-                      <span class="ag-name">写作员</span>
-                      <span class="badge">3 个技能</span>
-                      <span class="ag-actions">
-                        <button type="button" class="btn btn--secondary btn--sm">编辑</button>
-                        <button type="button" class="btn btn--danger btn--sm">删除</button>
-                      </span>
-                    </div>
-
-                    <!-- 展开的表单 -->
-                    <div class="panel" style="margin-top:var(--sp-1);padding:var(--sp-3);border:1px solid var(--line-strong);border-radius:var(--radius)">
-                      <div class="field">
-                        <label for="ag-name-edit">名字</label>
-                        <input id="ag-name-edit" value="审稿员" autocomplete="off" />
-                        <p class="hint fs-xs">智能体页里也有叫「审稿员」的——代码里写这个名字时用的是这一条。</p>
-                      </div>
-                      <div class="field">
-                        <label for="ag-ins-edit">指令</label>
-                        <textarea id="ag-ins-edit" rows="6" spellcheck="false">你是这个编排的审稿人：只看三件事——事实有没有来源、结论有没有代价、下一步能不能直接执行。按这三条逐段挑，别重写。</textarea>
-                      </div>
-                      <div class="field">
-                        <label>技能（技能库）</label>
-                        <div class="field-row" style="flex-wrap:wrap;gap:var(--sp-2)">
-                          <label class="field-row" style="gap:var(--sp-1)"><input type="checkbox" checked /> <span class="fs-xs mono">technical-writing-style</span></label>
-                          <label class="field-row" style="gap:var(--sp-1)"><input type="checkbox" checked /> <span class="fs-xs mono">research-and-write-article</span></label>
-                          <label class="field-row" style="gap:var(--sp-1)"><input type="checkbox" /> <span class="fs-xs mono">build-verify-html</span></label>
-                        </div>
-                      </div>
-                      <div class="field">
-                        <label>它目录下的独有技能</label>
-                        <p class="faint fs-xs" style="margin:0">
-                          2 条：<code class="mono">weekly-shape</code>、<code class="mono">tone-check</code>
-                          —— <span class="faint">（这一期只读；写入口与技能页的独有技能同款，二期接）</span>
-                        </p>
-                      </div>
-                      <div class="notice bad" style="margin-top:var(--sp-2)">
-                        本编排里已经有叫「审稿员」的内建智能体了——换一个名字。
-                      </div>
-                      <div class="field-row" style="justify-content:flex-end;margin-top:var(--sp-3)">
-                        <button type="button" class="btn btn--secondary btn--sm">取消</button>
-                        <button type="button" class="btn btn--primary btn--sm">保存</button>
-                      </div>
-                    </div>
-                    <!-- /展开的表单 -->
-
-                    <div class="ag-row">
-                      <span class="ag-name">审稿员</span>
-                      <span class="badge">0 个技能</span>
-                      <span class="badge warn" title="智能体页里也有一条叫「审稿员」的。">遮蔽同名</span>
-                      <span class="ag-actions">
-                        <button type="button" class="btn btn--secondary btn--sm">编辑</button>
-                        <button type="button" class="btn btn--danger btn--sm">删除</button>
-                      </span>
-                    </div>
-                  </div>
-                </div>
+            <div class="field">
+              <label>技能（技能库）</label>
+              <div class="field-row" style="flex-wrap:wrap;gap:var(--sp-2)">
+                <label class="field-row" style="gap:var(--sp-1)"><input type="checkbox" checked /> <span class="fs-xs mono">technical-writing-style</span></label>
+                <label class="field-row" style="gap:var(--sp-1)"><input type="checkbox" checked /> <span class="fs-xs mono">research-and-write-article</span></label>
+                <label class="field-row" style="gap:var(--sp-1)"><input type="checkbox" /> <span class="fs-xs mono">build-verify-html</span></label>
               </div>
-            </section>
+            </div>
+
+            <div class="field">
+              <label>它目录下的独有技能</label>
+              <p class="faint fs-xs" style="margin:0">
+                2 条：<code class="mono">weekly-shape</code>、<code class="mono">tone-check</code>
+                —— <span class="faint">（这一期只读；写入口与技能页的独有技能同款，二期接）</span>
+              </p>
+            </div>
+
+            <div class="notice bad">
+              本编排里已经有叫「审稿员」的内建智能体了——换一个名字。
+            </div>
+
+            <div class="field">
+              <label>代码里怎么用它</label>
+              <pre class="code-mock"><span class="k">const</span> 终稿 = <span class="k">await</span> agent(<span class="s">'审稿员'</span>).run(<span class="s">'挑毛病：'</span> + 草稿)</pre>
+            </div>
+
           </div>
         </div>
+      </div>
       <h3>屏 ③：空态（一条都没有）</h3>
       <div class="mock-frame" style="height:16rem">
         <div class="split-layout with-detail">
@@ -3606,23 +3555,29 @@ a > button { width: 100%; }
         </div>
       </div>
 
-      <h2>4. 为什么是"右栏的一节"，不是新页面 / 抽屉</h2>
+      <h2>4. 落点：列表在右栏一节，编辑跳独立视图</h2>
       <div class="grid2">
-        <div class="panel win"><b>A. 右栏一节 <span class="tag new">推荐</span></b>
+        <div class="panel win"><b>列表：右栏一节（编排详情里） <span class="tag new">推荐</span></b>
           <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
-            内建智能体与编排代码是<b>同一份定义</b>（住在同一个目录里）。改代码与改"这一步谁干"
-            是同一件事的两面，放同一屏少一次记忆负担。零新路由、零新壳。
+            内建智能体与编排代码是<b>同一份定义</b>（住在同一个目录里）。改完代码抬头就看得见
+            "这条编排里有哪几个人"，零新路由成本。
           </p>
         </div>
-        <div class="panel"><b>B. 独立路由 <code class="mono">#/workflows/:id/agents</code></b>
+        <div class="panel win"><b>编辑：跳到独立视图 + 返回 <span class="tag new">你拍的</span></b>
           <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
-            好处是空间大（将来独有技能要文件树时用得上）。代价：多一条路由、多一次"我该去哪一页"，
-            而这一节今天只有三个字段。
+            一整栏放指令与技能多选；栏头「← 返回编排」一步回去，回到<b>同一条</b>编排
+            （选中的编排不丢）。与「运行画面」同一套机制（<code class="mono">view.ts</code> 的
+            地址 store），所以刷新还在、地址能发给别人。
           </p>
         </div>
-        <div class="panel"><b>C. 顶栏动作 → 居中对话框</b>
+        <div class="panel"><b>不做：居中对话框</b>
           <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
-            对话框遮住代码——而"我在改哪一行代码引用了谁"恰恰是配它的理由。列表 + 编辑塞进一个框也会很挤。
+            对话框遮住代码，而"我在改哪一行代码引用了谁"恰恰是配它的理由；技能多选塞进框里也挤。
+          </p>
+        </div>
+        <div class="panel"><b>不做：整个"编排智能体"做成独立页</b>
+          <p class="fs-xs faint" style="margin: var(--sp-1) 0 0">
+            侧栏多一个入口就要回答"这条编排有几个人"——而那个答案本可以就在编排页上。
           </p>
         </div>
       </div>
@@ -3634,25 +3589,28 @@ a > button { width: 100%; }
           <tbody>
             <tr><td>段头</td><td>标题 + 计数 + 摘要（名字用「、」连）；整行真按钮可折叠</td><td>「本编排的智能体」/「3」/「写作员、审稿员」</td></tr>
             <tr><td>空</td><td>一句说清"代码里写名字会去智能体页找"，下面是唯一的主操作</td><td>见屏 ③</td></tr>
-            <tr><td>新建</td><td>就地展开一张空表单（名字空、指令空、技能不勾）</td><td>「新建智能体」</td></tr>
+            <tr><td>新建 / 编辑</td><td>跳到独立视图（地址变成 <code class="mono">#/workflows/agents/&lt;编排id&gt;/…</code>）；新建是空表单</td><td>栏头「← 返回编排」+ 标题（名字或「新建智能体」）</td></tr>
+            <tr><td>返回</td><td>回**同一条**编排的详情（选中的编排不变、地址回到 <code class="mono">#/workflows</code>）</td><td>「← 返回编排」</td></tr>
             <tr><td>名字</td><td>本编排内唯一；<b>与智能体页同名允许</b>（内建优先）</td><td>与全局同名时补一句条件提示（见屏 ②）</td></tr>
-            <tr><td>重名</td><td>保存时被拒 ⇒ 表单里一条 <code class="mono">notice bad</code>，原话照给</td><td>「本编排里已经有叫「审稿员」的内建智能体了——换一个名字。」</td></tr>
+            <tr><td>重名</td><td>保存时被拒 ⇒ 编辑页里一条 <code class="mono">notice bad</code>，原话照给，<b>不跳走</b></td><td>「本编排里已经有叫「审稿员」的内建智能体了——换一个名字。」</td></tr>
             <tr><td>技能</td><td>技能库多选（<code class="mono">skillIds</code>）；独有技能只读显示名字与条数</td><td>一期只读，二期接写入口</td></tr>
-            <tr><td>保存</td><td>写盘（PATCH/POST 已有接口）⇒ 回到列表 + toast；改名时服务端搬目录</td><td>「已保存」</td></tr>
+            <tr><td>保存</td><td>写盘（PATCH/POST 已有接口）⇒ <b>返回编排详情</b> + toast；改名时服务端搬目录</td><td>「已保存」</td></tr>
             <tr><td>删除</td><td>居中确认框（<code class="mono">askConfirm</code>）；代码里还引用着时在框里点名</td><td>「删掉「审稿员」？代码里还在用这个名字的地方会失效。」</td></tr>
             <tr><td>遮蔽</td><td>与智能体页同名 ⇒ 行尾徽标，悬停说清用的是哪条</td><td>「遮蔽同名」</td></tr>
           </tbody>
         </table>
       </div>
 
-      <h2>6. 探针判据（草案，10 条）</h2>
+      <h2>6. 探针判据（草案，12 条）</h2>
       <div class="table-wrap">
         <table class="table">
           <thead><tr><th>#</th><th>量什么</th><th>钉住什么</th></tr></thead>
           <tbody>
             <tr><td>1</td><td>详情右栏有这一节，计数 == <code class="mono">GET /api/workflows/:id/agents</code> 的条数</td><td>界面的数字不是抄来的</td></tr>
             <tr><td>2</td><td>空态那句在，且「新建智能体」是这一节里唯一的主操作（折叠段头本身也是按钮，不算）</td><td>空态有落点</td></tr>
-            <tr><td>3</td><td>点「新建」⇒ 表单出现且名字框聚焦</td><td>就地编辑是真的</td></tr>
+            <tr><td>3</td><td>点「编辑」⇒ <b>地址</b>变成 <code class="mono">#/workflows/agents/…</code>、编辑视图在、名字框有值</td><td>是"跳过去"，不是就地展开</td></tr>
+            <tr><td>3b</td><td>点「← 返回编排」⇒ 回到<b>同一条编排</b>的详情（标题还是它），地址回到 <code class="mono">#/workflows</code></td><td>一步返回、上下文不丢</td></tr>
+            <tr><td>3c</td><td>在编辑页刷新 ⇒ 还是那一页（地址是唯一出处）</td><td>不是组件里的开关</td></tr>
             <tr><td>4</td><td>名字空时「保存」禁用；填上就可用</td><td>不给一个必然被拒的按钮</td></tr>
             <tr><td>5</td><td>保存后<b>接口上</b>真的多一条（不是只把行画出来）</td><td>界面跟着数据走</td></tr>
             <tr><td>6</td><td>本编排内重名 ⇒ 表单里出现那句原话，且接口条数不变</td><td>错误原文不被前端改写</td></tr>
@@ -3684,10 +3642,12 @@ a > button { width: 100%; }
           <thead><tr><th>#</th><th>做什么</th><th>落在哪</th></tr></thead>
           <tbody>
             <tr><td>1</td><td>接口：<code class="mono">POST/PATCH/DELETE /api/workflows/:id/agents[/:agentId]</code> 已经在了，前端只消费</td><td><code class="mono">apps/web/src/lib/api.ts</code></td></tr>
-            <tr><td>2</td><td>新组件 <code class="mono">WorkflowAgents.svelte</code>（列表 + 表单 + 确认框）</td><td><code class="mono">apps/web/src/components/</code></td></tr>
-            <tr><td>3</td><td>挂进编排详情右栏，代码编辑器下面</td><td><code class="mono">apps/web/src/views/Workflows.svelte</code></td></tr>
-            <tr><td>4</td><td>i18n 词条（<code class="mono">workflows.agents*</code>）</td><td><code class="mono">packages/i18n/src/web/workflows.ts</code></td></tr>
-            <tr><td>5</td><td>探针 10 条 + 夹具（两条内建，其中一条与全局同名）</td><td><code class="mono">tools/layout-probe/{probe.html,run.mjs}</code></td></tr>
+            <tr><td>2</td><td>新组件 <code class="mono">WorkflowAgents.svelte</code>（右栏那一节：列表 + 新建入口 + 删除确认）</td><td><code class="mono">apps/web/src/components/</code></td></tr>
+            <tr><td>3</td><td>新组件 <code class="mono">WorkflowAgentEditor.svelte</code>（跳过去那一页：名字/指令/技能 + 返回/保存/删除）</td><td><code class="mono">apps/web/src/components/</code></td></tr>
+            <tr><td>4</td><td>地址：<code class="mono">wfAgent</code> store + <code class="mono">parseHash</code> 认 <code class="mono">#/workflows/agents/&lt;wid&gt;/&lt;aid｜new&gt;</code>（与 <code class="mono">workflowRun</code> 同款）</td><td><code class="mono">apps/web/src/lib/view.ts</code></td></tr>
+            <tr><td>5</td><td>把那一节挂进编排详情右栏（代码编辑器下面），编辑页作为整页分支</td><td><code class="mono">apps/web/src/views/Workflows.svelte</code></td></tr>
+            <tr><td>6</td><td>i18n 词条（<code class="mono">workflows.agents*</code>）</td><td><code class="mono">packages/i18n/src/web/workflows.ts</code></td></tr>
+            <tr><td>7</td><td>探针 12 条 + 夹具（两条内建，其中一条与全局同名）</td><td><code class="mono">tools/layout-probe/{probe.html,run.mjs}</code></td></tr>
           </tbody>
         </table>
       </div>
