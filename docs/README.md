@@ -23,7 +23,7 @@
 | **一条 run 实际是怎么跑起来的**（命令行、注入、收尾） | [`./runtime/pipeline.md`](./runtime/pipeline.md) |
 | **skill 是什么、住在哪、怎么装**（来源、磁盘落点、注入、限额） | [`./reference/skills.md`](./reference/skills.md) |
 | ~~**工具包怎么开发、住在哪**~~ 🛑 **已退场（D123，2026-11）**：工具包与动作能力整个删掉了，那份手册只剩历史查询价值 | [`./reference/tools.md`](./reference/tools.md) |
-| **界面风格规则（控件类体系、字号/间距令牌、怎么加新控件）** | [`./design/ui-style.md`](./design/ui-style.md)（批 300 落地；**现状体检与迁移计划**在 [`./design/style-audit.md`](./design/style-audit.md)） |
+| **界面风格规则（控件类体系、字号/间距令牌、怎么加新控件）** | [`./design/ui-style.md`](./design/ui-style.md)（批 300 落地；**新建页面从文首「开工清单」十步开始**，看得见的那一半是 [`./design/ui-demo.html`](./design/ui-demo.html)；**现状体检与迁移计划**在 [`./design/style-audit.md`](./design/style-audit.md)） |
 | 端到端走查与边界情况 | [`./reference/scenarios.md`](./reference/scenarios.md) |
 | ~~**智能体组是怎么工作的**~~ 🛑 **已退场（D126，2026-11）**：智能体组整条删掉，那份手册只剩历史查询价值 | [`./reference/agent-group-workflow.md`](./reference/agent-group-workflow.md) |
 | **要装到 Windows 上跑 / 有人报"Windows 上跑不起来"** | [`./reference/windows-compat.md`](./reference/windows-compat.md)（先看「现在的状态」，再看「下一步」与「最小验收清单」） |
@@ -52,7 +52,7 @@
 | [`./reference/agent-group-workflow.md`](./reference/agent-group-workflow.md) | 🛑 **已退场（D126）**：原「工作流智能体组：它是怎么工作的」—— 组里装了什么、三步（执行 → 审核 → 行动）、建任务时怎么摊开成普通配置、判决怎么分流、**返工闭环**（交回同一执行者原地改）、行动与固定参数、几道边界、界面看到什么 | — |
 | [`./runtime/runtime-framework.md`](./runtime/runtime-framework.md) | **Runtime 抽象框架（当前实现）** —— AgentBackend 公共契约与 RuntimeDescriptor 数据表（都贴真代码）、claude 与 codex 两行对照、daemon 公共机器路径表、差异在哪、加第三个 runtime 的清单 | — |
 | [`runtime/codex-runtime-design.md`](runtime/codex-runtime-design.md) | **Codex 支持设计（app-server 形式）** —— 为什么用 app-server 而不是 `codex exec`、事实核查、`kind` 契约扩展、per-run 进程模型、包结构、描述表取值、未验证项清单（✅ 已接入真实 codex 0.144.0-alpha.4 与 0.157.1，证据等级 verified；实测与文档差异清单） | v2 |
-| [`./design/ui-style.md`](./design/ui-style.md) | **界面风格规则（规程，不是快照）** —— 令牌表与门槛、按钮族（重量×尺寸）、输入/徽标/页面骨架怎么拿类名、结构性控件清单、文案规则、**明说的例外**、加新控件的顺序。改界面之前读它；配套的静态护栏在 `tests/ui-style.test.ts` | — |
+| [`./design/ui-style.md`](./design/ui-style.md) | **界面风格规则（规程，不是快照）** —— **文首「开工清单」**（新建页面十步，含"跳步会怎样"）、令牌表与门槛、按钮族（重量×尺寸）、输入/徽标/页面骨架怎么拿类名、结构性控件清单、文案规则、**明说的例外**、加新控件的顺序。改界面之前读它；配套的静态护栏在 `tests/ui-style.test.ts`，跨页一致性在 `pnpm run probe:layout` | — |
 | [`./design/style-audit.md`](./design/style-audit.md) | **界面风格审计（2026-11 的快照）** —— 裸值/重复定义/未定义变量/按钮 class 组合的体检数字、逐条迁移记录、像素变更清单与分批计划。**规则去 `ui-style.md`，这里只讲"当初为什么这么改"** | 批 297–302 |
 | [`./design/platform-compat.md`](./design/platform-compat.md) | **平台兼容规则（规程，2026-11 Windows infra_error 事故后固化）** —— Windows ≠ macOS 的九条纪律（进程退出码只在进程自己退出时可信、收进程只有 `process-tree.ts` 一处、适配器不许读平台、路径分隔符/文件系统大小写/CRLF/环境变量/文件占用）、怎么新增平台分支、配套机器检查在 `tests/platform-compat.test.ts`。**现状审计去 `reference/windows-compat.md`，这里是规则** | — |
 | [`./design/skill-crystallization.md`](./design/skill-crystallization.md) | **聊天沉淀 skill 设计（chat-to-skill，已设计未实现）** —— 在 conversation 里把"这段做法"提炼成 SKILL.md 入库、可进化（覆盖 + git 版本管理）；触发双层（用户主动按钮 + 信号建议）、起草 run + 不结晶清单、审阅后入库、git 化自动 commit；调研依据（skilldistill / dsh-skill-evolution / skill-miner / Anthropic 官方）与实现范围六项 | 设计稿（D80） |
