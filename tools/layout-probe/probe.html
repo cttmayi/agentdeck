@@ -5929,6 +5929,29 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
              *   差 10px。这里量"同一行里真的同高"：工作目录那行的输入框与「浏览…」按钮、
              *   以及表单底栏的主按钮。
              */
+            /**
+             * ★★★ D183：**一级东西一套内距**。面板与浮层是同一级（都是"有头、有体、
+             *   有脚的一块"），改之前浮层头少一个"下 12"、体是 24/24（面板 16/24）。
+             *   这里量"浮层与面板的内距逐条相等"，不是各自等于某个数。
+             */
+            facts['frame.paddingSame'] = (() => {
+              const pad = (el) => {
+                if (!el) return null
+                const c = cs(el)
+                return {
+                  上: c.paddingTop, 右: c.paddingRight, 下: c.paddingBottom, 左: c.paddingLeft,
+                }
+              }
+              return {
+                模态头: pad(d().querySelector('.modal-head')),
+                模态体: pad(d().querySelector('.modal-body')),
+                模态脚: pad(d().querySelector('.modal-foot')),
+                // 同一页的"面板级"（任务详情的栏头 / 左侧列表栏的栏头）
+                // 面板级的样本取**列表栏头**（`.pane-head`）而不是详情栏头：详情栏这一栏
+                // 此刻装的是"新建任务"表单，它的头是 `.create-head`（表单头，另一档，见 §2.6）
+                面板头: pad(d().querySelector('.pane-head') ?? d().querySelector('.main-panel-head')),
+              }
+            })()
             facts['controls.rowSameHeight'] = (() => {
               const m = (el) => {
                 if (!el) return null

@@ -125,6 +125,23 @@
    */
   --ctl-h: 1.875rem;
   --rail-h: calc(var(--ctl-h) + 4px);
+
+  /**
+   * ★★ D183：**一级东西一套内距**。界面上只有四级：
+   *
+   *   ① 页面级（`.main`）：24 / 32（窄屏收到 16）
+   *   ② 面板级（栏头 / 面板 / 详情栏的头-体-脚）：16/24/12 · 16/24 · 12/24
+   *   ③ 浮层级（抽屉 / 模态的头-体-脚）：**同 ②**——它们本来就是同一级东西，
+   *      一块"有头、有体、有脚"的方块，只是浮在别的东西上面
+   *   ④ 行级（表格单元格 / 表单字段 / 列表行）：各自那条规则定，见 §2.4
+   *
+   * 量到的原样：浮层的头少一个"下 12"、体是 24/24（面板体是 16/16——同一级东西
+   * 两套数）。于是"同样一块带头的面板，浮起来之后行距就变了"。
+   */
+  --pad-page: var(--sp-5) var(--sp-6);
+  --pad-frame-head: var(--sp-4) var(--sp-5) var(--sp-3);
+  --pad-frame-body: var(--sp-4) var(--sp-5);
+  --pad-frame-foot: var(--sp-3) var(--sp-5);
   --radius: 8px;
   --radius-lg: 12px;
 
@@ -880,7 +897,7 @@ hr {
 
 .main {
   overflow-y: auto;
-  padding: var(--sp-5) var(--sp-6);
+  padding: var(--pad-page);
 }
 
 /**
@@ -1280,7 +1297,7 @@ hr {
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--sp-4);
-  padding: var(--sp-4) var(--sp-5) var(--sp-3);
+  padding: var(--pad-frame-head);
   border-bottom: 1px solid var(--line);
 }
 
@@ -1344,7 +1361,7 @@ hr {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--sp-4) var(--sp-5);
+  padding: var(--pad-frame-body);
 }
 
 /* 底部常驻（「继续沟通」）——不随内容滚走 */
@@ -1352,7 +1369,7 @@ hr {
   flex-shrink: 0;
   border-top: 1px solid var(--line);
   background: var(--surface);
-  padding: var(--sp-3) var(--sp-5);
+  padding: var(--pad-frame-foot);
 }
 
 /* ══════════════ 主区里的就地面板（`.main-panel`）══════════════
@@ -1390,7 +1407,7 @@ hr {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-4) var(--sp-5) var(--sp-3);
+  padding: var(--pad-frame-head);
   border-bottom: 1px solid var(--line);
 }
 
@@ -1402,7 +1419,7 @@ hr {
 }
 
 .main-panel-body {
-  padding: var(--sp-4) var(--sp-5);
+  padding: var(--pad-frame-body);
 }
 
 .main-panel-foot {
@@ -1411,7 +1428,7 @@ hr {
   gap: var(--sp-3);
   border-top: 1px solid var(--line);
   background: var(--surface-2);
-  padding: var(--sp-3) var(--sp-5);
+  padding: var(--pad-frame-foot);
 }
 
 /* 详情/建任务的栏头（D69.15 由 MainArea 渲染，scoped 样式打不进来，放这里）：
@@ -1431,7 +1448,7 @@ hr {
  * 窄屏的「返回」按钮仍独占第一行（它只在详情整页、没有左栏时出现）。
  */
 .detail-head {
-  padding: var(--sp-4) var(--sp-5) var(--sp-3);
+  padding: var(--pad-frame-head);
   border-bottom: 1px solid var(--line);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1659,6 +1676,11 @@ hr {
     grid-template-columns: minmax(0, 1fr) !important;
   }
 
+  /**
+   * ★ D183：窄屏的统一收法——**页面级从 24/32 收到 16**，面板级只收"左右"
+   *   （16/24/12 · 16/24 · 12/24 的横向 24 → 16），竖向不动（竖向再收会让栏头
+   *   和内容贴在一起，而横向才是真正被挤的那条边）。
+   */
   .main {
     padding: var(--sp-4);
   }
@@ -2529,7 +2551,7 @@ tbody tr:last-child td,
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
-  padding: var(--sp-4) var(--sp-5);
+  padding: var(--pad-frame-head);
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
 }
@@ -2537,7 +2559,7 @@ tbody tr:last-child td,
 .drawer-body {
   flex: 1;
   min-height: 0; /* 与 .pane-body 同一个理由：不写这句内部滚动会失效 */
-  padding: var(--sp-5);
+  padding: var(--pad-frame-body);
   overflow-y: auto;
 }
 
@@ -2550,7 +2572,7 @@ tbody tr:last-child td,
   gap: var(--sp-3);
   border-top: 1px solid var(--line);
   background: var(--surface-2);
-  padding: var(--sp-3) var(--sp-5);
+  padding: var(--pad-frame-foot);
 }
 
 /* ══════════════ 居中对话框 ══════════════
@@ -2589,7 +2611,7 @@ tbody tr:last-child td,
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--sp-3);
-  padding: var(--sp-4) var(--sp-5);
+  padding: var(--pad-frame-head);
   border-bottom: 1px solid var(--line);
 }
 
@@ -2613,7 +2635,7 @@ tbody tr:last-child td,
 .modal-body {
   flex: 1;
   min-height: 0; /* 与 .drawer-body 同一个理由：不写这句内部滚动会失效 */
-  padding: var(--sp-5);
+  padding: var(--pad-frame-body);
   overflow-y: auto;
 }
 
@@ -2625,7 +2647,7 @@ tbody tr:last-child td,
   gap: var(--sp-3);
   border-top: 1px solid var(--line);
   background: var(--surface-2);
-  padding: var(--sp-3) var(--sp-5);
+  padding: var(--pad-frame-foot);
   border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
 
