@@ -94,6 +94,21 @@ export const settingsText = {
 
   // ── 成本 ──
   'settings.costs': { zh: '成本', en: 'Costs' },
+  /*
+   * 日志占用 + 压缩（D227）。四个词条：占用（带一个大小参数）、按钮、按钮的
+   * "为什么"，以及按完之后的两句话（压了 / 没什么可压的）。
+   * ⚠️ 不写解释段落：「日志是 append-only、压缩会把历史折成快照」那种话属于
+   *    `docs/design/storage-layout.md`，界面上只需要"占多大 + 按一下"。
+   */
+  'settings.logUsage': { zh: '日志占用 {size}', en: 'Logs take {size}' },
+  'settings.compactLogs': { zh: '压缩', en: 'Compact' },
+  'settings.compacting': { zh: '压缩中…', en: 'Compacting…' },
+  'settings.compactHint': {
+    zh: '把日志里的历史折成当前状态的快照（只影响体积，不改任何数据）',
+    en: 'Fold log history into a current-state snapshot (size only — no data changes)',
+  },
+  'settings.compacted': { zh: '已压缩，省下 {size}', en: 'Compacted — freed {size}' },
+  'settings.compactNothing': { zh: '没有需要压缩的日志', en: 'Nothing to compact' },
   'settings.costsTotalBefore': { zh: '总计 ', en: 'Total ' },
   'settings.runsCount': { zh: '{count} 次执行', en: '{count} run(s)' },
   'settings.runsWithoutUsage': {

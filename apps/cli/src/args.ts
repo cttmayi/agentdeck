@@ -45,6 +45,8 @@ const USAGE = `agentdeck —— 命令行（需要本机 daemon 正在运行）
   audits-export [--run <id>]  导出审计（写到标准输出）
   skills                      列出技能
   agents                      列出 agent
+  storage                     日志占用（按集合，含快照）
+  compact                     压缩日志（把历史折成快照，只影响体积）
 
 选项：
       --daemon <url>          本机 daemon 地址（默认 ${DEFAULT_DAEMON_URL}）

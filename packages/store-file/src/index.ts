@@ -10,6 +10,7 @@ export {
   openFileStore,
   STORE_FORMAT_VERSION,
   type CompactionReport,
+  type LogStorageReport,
   type FileStoreOptions,
 } from './file-store.ts'
 export { JsonlLog, type LogEntry } from './log.ts'

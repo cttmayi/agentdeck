@@ -62,6 +62,18 @@ describe('★ 命令集的范围：不提供代码执行入口', () => {
     }
   })
 
+  test('★★ `compact` 是"只改体积"的动作：不需要位置参数，也不落任何业务写入', () => {
+    const spec = findCommand('compact')
+    assert.ok(spec, '要有 compact 命令')
+    assert.equal(spec.needsPositional, undefined, 'compact 不该要参数（没有"压哪一条"这种事）')
+    /*
+     * 判据的意图：压缩只把日志历史折成快照，**不改任何一条记录**。
+     * 在命令行这一侧能守的就是"它是个无参数动作 + 摘要里写明只影响体积"——
+     * 真正的行为判据在 `packages/store-file` 的 compactNow 用例里。
+     */
+    assert.match(spec.summary, /只影响体积/)
+  })
+
   test('★ 没有任何命令能写 skill 或改 agent 配置', () => {
     const names = COMMANDS.map((c) => c.name)
     for (const forbidden of ['skill-install', 'skill-write', 'agent-create', 'agent-update']) {
@@ -90,6 +102,8 @@ describe('★ 命令集的范围：不提供代码执行入口', () => {
       'inbox', // 通知
       'costs', // 成本
       'audits-export', // 审计导出
+      'storage', // 日志占用（D227）
+      'compact', // 压日志（D227）
     ]) {
       assert.ok(names.has(required), `缺少命令：${required}`)
     }

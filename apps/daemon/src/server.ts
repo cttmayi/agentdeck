@@ -2822,6 +2822,10 @@ async function injectedSkillsOf(
      * 判据与开库时同一套，所以"按一下"不会压本来不该压的集合；返回体把压了哪几个、
      * 省了多少、现存几条都报出来（界面暂时没有按钮，这是运维入口）。
      */
+    if (req.method === 'GET' && path === '/api/maintenance/storage') {
+      sendJson(res, 200, await store.logStorage())
+      return
+    }
     if (req.method === 'POST' && path === '/api/maintenance/compact') {
       const compacted = await store.compactNow()
       sendJson(res, 200, {

@@ -240,6 +240,21 @@ function isActiveRun(run: Run): boolean {
  * 从磁盘补回来。写出去的对象少这两个键是安全的：读取路径上本来就没有 zod
  * 校验（整条记录以 JSON 存，见 `Skill.files` 那段注释）。
  */
+/** 日志占用的现状（`GET /api/maintenance/storage` 的返回体）。 */
+export interface LogStorageReport {
+  /** 每个集合两份文件的字节数（`logBytes` = 增量日志，`snapshotBytes` = 已物化的快照）。 */
+  collections: Array<{
+    workspaceId: string
+    name: string
+    logBytes: number
+    snapshotBytes: number
+  }>
+  logBytes: number
+  snapshotBytes: number
+  /** 两者之和——界面上那颗「压缩」按钮说的就是它。 */
+  totalBytes: number
+}
+
 /** 一次压缩的结果（`POST /api/maintenance/compact` 的返回体，也是启动日志的来源）。 */
 export interface CompactionReport {
   workspaceId: string
@@ -802,6 +817,30 @@ export class FileStore implements Store {
    */
   async compactNow(): Promise<CompactionReport[]> {
     return this.#mutex.run(() => this.#compactIfNeeded())
+  }
+
+  /**
+   * **日志占了多少**（`GET /api/maintenance/storage`，D227）。
+   *
+   * 为什么要有它：界面上那颗「压缩」按钮得先说清"现在占多大、压了能省多少"，
+   * 否则它只是一颗不知道有没有用的按钮。口径是**每个集合的日志文件 + 快照文件**
+   * （`log/<集合>.jsonl` 与 `log/<集合>.jsonl.snapshot`）的字节数——
+   * 也就是压缩能影响到的全部，不含 blob / 消息流 / 技能正文（那些不归 compact 管）。
+   */
+  async logStorage(): Promise<LogStorageReport> {
+    const collections: LogStorageReport['collections'] = []
+    for (const ws of this.#stores.values()) {
+      for (const name of COLLECTIONS) {
+        const base = join(ws.root, 'log', `${name}.jsonl`)
+        const logBytes = await stat(base).then((s) => s.size).catch(() => 0)
+        const snapshotBytes = await stat(`${base}.snapshot`).then((s) => s.size).catch(() => 0)
+        if (logBytes === 0 && snapshotBytes === 0) continue
+        collections.push({ workspaceId: String(ws.workspaceId), name, logBytes, snapshotBytes })
+      }
+    }
+    const logBytes = collections.reduce((n, c) => n + c.logBytes, 0)
+    const snapshotBytes = collections.reduce((n, c) => n + c.snapshotBytes, 0)
+    return { collections, logBytes, snapshotBytes, totalBytes: logBytes + snapshotBytes }
   }
 
   /**

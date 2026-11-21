@@ -225,6 +225,27 @@ export const COMMANDS: CommandSpec[] = [
       return api(ctx, '/api/agents')
     },
   },
+  /*
+   * 日志体积与压缩（D227）。两个子命令，理由与界面上那颗按钮相同：
+   *   · `storage` 先说清"占多大"——不知道体积的清理动作没人敢按；
+   *   · `compact` 要求 daemon 在跑（压缩只能在**活着的 JsonlLog 上**做，
+   *     外部脚本直接改文件会让追加句柄指向已删除的 inode）。
+   * 判据与开库时同一套：没有需要压的就返回 `compacted: []`，不是报错。
+   */
+  {
+    name: 'storage',
+    summary: '日志占用（按集合）',
+    async run(ctx) {
+      return api(ctx, '/api/maintenance/storage')
+    },
+  },
+  {
+    name: 'compact',
+    summary: '压缩日志（把历史折成快照，只影响体积）',
+    async run(ctx) {
+      return api(ctx, '/api/maintenance/compact', { method: 'POST' })
+    },
+  },
 ]
 
 export function findCommand(name: string): CommandSpec | undefined {

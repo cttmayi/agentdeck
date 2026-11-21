@@ -356,8 +356,15 @@ append-only 日志。真机上量到的样子：**一个**工作区、**87 行**
 > `run.jsonl` 1.2 MB → 0（快照 407 KB，397 条运行完好），整个 `log/` 从 **6.9 MB → 415 KB**。
 > 启动日志逐条打出"从多少降到多少、现存几条"——省了多少必须看得见。
 
-**不想重启也能压**：`POST /api/maintenance/compact`（loopback，运维入口，界面暂无按钮）
-⇒ `FileStore.compactNow()`。它在**活着的 `JsonlLog` 上**压：`compact()` 自己关掉追加句柄、
+**两个入口**（都不用重启 daemon）：
+
+| 从哪按 | 怎么按 | 看见什么 |
+|---|---|---|
+| 设置页「成本」卡 | 一行「日志占用 1.4 MB」+ 一颗「压缩」（`btn--secondary`）；压完 toast「已压缩，省下 3.2 MB」并**重新拉一次占用** | 体积 + 省了多少 |
+| CLI | `pnpm run cli storage` / `pnpm run cli compact`（`--human` 给人看，默认 JSON） | 同上的数字（JSON 给 agent 用） |
+
+两者打的是同一对接口：`GET /api/maintenance/storage`（按集合列出 `logBytes` / `snapshotBytes`）
+与 `POST /api/maintenance/compact` ⇒ `FileStore.compactNow()`。它在**活着的 `JsonlLog` 上**压：`compact()` 自己关掉追加句柄、
 写快照、删日志，之后再有写入自动重建文件——所以运行中的 daemon 调它是安全的。
 ⚠️ 反过来**不许**外部脚本直接改这些文件：那会让追加句柄指向一个已被删除的 inode，
 重启后这段时间的写入就没了（这也是为什么这件事必须由 daemon 自己做）。

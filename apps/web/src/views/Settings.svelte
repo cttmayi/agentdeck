@@ -37,6 +37,7 @@
     resetPaneWidth,
   } from '../lib/pane-resize.ts'
   import type { MarkdownHtmlMode } from '../lib/markdown.ts'
+  import { humanSize } from '../lib/workdir-view.ts'
 
   /** 设定页要列出的 runtime（身份接口给的那份清单） */
   $: runtimeOptions = $identity?.runtimes.map((r) => r.key) ?? []
@@ -61,6 +62,50 @@
 
   let costs: CostReport | null = null
   let costsError = ''
+
+  /*
+   * **日志占用 + 压缩**（D227，2026-11 使用者："设置页按钮 + CLI 子命令，都做吧"）。
+   *
+   * 为什么在「成本」这张卡里：它们是同一类东西——"这台机器在为什么花钱/占地"。
+   * 两个数字都来自接口（`/api/maintenance/storage` 与 `POST /api/maintenance/compact`），
+   * 界面自己不猜大小：**压完必须重新拉一次**（写动作成功后界面要跟着数据走）。
+   */
+  interface LogStorage {
+    collections: Array<{ workspaceId: string; name: string; logBytes: number; snapshotBytes: number }>
+    logBytes: number
+    snapshotBytes: number
+    totalBytes: number
+  }
+  let logStorage: LogStorage | null = null
+  let compacting = false
+
+  async function loadLogStorage(): Promise<void> {
+    try {
+      logStorage = await api<LogStorage>('/api/maintenance/storage')
+    } catch {
+      // 拿不到就不显示这一行（不打扰：成本与审计导出照常）
+      logStorage = null
+    }
+  }
+
+  async function compactLogs(): Promise<void> {
+    compacting = true
+    try {
+      const out = await api<{ freed: number; compacted: unknown[] }>('/api/maintenance/compact', {
+        method: 'POST',
+      })
+      await loadLogStorage() // ★ 压完立刻按新数据重画
+      showToast(
+        out.compacted.length === 0
+          ? tx('settings.compactNothing')
+          : tx('settings.compacted', { size: humanSize(out.freed) }),
+      )
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err))
+    } finally {
+      compacting = false
+    }
+  }
 
   let email = ''
   let password = ''
@@ -99,6 +144,7 @@
     } catch (err) {
       costsError = err instanceof Error ? err.message : String(err)
     }
+    await loadLogStorage()
     await refreshRemote()
   })
 
@@ -268,6 +314,29 @@
           {$t('settings.usageHintBefore')}<strong>{$t('settings.usageHintStrong')}</strong>{$t('settings.usageHintAfter')}
         </p>
       {/if}
+    {/if}
+
+    <!--
+      ══════════ 日志占用 + 压缩（D227）══════════
+      ★ 放「成本」卡里：与上面那行是同一类问题（这台机器在为什么花钱 / 占地）。
+      ★ 一行 = 「日志占用 X」+ 一颗次级按钮（`.field-row`：label + 控件 + 按钮的标准行）。
+        刻意用 `btn--secondary`：这不是这一页的主操作。
+      ★ 压完的反馈走 toast + **重新拉 storage**——两件事都要有，否则"我按了没反应"。
+    -->
+    {#if logStorage}
+      <div class="field-row" data-set-storage>
+        <span class="faint fs-xs" data-storage-size
+          >{$t('settings.logUsage', { size: humanSize(logStorage.totalBytes) })}</span
+        >
+        <button
+          type="button"
+          class="btn btn--secondary btn--sm"
+          disabled={compacting}
+          title={$t('settings.compactHint')}
+          onclick={compactLogs}
+          >{compacting ? $t('settings.compacting') : $t('settings.compactLogs')}</button
+        >
+      </div>
     {/if}
 
     <!-- 审计导出是**下载**，不是页面内渲染——用链接让浏览器走原生下载语义 -->
