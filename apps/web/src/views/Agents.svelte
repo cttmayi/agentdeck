@@ -371,7 +371,8 @@ import ListRow from '../components/ListRow.svelte'
         >
           {#snippet children()}
             <span class="agent-line">
-              <strong>{a.name}</strong>
+              <!-- ★ D190：长名字的截断走全局 `.ellipsis`（`display:block` 在行样式里） -->
+              <strong class="ellipsis">{a.name}</strong>
               <!-- ★ 2026-11（D155）：这里原来有一枚"是哪一条出厂成员"的徽标，删了
                    （使用者："都是智能体"；名字里已经写着是哪一条）。 -->
               <!--
@@ -555,12 +556,9 @@ import ListRow from '../components/ListRow.svelte'
   /* ★ 310 批：与聊天的 `.conv-title`、任务的 `.task-title` 同一条规矩——
      单行 + 省略号必须是**块级**且有 `max-width`，否则长名字会被顶成两行。 */
   .agent-line strong {
+  /* D190：截断四行收进全局 `.ellipsis`（markup 里已经带上） */
     font-weight: 600;
     display: block;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .agent-line {

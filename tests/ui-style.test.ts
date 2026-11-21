@@ -394,6 +394,68 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
   })
 
   /**
+   * ★★★ D190：**"要截断的长文字"只有一个写法——全局 `.ellipsis`**。
+   *
+   * 来时：那条"让省略号真的生效"的四行（`max-width:100%` + `overflow:hidden` +
+   * `text-overflow:ellipsis` + `white-space:nowrap`）在页面 `<style>` 里被**逐字抄了
+   * 35 次**，其中 6 份连 `display:block` 与 `font-weight:600` 都一样。抄到第 35 份时
+   * 已经没人知道哪一行是必须的（chat 那条的注释写着"`max-width:100%`，省略号才有盒子
+   * 可裁"——那句话对**每一个**块级标题都成立，所以它不该只写在 chat 里）。
+   *
+   * 判据分两档：
+   *   ① **不许再写** `max-width: 100%` + 那三条的组合（必须用 `.ellipsis`）；
+   *   ② 只剩三条（不带 `max-width`）的旧写法**只许少不许增**（棘轮：现在是 27 处）。
+   *      它们大多是 flex 子项自己的 `flex` / `min-width` 配套，收进 `.ellipsis` 要一条条
+   *      改 markup；棘轮保证"不会再多出第 28 份"，同时不假装这件事已经做完。
+   */
+  test('★★★ 截断的长文字只有一个写法（全局 `.ellipsis`），旧写法只许少不许增', async () => {
+    const files = await load()
+    const css = files.get('packages/ui/src/styles/app.css') ?? ''
+    assert.equal((css.match(/\.ellipsis \{/g) ?? []).length, 1, '`.ellipsis` 在 app.css 里必须是唯一一处定义')
+    for (const need of ['text-overflow: ellipsis', 'white-space: nowrap', 'overflow: hidden', 'max-width: 100%', 'min-width: 0']) {
+      assert.ok(css.includes(need), "`.ellipsis` 少了一行：" + need)
+    }
+    const RATCHET = 27
+    const offenders: string[] = []
+    let trioOnly = 0
+    for (const [rel, text] of files) {
+      if (!rel.endsWith('.svelte')) continue
+      const style = text.slice(text.indexOf('<style'))
+      const noComments = style.replace(/\/\*[^]*?\*\//g, '')
+      for (const m of noComments.matchAll(/\{([^{}]*text-overflow:\s*ellipsis[^{}]*)\}/g)) {
+        const body = m[1] ?? ''
+        if (body.includes('max-width: 100%')) offenders.push(`${rel} → ${body.trim().slice(0, 90)}`)
+        else if (['overflow: hidden', 'text-overflow: ellipsis', 'white-space: nowrap'].every((x) => body.includes(x))) trioOnly++
+      }
+    }
+    assert.deepEqual(offenders, [], `这套截断写法请改用全局 \`.ellipsis\`（markup 里加 class）：\n${offenders.join('\n')}`)
+    assert.ok(
+      trioOnly <= RATCHET,
+      `只剩"三条"的旧截断写法涨到 ${trioOnly} 处（上限 ${RATCHET}）：能收的就收进 \`.ellipsis\`；真要新增一处，先把上限往上调并想清楚为什么`,
+    )
+  })
+
+  /**
+   * ★★ D190：**声明的令牌必须有人用**（不留死接口）。
+   *
+   * 这条是量出来的：`--fs-2xl`（28px）在 `:root` 里 declare 了，**产品代码里一处都没有**
+   * ——`--fs-xl` 还有两处（`h1.page-name` 与 markdown 的 h1），再往上一档就是死的。
+   * 死令牌比裸值更坏：它看起来像"有这一档可以选"，于是下一个人照着它写，界面里就多出
+   * 一个只有它自己在用的字号。
+   */
+  test('★★ 令牌不许空手摆在那里：每个 `:root` 令牌至少有一处使用', async () => {
+    const files = await load()
+    const css = files.get('packages/ui/src/styles/app.css') ?? ''
+    const roots = [...css.matchAll(/:root[^{]*\{([^}]*)\}/g)].map((m) => m[1] ?? '')
+    const declared = new Set<string>()
+    for (const b of roots) for (const m of b.matchAll(/--([\w-]+)\s*:/g)) declared.add(m[1] as string)
+    const used = new Set<string>()
+    for (const [, text] of files) for (const m of text.matchAll(/var\(--([\w-]+)/g)) used.add(m[1] as string)
+    const dead = [...declared].filter((n) => !used.has(n)).sort()
+    assert.deepEqual(dead, [], `这些令牌声明了却没人用（删掉令牌，或在需要它的地方用它）：\n${dead.map((n) => '--' + n).join('\n')}`)
+  })
+
+  /**
    * ★★★ D188：**排版总表的数字必须与 `app.css` 的令牌一致**。
    *
    * 由来：`ui-style.md` 的令牌表里那行「控件高 `--ctl-h` 1.9rem · `--ctl-h-sm` 1.5rem」

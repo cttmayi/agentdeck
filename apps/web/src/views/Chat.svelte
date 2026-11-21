@@ -1023,7 +1023,7 @@
             {#snippet children()}
               <!-- ★ `title` 必须有：这一格是单行省略的，没有它标题一长就**永远看不全**
                  （任务列表、技能/工具的名称列都有） -->
-              <span class="conv-title" title={conversation.title}>{conversation.title}</span>
+              <span class="conv-title ellipsis" title={conversation.title}>{conversation.title}</span>
               <!-- ★ 「N 轮 · 最近 X 分钟前」：轮数说明它有多重，相对时间说明
                    它有多旧——两者一起才是「这一条还值不值得点开」的答案。
                    ⚠️ 这句用的是 `chat.summary`，它**一直存在却没人用**：原本就
@@ -1101,7 +1101,9 @@
           {:else}
             <!-- ★ 2026-11（使用者报的）：标题太长会把「改名」按钮挤到第二行 ⇒ 栏头整体 3 行。
                  干脆删掉按钮：标题本身可点（悬浮提示 + 光标变化），点一下就地进改名。 -->
+            <!-- ★ D190：截断走全局 `.ellipsis`（flex / display / cursor 留在这条规则里） -->
             <h2
+              class="ellipsis"
               role="button"
               tabindex="0"
               title={$t('chat.renameHint')}
@@ -1647,12 +1649,10 @@
     /* ★ 310 批（使用者报的：标题被拉成两行，末尾却还带省略号）：行内元素上
        `overflow`/`text-overflow` **不生效**——`nowrap` 只挡住换行点的算法，
        长中文在窄栏里仍会被父级按钮的宽度顶出去、看起来像两行。必须 `display: block`
-       + `max-width: 100%`，省略号才有"盒子"可裁。 */
+       + `max-width: 100%`，省略号才有"盒子"可裁。
+       ★ D190：那句话是对的，**但它对每一处块级标题都成立**——所以那四行搬进了全局
+       `.ellipsis`（app.css），这里只留 `display: block`（行内元素必须先变成盒子）。 */
     display: block;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   /* ⚠️ 2026-11（D142）：`.conv-sub` 的声明删了——行的第二行统一走 app.css 的
@@ -1686,6 +1686,8 @@
   }
 
   .chat-head-main > h2 {
+
+  /* D190：截断四行收进全局 `.ellipsis`（markup 里已经带上） */
     /* ★ 2026-11（使用者报的：标题太长把「改名」挤到第二行、整体 3 行）：
        **flex-basis 必须是 0，不能是 auto**。`auto` 时 basis = 整段标题的内容宽
        （headless Chrome 实测：1258px 的标题 + 444px 的容器），flex-wrap 里它
@@ -1694,10 +1696,6 @@
     flex: 1 1 0;
     min-width: 0;
     display: block;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     /* 标题本身可点进改名（按钮已删）：光标与悬浮下划线给出"能点"的暗示 */
     cursor: pointer;
   }

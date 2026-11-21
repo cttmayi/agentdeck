@@ -332,7 +332,7 @@
           {#each visible as w (w.id)}
             <ListRow rowClass="wf-row" active={w.id === selectedId} onclick={() => selectOne(w)}>
               {#snippet children()}
-                <span class="wf-title" title={w.name}>{w.name}</span>
+                <span class="wf-title ellipsis" title={w.name}>{w.name}</span>
                 <span class="list-row-sub wf-sub">
                   <span class="badge">{$t(sourceKey(w))}</span>
                   <span class="faint"
@@ -503,12 +503,9 @@
      第一行标题（单行省略五件套）、第二行辅助信息（显式字色/字号 + 单行省略）——
      不写 color/font-size 就会从行里继承，两页的辅助信息颜色不一致。 */
   .wf-title {
+  /* D190：截断四行收进全局 `.ellipsis`（markup 里已经带上） */
     display: block;
-    max-width: 100%;
     font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   /* ⚠️ 2026-11（D142）：`.wf-sub` 的声明删了——统一走 app.css 的 `.list-row-sub`
      （基线对齐）。原来这里是 `align-items: center`，而这一行开头就是一枚「来源」徽标。 */

@@ -525,7 +525,7 @@
           onclick={() => void selfTest()}
         >{selftest === '' ? $t('chat.voiceSettingsSelfTest') : selftest}</button>
       {/if}
-      <span class="faint fs-xs mono voice-path" title={capability?.paths?.asrRoot ?? ''}
+      <span class="faint fs-xs mono voice-path ellipsis" title={capability?.paths?.asrRoot ?? ''}
         >{capability?.paths?.asrRoot ?? ''}</span
       >
     </div>
@@ -839,11 +839,10 @@
     transition: width 0.3s linear;
   }
 
-  /* 输出方式那一行：整行给下拉（它有三档、字也长，挤在并排里会折行） */
+  /* 输出方式那一行：整行给下拉（它有三档、字也长，挤在并排里会折行）。
+     ★ D190：截断四行（`max-width:100%` + 那三条）收进全局 `.ellipsis`。 */
   .voice-path {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 100%;
+    /* 这个元素只多这一件事：它是行内 `<span>`，得先变成盒子才裁得动 */
+    display: block;
   }
 </style>

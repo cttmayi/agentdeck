@@ -739,7 +739,7 @@ import ListRow from '../components/ListRow.svelte'
       -->
       <!-- ⚠️ 标题与徽标必须同一行：`{#if}` 块换行会在 textContent 里留前导空白，
            探针按 `startsWith('探针用的任务')` 找夹具行（布局判据的入口）——踩过。 -->
-      <span class="task-title" title={issue.title}>{#if issue.source?.kind === 'workflow'}<span class="badge">{$t('workflows.taskBadge')}</span>{/if}{issue.title}</span>
+      <span class="task-title ellipsis" title={issue.title}>{#if issue.source?.kind === 'workflow'}<span class="badge">{$t('workflows.taskBadge')}</span>{/if}{issue.title}</span>
       <span class="list-row-sub task-meta">
         <span class="badge stage-tag {info.stage}">{$t(stageShortId(info.stage))}</span>
         <!-- 只显示标签**之外**的信息（`note`）：「待审查」后面再跟一句
@@ -1401,11 +1401,8 @@ import ListRow from '../components/ListRow.svelte'
     `display:block` 是必需的——行内元素上 `text-overflow` 不生效。
   */
   .task-title {
+  /* D190：截断四行收进全局 `.ellipsis`（markup 里已经带上） */
     display: block;
-    max-width: 100%;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
     font-weight: 600;
   }
 

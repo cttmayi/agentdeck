@@ -294,7 +294,7 @@
           >
             {#snippet children()}
               <!-- 标题单行省略 + `title` 兜底（与聊天/任务列表同一条：列表是用来扫的） -->
-              <span class="crystal-title" title={sourceLabel(row)}>{sourceLabel(row)}</span>
+              <span class="crystal-title ellipsis" title={sourceLabel(row)}>{sourceLabel(row)}</span>
               <span class="list-row-sub crystal-meta">
                 <!-- ★ 这一格是**沉淀任务**的状态，不是起草 run 的状态：
                      run 跑完只说明草稿写出来了，活还没完（要审阅、要入库）——
@@ -410,12 +410,9 @@
    * 现在照 §2.4 的五件套与"辅助信息显式字色/字号"补齐。
    */
   .crystal-title {
+  /* D190：截断四行收进全局 `.ellipsis`（markup 里已经带上） */
     display: block;
-    max-width: 100%;
     font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   /* ⚠️ 2026-11（D142）：`.crystal-meta` 的声明删了——统一走 app.css 的 `.list-row-sub`
      （基线对齐；这一行同样混着状态徽标）。 */

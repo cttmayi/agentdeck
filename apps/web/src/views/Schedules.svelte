@@ -525,7 +525,7 @@ import type { WebTextId } from '@agentdeck/i18n'
             }}
           >
             {#snippet children()}
-              <span class="sched-title">{s.name}</span>
+              <span class="sched-title ellipsis">{s.name}</span>
               <span class="list-row-sub sched-sub">
                 <span class="sched-cron">{s.humanCron}</span>
                 {#if s.enabled && s.nextRunAt !== null}
@@ -941,15 +941,12 @@ import type { WebTextId } from '@agentdeck/i18n'
      用了同一个类名却照样吃浏览器默认的 40px 缩进。现在那份在 `app.css`（全局，
      一处定义、六页照抄），页面里不许再写。 */
   .sched-title {
+  /* D190：截断四行收进全局 `.ellipsis`（markup 里已经带上） */
     /* ★ 310 批同款规矩（使用者报过"标题被拉成两行还带省略号"）：行内元素上
        overflow/text-overflow 不生效——必须 block + max-width:100%，省略号才有
        盒子可裁；2026-11（使用者："列表 item 宽度不对"）sched-title 漏了这两行。 */
     display: block;
-    max-width: 100%;
     font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   /* ⚠️ 2026-11（D142）：`.sched-sub` 的声明删了——这一页原来用 `align-items: center`，
      而这一行里混着徽标（「最近 15 小时前」后面那枚状态徽标），center 对齐的是盒子、
