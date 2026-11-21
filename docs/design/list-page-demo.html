@@ -241,8 +241,17 @@
   --rail-selected: #ffffff; /* 对 --rail 1.24（选中项是一颗白药丸） */
 
   --text: #1d232c;
-  --text-dim: #5a6472;
-  --text-faint: #8a93a2;
+  /**
+   * ★★★ D207（使用者拍板："就 AA 吧"）：**次要文字（faint）提到 WCAG AA**。
+   *
+   * 改前 `--text-faint: #8a93a2` 在白面上只有 **3.10:1**、面板底 2.67、轨道底 2.49
+   * （低于 AA 的 4.5，也低于"大字号"门槛 3）。改后 `#616a79`：白面 **5.46**、页面底 5.09、
+   * 面板 4.70、surface-2 4.97——**所有它实际会用到的底都过 4.5**。
+   * 代价：它离 `--text-dim` 只剩一步（5.46 vs 6.00）⇒ 同批把 dim 从 `#5a6472` 压到
+   * **`#4f5865`**（白面 7.20），把"次要 / 更次要"两层重新拉开，dim 在轨道上也更稳（4.83 → 5.79）。
+   */
+  --text-dim: #4f5865;
+  --text-faint: #5d6676;
 
   --accent: #2b6fd0;
   --accent-dim: #2f6fd0;
@@ -251,7 +260,7 @@
   --warn: #b7791f;
 
   /* 运行状态色：与语义色分开，因为"进行中"既不是好也不是坏 */
-  --status-todo: #8a93a2;
+  --status-todo: #5d6676; /* D207：跟着 --text-faint（todo 就是最退后那一档状态） */
   --status-active: #2b6fd0;
   --status-review: #7a5fd0;
   --status-done: #1f9d73;
@@ -305,8 +314,9 @@
   --rail-selected: #232936; /* 对 --rail 1.35（选中比 hover 再亮一档） */
 
   --text: #e6e9ef;
+  /* D207：暗色同步——faint 从 `#6d7686`（最差底 3.18）提到 `#8a93a2`（最差底 4.70）。 */
   --text-dim: #a2abbb;
-  --text-faint: #6d7686;
+  --text-faint: #8a93a2;
 
   --accent: #5aa9f5;
   --accent-dim: #2b5f92;
@@ -314,7 +324,7 @@
   --bad: #f2716a;
   --warn: #e0b04a;
 
-  --status-todo: #6d7686;
+  --status-todo: #8a93a2; /* D207：跟着 --text-faint */
   --status-active: #5aa9f5;
   --status-review: #b48ef0;
   --status-done: #4ec9a0;
@@ -3236,11 +3246,10 @@ a > button { width: 100%; }
         color: var(--text-dim);
         letter-spacing: 0.02em;
       }
-      /* 三档候选值（演示专用，产品里 --text-faint 只有一个值） */
+      /* D207 之后这里量的是**真样式**：faint 已提到 AA，不再有演示专用的候选值。 */
       .demo-faint-now { color: var(--text-faint); }
-      .demo-faint-mid { color: #757e8d; }
-      .demo-faint-aa { color: #6a7382; }
       .demo-faint-dim { color: var(--text-dim); }
+      .demo-faint-sub { color: var(--text); }
       .demo-setting-tag {
         display: inline-block; margin-bottom: var(--sp-2);
         font-size: var(--fs-2xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
@@ -3882,30 +3891,27 @@ a > button { width: 100%; }
           <p class="demo-rule-note" id="demo-setting-delta">正在量…</p>
         </section>
 
-        <!-- ══════════ 次要文字的三档深度：faint 该不该压到 AA ══════════ -->
+        <!-- ══════════ 次要文字的深度：faint 已提到 AA（D207）══════════ -->
         <section class="demo-rule" id="demo-rule-faint">
-          <h3>⑧ 次要文字的三档深度：`--text-faint` 要不要压到 AA</h3>
+          <h3>⑧ 三层文字的深度：faint 已提到 AA</h3>
           <p class="demo-rule-note">
-            同一句话、同样的字号，只差字色。第 3 行是**按 WCAG AA 反推出来的值**（白面上 4.79:1），
-            第 4 行是更往下一档的 <code>--text-dim</code>（6.00:1）——压到 AA 之后它就与 dim 只差一步，
-            "退到很后面"那一层会变薄。右边实时打印每行的实测对比度。
+            使用者拍板「就 AA 吧」（D207）：`--text-faint` 从 `#8a93a2`（白面 3.10:1）提到
+            <strong>#5d6676</strong>，最深的底（`--surface-2`）也有 <strong>4.66:1</strong>。
+            代价是它离 `--text-dim` 只剩一步 ⇒ 同批把 dim 压深到 `#4f5865`（白面 7.20），
+            三层重新拉开。下面是三层在同一张卡上的实测值。
           </p>
           <div class="demo-rule" id="demo-faint-list" style="border: 0; padding: 0; background: none">
             <div class="demo-faint-row">
-              <span class="tag">① 现状 --text-faint</span>
-              <span class="demo-faint-now">助手 · 2 小时前 · 已归档（次要信息的常用写法）</span>
+              <span class="tag">① 正文 --text</span>
+              <span class="demo-faint-sub">助手 · 2 小时前 · 已归档（次要信息的常用写法）</span>
             </div>
             <div class="demo-faint-row">
-              <span class="tag">② 折中 #757e8d</span>
-              <span class="demo-faint-mid">助手 · 2 小时前 · 已归档（次要信息的常用写法）</span>
-            </div>
-            <div class="demo-faint-row">
-              <span class="tag">③ 压到 AA #6a7382</span>
-              <span class="demo-faint-aa">助手 · 2 小时前 · 已归档（次要信息的常用写法）</span>
-            </div>
-            <div class="demo-faint-row">
-              <span class="tag">④ 再深一档 --text-dim</span>
+              <span class="tag">② 更次要 --text-dim</span>
               <span class="demo-faint-dim">助手 · 2 小时前 · 已归档（次要信息的常用写法）</span>
+            </div>
+            <div class="demo-faint-row">
+              <span class="tag">③ 最次要 --text-faint</span>
+              <span class="demo-faint-now">助手 · 2 小时前 · 已归档（次要信息的常用写法）</span>
             </div>
           </div>
           <p class="demo-rule-note" id="demo-faint-delta">正在量…</p>
@@ -4301,11 +4307,12 @@ a > button { width: 100%; }
           }
         }
         /**
-         * ★ D206：**次要文字的三档深度**（第 ⑧ 项）——量的是"压到 AA 之后还能不能分层"。
+         * ★ D207：**三层文字的深度**（第 ⑧ 项）——faint 已经提到 AA，这一块量的是终态。
          *
-         * 现状：`--text-faint` 在白面上 3.10:1（低于 AA 4.5）。压到 AA 需要的颜色约 `#6a7382`，
-         *   但那样它与 `--text-dim`(6.00:1) 只差一步。这一块把四档摆在同一张卡上，同时打印实测值，
-         *   让人自己判断"值不值得"——不是让人凭描述猜。
+         * 原来（D206）这里是"四档候选对比"，用来看"要不要压到 AA"。使用者拍板压到 AA，
+         * 于是候选值进了 `app.css`、演示专用覆盖删掉 ⇒ 现在量的是真样式：
+         *   ① `--text`（正文）、② `--text-dim`、③ `--text-faint`，
+         * 要求 ① > ② > ③（三层确实拉开）且 ③ 在**最深的底（surface-2）上也 ≥4.5**。
          */
         {
           const list = q('#demo-faint-list')
@@ -4313,9 +4320,8 @@ a > button { width: 100%; }
           if (list) {
             const rows = [...list.querySelectorAll('.demo-faint-row')]
             const sample = (cls) => list.querySelector('.' + cls)
-            const surface = C(list).backgroundColor
             // ⚠️ 这个函数要能吃两种写法：computed 的 `rgb(…)` **和** 手写的 `#rrggbb`。
-            //    第一版只认 `rgb()`，于是 `lum('#ffffff')` 返回 null、四行比值全变成 0:1（踩过）。
+            //    第一版只认 `rgb()`，于是 `lum('#ffffff')` 返回 null、比值全变成 0:1（踩过）。
             const lum = (c) => {
               let rgb = null
               const m = c.match(/rgba?\(([^)]+)\)/)
@@ -4335,27 +4341,24 @@ a > button { width: 100%; }
               if (a === null || b === null) return 0
               return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
             }
-            const bg = C(list).backgroundColor === 'rgba(0, 0, 0, 0)' ? C(document.body).backgroundColor : surface
-            const now = ratioOn(sample('demo-faint-now'), '#ffffff')
-            const mid = ratioOn(sample('demo-faint-mid'), '#ffffff')
-            const aa = ratioOn(sample('demo-faint-aa'), '#ffffff')
-            const dim = ratioOn(sample('demo-faint-dim'), '#ffffff')
+            // 最深的那块底（亮色是 --surface-2 = #e2e7ee）——faint 必须在这里也 ≥4.5
+            const deepest = '#e2e7ee'
+            const sub = ratioOn(sample('demo-faint-sub'), deepest)
+            const dim = ratioOn(sample('demo-faint-dim'), deepest)
+            const faint = ratioOn(sample('demo-faint-now'), deepest)
             ruleChecks.push([
-              '⑧ 次要文字四档：现状 3.10 · 折中 4.10 · AA 4.79 · dim 6.00（白面上实测）',
+              '⑧ 三层文字：正文 > dim > faint，且 faint 在最深的底上也 ≥4.5',
               (() => {
-                if (rows.length !== 4) return false
-                const r2 = (v) => Math.round(v * 100) / 100
-                return r2(now) === 3.1 && r2(mid) === 4.1 && r2(aa) === 4.79 && r2(dim) === 6 && r2(aa) < r2(dim)
+                if (rows.length !== 3) return false
+                return sub > dim && dim > faint && faint >= 4.5
               })(),
             ])
             if (delta) {
               const r2 = (v) => String(Math.round(v * 100) / 100)
               delta.innerHTML =
-                '实测（白面上）：① 现状 <strong>' + r2(now) + ':1</strong>、② 折中 <strong>' + r2(mid) +
-                ':1</strong>、③ AA <strong>' + r2(aa) + ':1</strong>、④ dim <strong>' + r2(dim) +
-                ':1</strong>。压到 AA 后与 dim 只差 ' + r2(dim - aa) + ' 个单位——' +
-                '这就是"值的代价"：AA 达标，但次要信息与次要信息的下一档几乎贴在一起。' +
-                (bg ? '' : '')
+                '实测（统一按最深的底 <code>--surface-2</code> 量）：正文 <strong>' + r2(sub) +
+                ':1</strong>、dim <strong>' + r2(dim) + ':1</strong>、faint <strong>' + r2(faint) +
+                ':1</strong>。三层都 ≥4.5，且保持"正文 > dim > faint"的顺序。'
             }
           }
         }
@@ -4368,7 +4371,7 @@ a > button { width: 100%; }
               ? '<b>排版七条自检通过 ' + ruleChecks.length + '/' + ruleChecks.length + '</b>：' +
                 '控件同高、面板与浮层内距逐条相等、表格紧凑档、并排两列一条规则、' +
                 '正文档 14px + 行宽 640px、主操作一个长相、标题三档 17/15/13 两两差 2px、' +
-                '次要文字四档实测（3.10 / 4.10 / 4.79 / 6.00）。'
+                '三层文字实测（正文 > dim > faint，faint 最深的底上仍 ≥4.5）。'
               : '<b>排版七条自检未通过（' + ruleBad.length + ' 项）</b>：' + ruleBad.join('、')
         }
         const bad = checks.filter(([, ok]) => !ok).map(([name]) => name)

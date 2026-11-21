@@ -421,7 +421,10 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
      */
     const tok = (block: string, name: string): string => {
       const re = new RegExp(`${name}:\\s*(#[0-9a-fA-F]{3,8})`)
-      const m = block.match(re) ?? css.match(re)
+      // ⚠️ 必须先剥注释：注释里会写"改前 `--text-faint: #8a93a2`"这种句子，
+      //    不剥就会读到注释里的旧值（D207 踩过，报"亮 faint / surface 3.1"其实读的是注释）。
+      const stripped = (t: string): string => t.replace(/\/\*[^]*?\*\//g, '')
+      const m = stripped(block).match(re) ?? stripped(css).match(re)
       assert.ok(m, `app.css 里没有 ${name}`)
       return String(m[1])
     }
@@ -451,6 +454,11 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
         [`${theme} dim / surface`, tok(block, '--text-dim'), tok(block, '--surface'), 4.5],
         [`${theme} dim / rail`, tok(block, '--text-dim'), tok(block, '--rail'), 4.5],
         [`${theme} on-accent / accent-dim`, tok(block, '--on-accent'), tok(block, '--accent-dim'), 4.5],
+        // ★ D207：faint 已经提到 AA（使用者拍板"就 AA 吧"）⇒ 它从"登记缺口"升进"必须达标"
+        [`${theme} faint / surface`, tok(block, '--text-faint'), tok(block, '--surface'), 4.5],
+        [`${theme} faint / bg`, tok(block, '--text-faint'), tok(block, '--bg'), 4.5],
+        [`${theme} faint / panel`, tok(block, '--text-faint'), tok(block, '--panel'), 4.5],
+        [`${theme} faint / surface-2`, tok(block, '--text-faint'), tok(block, '--surface-2'), 4.5],
       )
     }
     const broken = MUST.filter(([, fg, bg, need]) => ratio(fg, bg) < need).map(
@@ -462,13 +470,19 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
      * ② 登记在案的 AA 缺口（**数值棘轮**）：只许变好。改小一个数就得先改这张表，
      *    于是"又调低一点"这件事在 diff 里是可见的。
      */
+    /**
+     * ⚠️ `--text-faint` 的两行**已经删了**：D207 把它们提进上面的"MUST ≥4.5"。
+     *    剩下的是**状态色当文字**——它们是语义色（绿/红/琥珀），压深会让"状态色"变浑浊，
+     *    而且它们主要出现在徽章里（浅色底 + 同色描边），所以继续留在棘轮档，只许变好。
+     */
     const FLOOR: Array<[string, string, string, number]> = [
-      ['亮 faint / surface', tok(lightBlock, '--text-faint'), tok(lightBlock, '--surface'), 3.1],
-      ['亮 faint / rail', tok(lightBlock, '--text-faint'), tok(lightBlock, '--rail'), 2.49],
       ['亮 good 当文字 / surface', tok(lightBlock, '--good'), tok(lightBlock, '--surface'), 3.43],
       ['亮 warn 当文字 / surface', tok(lightBlock, '--warn'), tok(lightBlock, '--surface'), 3.64],
       ['亮 bad 当文字 / surface', tok(lightBlock, '--bad'), tok(lightBlock, '--surface'), 4.38],
-      ['暗 faint / surface', tok(darkBlock, '--text-faint'), tok(darkBlock, '--surface'), 3.84],
+      // 品牌蓝 / 语义红画在**有色底**（`--surface-2`）上：也是"要动就得动品牌色"的那一类。
+      // 实测（D207 记）：accent 3.94、bad 3.52。要达标需 accent → #2560ba、bad → #c43636（都更暗）。
+      ['亮 accent 当文字 / surface-2', tok(lightBlock, '--accent'), tok(lightBlock, '--surface-2'), 3.94],
+      ['亮 bad 当文字 / surface-2', tok(lightBlock, '--bad'), tok(lightBlock, '--surface-2'), 3.52],
     ]
     const worse = FLOOR.filter(([, fg, bg, floor]) => ratio(fg, bg) < floor - 0.01).map(
       ([name, fg, bg, floor]) =>
