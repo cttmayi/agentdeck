@@ -394,6 +394,83 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
   })
 
   /**
+   * ★★★ D188：**排版总表的数字必须与 `app.css` 的令牌一致**。
+   *
+   * 由来：`ui-style.md` 的令牌表里那行「控件高 `--ctl-h` 1.9rem · `--ctl-h-sm` 1.5rem」
+   * 在 D181/D182 之后**已经不存在了**——界面早就是 30px，文档还写着 1.9rem 与一个
+   * 被撤销的档。文档漂移比代码 bug 更阴：没人报错，下一个照着文档写的人就写错。
+   *
+   * 这条判据把「文档里的数」与「令牌的真值」机器比对：从 `:root` 里解析令牌、
+   * 展开 `var()`、算 `calc()` 里的 `+`、把 rem 折成 px（1rem = 16px），再和
+   * §0.1 总表那一列比。`--rail-h` 是 `calc(var(--ctl-h) + 4px)` ⇒ 应该算出 34。
+   */
+  test('★★★ 排版总表（ui-style §0.1）里的数字必须等于 app.css 的令牌真值', async () => {
+    const files3 = await load()
+    const css = files3.get(APP_CSS) ?? ''
+    // ⚠️ 令牌**不止在第一个 `:root` 里**（`--list-row-min-h` 就在列表那一段的第二个
+    //    `:root` 块里）。所以整份文件扫一遍，同名以第一次出现为准。
+    const raw = new Map<string, string>()
+    for (const m of css.matchAll(/--([\w-]+):\s*([^;]+);/g)) {
+      if (!raw.has(m[1] as string)) raw.set(m[1] as string, (m[2] as string).trim())
+    }
+    /** 把令牌展开成 px 列表（1rem = 16px；只支持这一个加法，够用且不引第三方） */
+    const toPx = (value: string): number[] | null => {
+      let v = value
+      for (let i = 0; i < 8 && v.includes('var('); i++) {
+        v = v.replace(/var\(--([\w-]+)\)/g, (_a, name: string) => raw.get(name) ?? '?')
+      }
+      if (v.includes('?')) return null
+      const calc = /calc\((.+)\)/.exec(v)?.[1]
+      const nums = (str: string): number[] => {
+        const out: number[] = []
+        for (const tok of str.split(/\s+/).filter((t) => t !== '' && t !== '+')) {
+          const m = /^([0-9.]+)(rem|px)?$/.exec(tok)
+          if (!m) return []
+          out.push(Math.round(Number(m[1]) * (m[2] === 'rem' ? 16 : 1)))
+        }
+        return out
+      }
+      if (calc !== undefined) {
+        const sum = nums(calc)
+        const a = sum[0]
+        const b = sum[1]
+        return a !== undefined && b !== undefined ? [Math.round(a + b)] : null
+      }
+      const list = nums(v)
+      return list.length > 0 ? list : null
+    }
+    // ⚠️ 文档不在 `load()` 扫的那批文件里（它只扫界面源码）⇒ 直接用 readFile 读
+    const doc = await readFile(join(REPO_ROOT, 'docs/design/ui-style.md'), 'utf8')
+    const section = doc.slice(doc.indexOf('## 0.1 排版七条'), doc.indexOf('两条**不是数字**的规则'))
+    const rows = [...section.matchAll(/\| ([^|]+) \| `--([\w-]+)` \| ([^|]+) \|/g)]
+    assert.ok(rows.length >= 12, `§0.1 总表应当有至少 12 行带令牌的行（现在 ${rows.length} 行）`)
+    const bad: string[] = []
+    for (const row of rows) {
+      const [, theme, name, shown] = row
+      const truth = toPx(raw.get(name as string) ?? '')
+      const claimed = (shown as string)
+        .trim()
+        .split(/[·/]/)
+        .map((t) => t.trim())
+        .filter((t) => /^[0-9]+$/.test(t))
+        .map(Number)
+      if (!truth) {
+        bad.push(`--${String(name)} 在 app.css 里解析不出来（令牌删了？）`)
+        continue
+      }
+      // 令牌只有一个数时（`--pad-cell: 12px` = 四边都 12），文档写"12/12"也算对：
+      // 比的是**去重后的数值集合**，不是写法。
+      const uniq = (xs: number[]): number[] => Array.from(new Set(xs))
+      if (uniq(truth).join('/') !== uniq(claimed).join('/')) {
+        bad.push(`「${String(theme).trim()}」\`--${String(name)}\`：文档写 ${claimed.join('/')}px，令牌真值 ${truth.join('/')}px`)
+      }
+      const source = files3.get(APP_CSS) ?? ''
+      if (!source.includes(`--${String(name)}:`)) bad.push(`\`--${String(name)}\` 在 app.css 的 :root 里不存在`)
+    }
+    assert.deepEqual(bad, [], `文档与令牌漂了（改令牌时把 §0.1 那张表一起改）：\n${bad.join('\n')}`)
+  })
+
+  /**
    * ★★ D181：**动作按钮必须归进按钮族**（`class="btn btn--<重量>"`）。
    *
    * 由来：使用者说"按钮的类型差别大，一般按钮和顶栏的按钮差异太大"。查下来一半是
