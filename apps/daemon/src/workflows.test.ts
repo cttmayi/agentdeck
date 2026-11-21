@@ -157,7 +157,7 @@ test('★ 运行实例：一条一个文件（`workflow-runs/<runId>.json`）', 
   assert.equal(loaded.runs[0]!.id, 'run-1')
 })
 
-test('★★ 老的两个大 JSON 一次迁进目录；老文件改名留档、不删', async () => {
+test('★★ 老的两个大 JSON 一次迁进目录；核对通过后**删掉老文件**（D227）', async () => {
   await rm(TMP, { recursive: true, force: true })
   const { mkdir } = await import('node:fs/promises')
   await mkdir(TMP, { recursive: true })
@@ -174,10 +174,12 @@ test('★★ 老的两个大 JSON 一次迁进目录；老文件改名留档、�
   assert.equal(first.workflows[0]!.name, '老编排')
   assert.match(first.workflows[0]!.code, /await flow/, '代码也迁过去了（在 main.js 里）')
 
-  // 老文件改名留档：原名不再存在（否则下次启动会再迁一次）
+  /*
+   * ★ D227：老文件**删掉**（使用者："migrated 文件也清掉"）。删的前提是回读核对通过。
+   *   两种名字都不该存在：原名与 `.migrated` 档案。
+   */
   await assert.rejects(() => readFile(legacyWorkflowsPath(TMP), 'utf8'))
-  const archived = await readFile(`${legacyWorkflowsPath(TMP)}.migrated`, 'utf8')
-  assert.match(archived, /老编排/)
+  await assert.rejects(() => readFile(`${legacyWorkflowsPath(TMP)}.migrated`, 'utf8'))
 
   const runs = await loadWorkflowRuns(TMP)
   assert.equal(runs.migrated?.migrated, 1)

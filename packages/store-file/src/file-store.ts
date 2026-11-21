@@ -1,4 +1,4 @@
-import { readFile, readdir, rename, stat } from 'node:fs/promises'
+import { readFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   ACTIVE_RUN_STATUSES,
@@ -240,6 +240,13 @@ function isActiveRun(run: Run): boolean {
  * 从磁盘补回来。写出去的对象少这两个键是安全的：读取路径上本来就没有 zod
  * 校验（整条记录以 JSON 存，见 `Skill.files` 那段注释）。
  */
+/** 字节数给人看（"4.3 MB" / "812 KB"）。日志里报压缩收益用。 */
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
 function toIndexRecord(skill: Skill): Skill {
   const record: Record<string, unknown> = { ...skill }
   delete record['body']
@@ -640,22 +647,19 @@ export class FileStore implements Store {
     for (const [id, rec] of index) {
       this.#workspaces.set(id, { ...(rec as unknown as Workspace), id: id as Workspace['id'] })
     }
+    /*
+     * 落盘 + **回读核对**，都对上才删老文件（D227：使用者要求清掉 `.migrated` 留档）。
+     * 核对什么：新文件读得回来、且条数不少于刚回放出来的条数——这一步不是仪式，
+     * 它是"删老文件"唯一的安全垫。
+     */
     await this.#saveWorkspaces()
-    let target = `${legacy}.migrated`
-    try {
-      await readFile(target)
-      target = `${legacy}.migrated-${Date.now()}`
-    } catch {
-      // 没有旧档案 ⇒ 用默认名
-    }
-    try {
-      await rename(legacy, target)
-    } catch {
-      // 改名失败不影响已经迁好的数据（下次启动会再看到老文件，但由于新文件已在，不会再迁）
-    }
+    const verify = await readJsonOrNull<unknown[]>(this.#workspacesPath())
+    const ok = Array.isArray(verify) && verify.length >= index.size
+    if (ok) await removeQuietly(legacy)
     this.#onInfo(
       `workspace 登记表已从 workspaces.jsonl 迁成 workspaces.json：` +
-        `${index.size} 个工作区；老文件改名 \`.migrated\` 留档`,
+        `${index.size} 个工作区；` +
+        (ok ? '老文件已删除' : '⚠️ 回读核对没通过，老文件**原样留着**'),
     )
   }
 
@@ -708,7 +712,75 @@ export class FileStore implements Store {
     // 技能内容从"记录里"搬到"磁盘上"的一次性迁移（2026-10）。必须在预加载
     // 之后——它要遍历 `#stores` 里的记录。
     await store.#migrateSkillsToDisk()
+
+    // ── D227：日志的回收（`compact()` 以前**没有任何调用点**，所以只增不减）──
+    await store.#autoCompact()
+    // ── 迁移留档的清理（使用者："migrated 文件也清掉"）──
+    await store.#dropStaleMigratedFiles()
     return store
+  }
+
+  /**
+   * **该压就压**（D227，2026-11）。
+   *
+   * 两个判据**任一**成立就压（2026-11 实测：只用条数会漏掉"条数不多但很肥"的那种）：
+   *
+   *   ① **历史很长**：`pendingOps`（日志里还没物化的条数）> `max(200, 3 × 现存记录数)`
+   *      ——run 这种"状态来回改"的典型（2811 条历史 / 397 条现存）；
+   *   ② **日志很肥**：日志字节数 > `max(512 KB, 4 × 现存记录的字节数)`
+   *      ——`skill.jsonl` 这种"记录数很少、老记录却带着正文副本"的典型
+   *      （真机：4.4 MB 日志 / 13 条现存索引 ⇒ ① 算出来才 88 条，压不动，② 一眼看穿）。
+   *
+   * 为什么这么定：
+   *   · 两个都是**比例**判据，几个集合的体量差三个数量级也能用同一个规则；
+   *   · 留 3/4 倍余量：正常写入不该天天触发压缩；
+   *   · 压缩**幂等且可重复**：`compact()` 先把快照 fsync 落地再删日志，
+   *     中途崩溃最坏是"这次没压成"，下次启动再来。
+   *
+   * 压完把省下的字节数打出来——"省了多少"必须看得见，否则这条机制没人知道它生效过。
+   */
+  async #autoCompact(): Promise<void> {
+    for (const ws of this.#stores.values()) {
+      for (const name of COLLECTIONS) {
+        const log = ws.logs[name]
+        const path = join(ws.root, 'log', `${name}.jsonl`)
+        const before = await stat(path).then((s) => s.size).catch(() => 0)
+        if (before === 0) continue
+        const liveBytes = Buffer.byteLength(JSON.stringify(log.all()))
+        const tooLong = log.pendingOps > Math.max(200, 3 * log.size)
+        const tooFat = before > Math.max(512 * 1024, 4 * liveBytes)
+        if (!tooLong && !tooFat) continue
+        await log.compact()
+        const after = await stat(path).then((s) => s.size).catch(() => 0)
+        this.#onInfo(
+          `日志已压缩：log/${name}.jsonl 从 ${fmtBytes(before)} 降到 ${fmtBytes(after)}` +
+            `（现存 ${log.size} 条记录）`,
+        )
+      }
+    }
+  }
+
+  /**
+   * 删掉数据目录根下**迁移时代留下的 `<名字>.migrated` 档案**（D227）。
+   *
+   * 为什么可以删：迁移完成后数据已经在新地方（目录化 / 普通 JSON），老文件只剩
+   * "回滚到旧版代码"这一个用途；而这些迁移都跑了不止一遍、开发期也验过，
+   * 留着就是数据目录里的垃圾（使用者："migrated 文件也清掉"）。
+   *
+   * ⚠️ 只扫**数据目录根**、只认 `<xxx>.migrated` 与 `<xxx>.migrated-<时间戳>` 两种名字：
+   *   `agents/.migrated` 是**标记**（防重复迁移），不在这里，也不许删。
+   */
+  async #dropStaleMigratedFiles(): Promise<void> {
+    let names: string[]
+    try {
+      names = await readdir(this.#dataDir)
+    } catch {
+      return
+    }
+    const stale = names.filter((n) => /\.migrated(-\d+)?$/.test(n))
+    if (stale.length === 0) return
+    for (const name of stale) await removeQuietly(join(this.#dataDir, name))
+    this.#onInfo(`已清理迁移留档：${stale.join('、')}`)
   }
 
   /**

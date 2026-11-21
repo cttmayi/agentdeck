@@ -245,7 +245,7 @@ describe('★ D226：workspace 登记表是普通 JSON（不是日志）', () =>
     }
   })
 
-  test('★★ 老 workspaces.jsonl ⇒ 回放成最后状态、迁成 .json、老文件改名留档', async () => {
+  test('★★ 老 workspaces.jsonl ⇒ 回放成最后状态、迁成 .json，核对通过后**删掉老文件**', async () => {
     const d = await makeTempDir('ws-legacy')
     try {
       await mkdir(join(d, 'workspaces'), { recursive: true })
@@ -271,9 +271,12 @@ describe('★ D226：workspace 登记表是普通 JSON（不是日志）', () =>
       assert.deepEqual(await st.listWorkspaceIds(), ['ws-a'])
       await st.close()
 
-      // 老文件改名留档（不删），新文件是普通数组
+      /*
+       * ★ D227：老文件**删掉**（使用者："migrated 文件也清掉"）。删的前提是
+       * 新文件回读核对通过——所以这里同时断言"新文件里是最后状态"。
+       */
       await assert.rejects(() => readFile(join(d, 'workspaces.jsonl'), 'utf8'))
-      assert.match(await readFile(join(d, 'workspaces.jsonl.migrated'), 'utf8'), /首版/)
+      await assert.rejects(() => readFile(join(d, 'workspaces.jsonl.migrated'), 'utf8'))
       const list = JSON.parse(await readFile(join(d, 'workspaces.json'), 'utf8')) as unknown[]
       assert.equal(list.length, 1)
     } finally {
@@ -323,6 +326,65 @@ describe('★ D226：workspace 登记表是普通 JSON（不是日志）', () =>
       const b = await FileStore.open({ dataDir: d, fsync: false })
       assert.deepEqual((await b.listWorkspaceIds()).sort(), ['ws-a', 'ws-b'])
       await b.close()
+    } finally {
+      await cleanup(d)
+    }
+  })
+})
+
+describe('★ D227：日志回收（compact 终于有调用点）与迁移留档清理', () => {
+  test('★★ 日志"状态少、历史多"时，开库自动压缩一次（只增不减的老毛病）', async () => {
+    const d = await makeTempDir('auto-compact')
+    try {
+      const a = await FileStore.open({ dataDir: d, fsync: false })
+      await a.insertWorkspace({
+        executeTemplate: '', reviewTemplate: '', chatTemplate: '',
+        defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1,
+      })
+      // 同一个 id 写 250 版：`pendingOps` 250，远大于 max(200, 3×1)
+      for (let i = 0; i < 250; i += 1) {
+        await a.insertSkill(makeSkill({ id: 's1', workspaceId: WS, slug: 'bloat', name: `v${i}` }))
+      }
+      await a.close()
+
+      const logs: string[] = []
+      const b = await FileStore.open({ dataDir: d, fsync: false, onInfo: (m) => logs.push(m) })
+      assert.ok(
+        logs.some((l) => l.includes('日志已压缩') && l.includes('skill.jsonl')),
+        `开库应当压缩 skill 日志，实际日志：${logs.join(' / ')}`,
+      )
+      // 物化之后：状态还在（最后一版），快照文件在
+      assert.equal((await b.getSkill(skillId('s1')))?.name, 'v249')
+      await access(join(d, 'workspaces', String(WS), 'log', 'skill.jsonl.snapshot'))
+      await b.close()
+    } finally {
+      await cleanup(d)
+    }
+  })
+
+  test('★ 迁移留下的 `.migrated` 档案在开库时清掉（agents/.migrated 是标记，不许动）', async () => {
+    const d = await makeTempDir('drop-migrated')
+    try {
+      const a = await FileStore.open({ dataDir: d, fsync: false })
+      await a.insertWorkspace({
+        executeTemplate: '', reviewTemplate: '', chatTemplate: '',
+        defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1,
+      })
+      await a.close()
+      // 造两份"历史留档" + 一份**标记**（标记必须留着：它挡着重复迁移）
+      await writeFile(join(d, 'workflows.json.migrated'), '[]', 'utf8')
+      await writeFile(join(d, 'schedules.json.migrated-123'), '[]', 'utf8')
+      await mkdir(join(d, 'agents'), { recursive: true })
+      await writeFile(join(d, 'agents', '.migrated'), '{"v":1}', 'utf8')
+
+      const logs: string[] = []
+      const b = await FileStore.open({ dataDir: d, fsync: false, onInfo: (m) => logs.push(m) })
+      await b.close()
+      assert.ok(logs.some((l) => l.includes('已清理迁移留档')))
+      await assert.rejects(() => readFile(join(d, 'workflows.json.migrated'), 'utf8'))
+      await assert.rejects(() => readFile(join(d, 'schedules.json.migrated-123'), 'utf8'))
+      // 标记还在
+      assert.match(await readFile(join(d, 'agents', '.migrated'), 'utf8'), /v/)
     } finally {
       await cleanup(d)
     }

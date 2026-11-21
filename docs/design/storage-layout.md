@@ -190,13 +190,14 @@
 
 **改了之前是什么**：`workspaces.jsonl`——与 issue / run 那些**业务集合**共用同一套
 append-only 日志。真机上量到的样子：**一个**工作区、**87 行**、**67 KB**（每次保存设置都是
-`put`，整条记录再追加一份），而 `compact()` **没有任何生产调用点** ⇒ 只增不减。
+`put`，整条记录再追加一份），而且当时 `compact()` **没有任何生产调用点** ⇒ 只增不减
+（D227 补上了回收，见 §10）。
 迁移后同一个工作区是 **1060 字节 / 1 条**。
 
 | 文件 | 角色 |
 |---|---|
 | `workspaces.json` | workspace 记录（`locale` / `defaultAgentId` / `defaultRuntimeKey` / 三档模板 / `memoryPrefixes` / `localSkillDirs` / `runtimeConfigIsolation` / **`platformSlots`** 槽位表 / 时间），整文件原子写 |
-| `workspaces.jsonl.migrated` | 老日志的留档（**不在白名单里，不会被读**；回滚 = 改回原名 + 发旧版代码） |
+| ~~`workspaces.jsonl.migrated`~~ | D226 时是留档；**D227 起迁移核对通过就删掉**（启动时还会扫一遍数据目录根，清掉历史遗留的 `.migrated`） |
 
 为什么日志对 workspace 没有用（逐条对照 `log.ts` 头注释里那三个理由）：
 历史——没有任何代码读它的历史，界面上也没有「工作区版本 / 回滚」；回放导入——那是给
@@ -211,14 +212,14 @@ append-only 日志。真机上量到的样子：**一个**工作区、**87 行**
 
 1. 读 `workspaces.json`（正常路径）；
 2. 读不到且老 `workspaces.jsonl` 还在 ⇒ **回放**（`put` 覆盖 / `patch` 合并 / `del` 删除）
-   成最后状态、写进新文件、老文件改名 `.migrated` **留档不删**；
+   成最后状态、写进新文件、**核对通过后删掉老文件**（D227；核对不通过就原样留着并报错）；
 3. 还是空的、或**登记表缺了盘上有的工作区** ⇒ **按数据重建**：来源是
    `workspaces/<id>/` 目录 **+** `agents/<id>/agent.json` 里的 `workspaceId`
    （智能体是平铺的，不属于哪个工作区目录——只扫目录会在"只有智能体"的数据目录上一无所获）。
    名称在目录里没有留档 ⇒ 用默认名，并打一条 `info` 说清。
 
 > 实测（真数据的一份拷贝）：首开把 87 行回放成 1 条（`locale: zh` / `runtime: codex` /
-> 5 个槽位 / 2 个本地技能目录全都还在），老文件变 `workspaces.jsonl.migrated`；
+> 5 个槽位 / 2 个本地技能目录全都还在），老文件核对通过后被删除；
 > 手工删掉 `workspaces.json` 再开 ⇒ 打印「登记表缺了盘上已有的 1 个工作区，已按数据重建」，
 > 11 个智能体照常读得到；第三次开没有任何迁移/自愈日志（幂等）。
 
@@ -253,13 +254,13 @@ append-only 日志。真机上量到的样子：**一个**工作区、**87 行**
    刻意不跟着删（任务页里那条 issue 还指着它的运行记录）。
 
 **迁移**（`migrateLegacyWorkflows` / `migrateLegacyWorkflowRuns`，启动时自动跑一次）：
-老文件里的每条落成目录（目录已存在就跳过），然后把老文件改名 `.migrated`（已存在就带时间戳）
-**留档不删**——回滚只需发旧版代码 + 改回原名。老文件是坏 JSON ⇒ **报错、不改名、不删**
+老文件里的每条落成目录（目录已存在就跳过），然后**回读核对**（新存储读得回来、条数不少于迁入的）
+——通过才**删掉**老文件（D227：不再留 `.migrated` 档）。老文件是坏 JSON ⇒ **报错、不删**
 （迁移不许掩盖坏数据）。幂等：跑完就没有原名文件了，再跑直接返回 `null`。
 
 > 实测（真数据的一份拷贝）：1 条编排 + 23 条运行 → `workflows/01M7DP…/` 一个目录
 > （`workflow.json` 无 code、`main.js` 339 字）+ `workflow-runs/` 23 个文件；
-> 老文件变 `workflows.json.migrated` / `workflow-runs.json.migrated`；第二次跑 `migrated: null`。
+> 老文件核对通过后被删除；第二次跑 `migrated: null`。
 
 **还没做**：编排内建智能体（`Workflow.inlineAgents`，现在恒为 `[]`）。它落地时按
 `agents/<id>/` 的形状在编排目录里加 `agents/<agentId>/{agent.json,instructions.md}`——
@@ -296,11 +297,11 @@ append-only 日志。真机上量到的样子：**一个**工作区、**87 行**
    连它一起删是对的。
 
 **迁移**（`migrateLegacySchedules`，启动时自动跑一次）：口径与编排那次逐条相同——
-目录已存在就跳过；迁完 `schedules.json` 改名 `.migrated` **留档不删**；老文件是坏 JSON ⇒
-报错且**不改名不删**；幂等（跑完再跑返回 `null`）。
+目录已存在就跳过；迁完**回读核对通过才删** `schedules.json`（D227）；老文件是坏 JSON ⇒
+报错且**不删**；幂等（跑完再跑返回 `null`）。
 
 > 实测（真数据的一份拷贝）：3 条 → 3 个目录（`schedule.json` 的键里没有 `taskText` / `records`），
-> 老文件变 `schedules.json.migrated`，第二次跑 `migrated: null`。新建 / 改正文 / 删除走 HTTP
+> 老文件核对通过后被删除，第二次跑 `migrated: null`。新建 / 改正文 / 删除走 HTTP
 > 也各验过一遍（改的是 `task.md`，删的是整个目录）。
 
 ## 9. run、消息流、会话
@@ -338,10 +339,22 @@ append-only 日志。真机上量到的样子：**一个**工作区、**87 行**
 **白名单就是这条边界的实现**：名单外的文件不会被读、更不会被连带删除；名单内坏掉的一行
 也只影响那一条记录，不会拖垮整份。
 
-**压缩（compact）**：把当前状态物化成 `log/<collection>.jsonl.snapshot` 再丢弃增量日志。
+**压缩（compact）＝ 唯一能把日志变小的机制**（D227 起**每次开库自动跑**）：
+把当前状态物化成 `log/<collection>.jsonl.snapshot`，再删掉增量日志。
 顺序不可颠倒——**先 fsync 快照落地，再删日志**（反过来崩溃会同时丢两者 = 清空工作区）。
-⚠️ 现状：`FileStore.compact()` **今天没有任何生产调用点**（store 暴露了方法，daemon 没接
-路由也没接定时器），所以真机上**看不到** `.snapshot` 文件。它现在只被测试与"要用时手动调"用到。
+
+判据是两条比例式，**任一**成立就压（`JsonlLog.pendingOps` 是 D227 为此加的）：
+
+| 判据 | 算式 | 抓的是哪种 |
+|---|---|---|
+| 历史很长 | `pendingOps > max(200, 3 × 现存记录数)` | `run.jsonl`（状态来回改）：2811 条历史 / 397 条现存 |
+| 日志很肥 | `字节数 > max(512 KB, 4 × 现存记录的字节数)` | `skill.jsonl`（老记录带正文副本）：4.4 MB / 13 条索引 |
+
+只盯条数会漏掉第二种——实测 `skill.jsonl` 按条数算才 88 条，压不动。
+
+> 实测（真数据拷贝）：`skill.jsonl` 4.3 MB → 0（快照 6 KB，13 个技能正文照样读得回来）、
+> `run.jsonl` 1.2 MB → 0（快照 407 KB，397 条运行完好），整个 `log/` 从 **6.9 MB → 415 KB**。
+> 启动日志逐条打出"从多少降到多少、现存几条"——省了多少必须看得见。
 
 ---
 
@@ -414,6 +427,7 @@ skill、`~/.claude.json` 的 `mcpServers` 会拉起 npx/浏览器，天然在任
 | 技能正文落盘、`skillsRoot` 落点、覆盖安装清空旧支持文件、拒绝越界路径 | `packages/store-file/src/file-store.test.ts`、`apps/daemon/src/skills-install.test.ts`、`apps/daemon/src/skill-exec-check.test.ts` |
 | 日志 append-only、patch 绝对赋值、compact 顺序 | `packages/store-file/src/file-store.test.ts` |
 | workspace 登记表：普通 JSON（不追加）、老 `.jsonl` 回放迁移、按目录/智能体自愈、半坏补齐 | `packages/store-file/src/file-store.test.ts`（D226 那 4 条） |
+| 开库自动压缩（条数判据与字节判据都要见效）、迁移留档清理（`agents/.migrated` 是标记不许动） | `packages/store-file/src/file-store.test.ts`（D227 那 2 条） |
 | 定时任务的目录形状、记录一行一条与顺序、坏条 / 缺 `task.md` 报错、迁移与幂等 | `apps/daemon/src/schedules.test.ts`（存储 7 条 + 整链 3 条） |
 | 编排的目录形状、逐条报错、缺 `main.js` 仍列出、老文件迁移与幂等、删除只删定义 | `apps/daemon/src/workflows.test.ts`；端上另有 `template-e2e.test.ts`、`startup-reconcile.test.ts` |
 | 记忆目录化与镜像 | `apps/daemon/src/{memory,memory-files}.test.ts` |

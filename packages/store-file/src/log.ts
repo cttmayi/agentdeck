@@ -42,6 +42,12 @@ export class JsonlLog<T extends { id: string }> {
   readonly #handle: AppendHandle
   readonly #index = new Map<string, T>()
   #seq = 0
+  /**
+   * 上次物化（快照）时的 `seq`。`#seq - #snapshotSeq` = **日志里还没物化的条数**——
+   * 这是"该不该压缩"的判据（2026-11，D227：`compact()` 以前没有任何调用点，
+   * 所有集合的日志只增不减）。
+   */
+  #snapshotSeq = 0
 
   constructor(path: string, options: { fsync?: boolean } = {}) {
     this.#path = path
@@ -57,11 +63,22 @@ export class JsonlLog<T extends { id: string }> {
     return this.#seq
   }
 
+  /**
+   * 日志文件里**还没被物化**的条数（快照之后写进来的那些）。
+   *
+   * 用它判断"要不要压缩"：写得多、状态少（run 的状态来回改、skill 的老记录带正文）
+   * 时这个数会远大于 `size`；`compact()` 之后归零。
+   */
+  get pendingOps(): number {
+    return Math.max(0, this.#seq - this.#snapshotSeq)
+  }
+
   /** 打开并重建内存索引：先读快照，再回放增量日志。 */
   async open(): Promise<void> {
     const snap = await readJsonOrNull<Snapshot<T>>(this.#snapshotPath)
     if (snap) {
       this.#seq = snap.seq
+      this.#snapshotSeq = snap.seq
       for (const item of snap.items) this.#index.set(item.id, item)
     }
     await this.#replay()
@@ -171,6 +188,8 @@ export class JsonlLog<T extends { id: string }> {
       this.#snapshotPath,
       JSON.stringify({ seq: this.#seq, items: this.all() } satisfies Snapshot<T>),
     )
+    // 快照落地之后才认账：这一刻日志里已经没有被物化的东西了（`pendingOps` 归零）
+    this.#snapshotSeq = this.#seq
 
     await this.#handle.close()
     const rotated = `${this.#path}.discard-${process.pid}-${Date.now()}`

@@ -27,7 +27,7 @@
  *   "新的在前"（与内存里的 `Schedule.records` 同一顺序）。
  */
 
-import { readdir, readFile, rename, rm } from 'node:fs/promises'
+import { readdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { atomicWrite, ensureDir, readJsonOrNull } from '@agentdeck/store-file'
 import type { Schedule, ScheduleRecord } from './schedules.ts'
@@ -211,7 +211,7 @@ export function legacySchedulesPath(dir: string): string {
  *   · 老文件**不存在** ⇒ 什么都不做（返回 `null`，与"迁了 0 条"是两件事）；
  *   · 老文件**读不出来** ⇒ **不改名、不删**，把错误报出去（迁移不许掩盖坏数据）；
  *   · 目标目录**已经存在** ⇒ 跳过那一条（目录是新的真相）；
- *   · 迁完把老文件改名 `schedules.json.migrated` **留档不删**（回滚 = 发旧版代码 + 改回原名）。
+ *   · 迁完**核对**通过才删老文件（D227：不再留 `.migrated` 档）。
  */
 export async function migrateLegacySchedules(
   dir: string,
@@ -260,19 +260,24 @@ export async function migrateLegacySchedules(
       errors.push(`定时任务 ${s.id} 落盘失败：${String(err)}`)
     }
   }
-  // 一条都没迁成（全失败）就别改名——留着老文件，下次启动还能再试。
+  // 一条都没迁成（全失败）就别动老文件——留着，下次启动还能再试。
   if (errors.length === 0 || migrated > 0) {
-    let target = `${path}.migrated`
-    try {
-      await readFile(target)
-      target = `${path}.migrated-${Date.now()}`
-    } catch {
-      // 没有旧档案 ⇒ 用默认名
-    }
-    try {
-      await rename(path, target)
-    } catch (err) {
-      errors.push(`老文件改名留档失败（不影响已迁数据）：${String(err)}`)
+    /*
+     * ⚠️ 删之前**核对**（D227，使用者："migrated 文件也清掉"）：把新存储读回来数一遍，
+     *   "读得回来、条数不少于刚迁过去的"才删。核对不通过 ⇒ 老文件原样留着 + 报原因。
+     */
+    const back = await listScheduleDirs(dir)
+    const safe = back.errors.length === 0 && back.schedules.length >= migrated
+    if (safe) {
+      try {
+        await rm(path, { force: true })
+      } catch (err) {
+        errors.push(`老文件删除失败（不影响已迁数据）：${String(err)}`)
+      }
+    } else {
+      errors.push(
+        `${path} 回读核对没通过（新存储 ${back.schedules.length} 条 < 迁入 ${migrated} 条），老文件原样留着`,
+      )
     }
   }
   return { migrated, skipped, errors }

@@ -1376,7 +1376,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     info(
       `定时任务存储已迁移到目录形状：${m.migrated} 条迁入 ${schedulesRoot(options.dataDir)}` +
         (m.skipped > 0 ? `，${m.skipped} 条目录里已有（跳过）` : '') +
-        '；老文件改名为 `.migrated` 留档',
+        '；老文件已删除（核对通过后才删）',
     )
     for (const e of m.errors) warn(`定时任务迁移：${e}`)
   }
@@ -1404,7 +1404,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     info(
       `编排存储已迁移到目录形状：${m.migrated} 条迁入 ${workflowsRoot(options.dataDir)}` +
         (m.skipped > 0 ? `，${m.skipped} 条目录里已有（跳过）` : '') +
-        '；老文件改名为 `.migrated` 留档',
+        '；老文件已删除（核对通过后才删）',
     )
     for (const e of m.errors) warn(`编排迁移：${e}`)
   }

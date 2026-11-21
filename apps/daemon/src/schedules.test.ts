@@ -246,7 +246,7 @@ describe('定时任务存储与切分', () => {
     }
   })
 
-  test('★★ 老的 schedules.json 一次迁进目录；老文件改名留档、幂等', async () => {
+  test('★★ 老的 schedules.json 一次迁进目录；核对通过后**删掉老文件**、幂等', async () => {
     const dir = await makeTempDir('schedules-migrate')
     try {
       const { readFile, writeFile } = await import('node:fs/promises')
@@ -258,9 +258,9 @@ describe('定时任务存储与切分', () => {
       assert.equal(first.schedules[0]!.taskText, '{{date}} 竞品周报')
       assert.equal(first.schedules[0]!.records.length, 1)
 
-      // 原名文件不再存在，留档在 `.migrated`
+      // ★ D227：老文件删掉（核对通过后），也不再产生 `.migrated` 档案
       await assert.rejects(() => readFile(legacySchedulesPath(dir), 'utf8'))
-      assert.match(await readFile(`${legacySchedulesPath(dir)}.migrated`, 'utf8'), /竞品周报/)
+      await assert.rejects(() => readFile(`${legacySchedulesPath(dir)}.migrated`, 'utf8'))
 
       const second = await loadSchedules(dir)
       assert.equal(second.migrated, null, '已归档 ⇒ 不再迁')

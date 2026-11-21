@@ -28,7 +28,7 @@
  *   到本文件里（`workflow.json` 里的 `inlineAgents` 字段先原样留着，那条功能要用它）。
  */
 
-import { mkdir, readdir, readFile, rename, rm } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { atomicWrite, ensureDir, readJsonOrNull } from '@agentdeck/store-file'
 import type { Workflow } from './workflows.ts'
@@ -228,20 +228,22 @@ export function legacyWorkflowRunsPath(dir: string): string {
 }
 
 /**
- * 把一个老文件改名留档（`<名>.migrated`；已经存在就带时间戳）。
+ * 迁移成功后**删掉**老文件（D227，2026-11 使用者："migrated 文件也清掉"）。
  *
- * **不删**：回滚只需发旧版代码 + 把这个文件改回原名。老文件是使用者的数据，
- * 平台不悄悄删人的东西（与 `agent.jsonl` 那次处置同一口径）。
+ * ⚠️ 删之前**必须核对**：调用方把新存储读回来数一遍，只有"读得回来、条数不少于
+ *   刚迁过去的"才删。这一步是删老文件唯一的安全垫——没有它，删就是赌。
+ *   核对不通过 ⇒ 老文件原样留着，并把原因写进 `errors`（启动日志会打出来）。
+ *
+ * 历史沿革：D224/D225 那两版是改名 `.migrated` 留档（可回滚）；使用者看过之后
+ * 要求清掉——数据已经在新地方，留着只是数据目录里的垃圾。
  */
-async function archiveLegacy(path: string): Promise<void> {
-  let target = `${path}.migrated`
+async function dropLegacy(path: string): Promise<string | null> {
   try {
-    await readFile(target)
-    target = `${path}.migrated-${Date.now()}`
-  } catch {
-    // 没有旧档案 ⇒ 用默认名
+    await rm(path, { force: true })
+    return null
+  } catch (err) {
+    return `老文件删除失败（不影响已迁数据）：${String(err)}`
   }
-  await rename(path, target)
 }
 
 /**
@@ -290,12 +292,15 @@ export async function migrateLegacyWorkflows(
       errors.push(`编排 ${wf.id} 落盘失败：${String(err)}`)
     }
   }
-  // 一条都没迁成（全失败）就别改名——留着老文件，下次启动还能再试。
+  // 一条都没迁成（全失败）就别动老文件——留着，下次启动还能再试。
   if (errors.length === 0 || migrated > 0) {
-    try {
-      await archiveLegacy(path)
-    } catch (err) {
-      errors.push(`老文件改名留档失败（不影响已迁数据）：${String(err)}`)
+    const back = await listWorkflowDirs(dir)
+    const safe = back.errors.length === 0 && back.workflows.length >= migrated
+    if (safe) {
+      const why = await dropLegacy(path)
+      if (why !== null) errors.push(why)
+    } else {
+      errors.push(`${path} 回读核对没通过（新存储 ${back.workflows.length} 条 < 迁入 ${migrated} 条），老文件原样留着`)
     }
   }
   return { migrated, skipped, errors }
@@ -339,11 +344,15 @@ export async function migrateLegacyWorkflowRuns(
       errors.push(`运行 ${run.id} 落盘失败：${String(err)}`)
     }
   }
+  // 一条都没迁成（全失败）就别动老文件——留着，下次启动还能再试。
   if (errors.length === 0 || migrated > 0) {
-    try {
-      await archiveLegacy(path)
-    } catch (err) {
-      errors.push(`老文件改名留档失败（不影响已迁数据）：${String(err)}`)
+    const back = await listWorkflowDirs(dir)
+    const safe = back.errors.length === 0 && back.workflows.length >= migrated
+    if (safe) {
+      const why = await dropLegacy(path)
+      if (why !== null) errors.push(why)
+    } else {
+      errors.push(`${path} 回读核对没通过（新存储 ${back.workflows.length} 条 < 迁入 ${migrated} 条），老文件原样留着`)
     }
   }
   return { migrated, skipped, errors }
