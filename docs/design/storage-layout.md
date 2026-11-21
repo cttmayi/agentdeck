@@ -54,20 +54,45 @@
 ├── lock                          { pid, startedAt } 单进程锁
 ├── device.json                   { id, name, createdAt, lastSeenAt }
 ├── workspaces.json               workspace 记录（普通 JSON 数组，**不是日志**，§6）
+│
 ├── agents/<agentId>/             ★ 一个智能体 = 一个目录（§3）
-├── memory/<agentId>/MEMORY.md    记忆的**人可读镜像**；`memory/` 整个根是一个 git 仓库
-├── workflows/<workflowId>/       ★ 一条编排 = 一个目录（§7）：workflow.json + main.js
+│   ├── agent.json                结构化（**不含指令正文**）
+│   ├── instructions.md           指令正文（**组装前**：内置 = 身份块，自建 = 全文）
+│   ├── memory.jsonl              它自己的记忆（权威；§5）
+│   └── SKILL/<slug>/SKILL.md     它**独有**的技能（文件资产：不进技能库、不进技能页、不可卸载）
+│
+├── memory/<agentId>/MEMORY.md    记忆的**人可读镜像**（`memory/` 整个根是一个 git 仓库）
+│
+├── workflows/<workflowId>/       ★ 一条编排 = 一个目录（§7）
+│   ├── workflow.json             结构化（**不含代码**）
+│   ├── main.js                   编排代码本体
+│   └── agents/<agentId>/         **编排内建智能体**（只在编排里有效）——与 agents/<id>/ 同形：
+│       ├── agent.json            name / runtimeKey / skillIds …（不含指令）
+│       └── instructions.md       它的话
+│       ⚠️ 这一层**功能尚未落地**（`Workflow.inlineAgents` 字段已在、原语没接）；
+│          落地的位置就是这里，别在别处再造一套"编排专用智能体"的存法
+│
 ├── workflow-runs/<runId>.json    编排运行记录：一条运行一个文件
-├── schedules/<scheduleId>/        ★ 一条定时任务 = 一个目录（§8）：schedule.json + task.md + records.jsonl
+│
+├── schedules/<scheduleId>/       ★ 一条定时任务 = 一个目录（§8）
+│   ├── schedule.json             配置（cron / 执行者 / 启动方式 / 计数 / 上次触发）
+│   ├── task.md                   任务模板正文（`{{date}}` 这些变量的宿主）
+│   └── records.jsonl             触发记录（一行一条，最老在前，最多 50 行）
+│
 ├── claude-config/                claude 的受管配置目录（D78，§11）
 ├── codex-config/                 codex 的受管 CODEX_HOME（§11）
 ├── tool-tmp/                     脚本临时目录（跑完即删）
+│
 └── workspaces/<wsId>/
     ├── log/<collection>.jsonl    append-only 权威记录（§10）
     ├── log/<collection>.jsonl.snapshot  压缩后的快照（只有 compact 过才有）
     ├── blobs/<前两位>/<sha256>   内容寻址（不可变，路径即摘要）
     └── runs/<runId>/messages.jsonl   这条 run 的消息流（§9）
 ```
+
+> 一句话读法：**凡走 JSONL 日志的都是「会不断变化的业务记录」（`workspaces/<wsId>/log/`），
+> 凡是一个实体一个目录的都是「一份配置 + 一篇人能读的正文」（`agents/` `workflows/`
+> `schedules/`）**。两种形状不混用——日志用来记"它变过几次"，目录用来记"它现在是什么"。
 
 ---
 
@@ -263,7 +288,8 @@ append-only 日志。真机上量到的样子：**一个**工作区、**87 行**
 > 老文件核对通过后被删除；第二次跑 `migrated: null`。
 
 **还没做**：编排内建智能体（`Workflow.inlineAgents`，现在恒为 `[]`）。它落地时按
-`agents/<id>/` 的形状在编排目录里加 `agents/<agentId>/{agent.json,instructions.md}`——
+`agents/<id>/` 的形状在编排目录里加 `agents/<agentId>/{agent.json,instructions.md}`
+（§2 的全图里已经把这一层画进去了，并标了"功能尚未落地"）——
 **现在不建空目录**（那叫造死结构）。
 
 ## 8. 定时任务 —— `schedules/<id>/`（D225，2026-11 已落地）
