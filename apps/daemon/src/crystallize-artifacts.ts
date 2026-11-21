@@ -387,7 +387,7 @@ export async function readDraftSkillDir(dir: string): Promise<Record<string, str
  * **动态认出哪一份是 SKILL.md**（分批第 217 批，使用者定："不要搬，动态识别位置"）。
  *
  * 起草者不一定手写 `skill/SKILL.md`——它可能调自己那份写入器（真机上装的 distilly 有
- * `tools/skill_writer.py`，落点是 `<base-dir>/<slug>/SKILL.md`）。所以产物可能是
+ * `tools/skill_writer.py`，落点是 `<base-dir>/<名字>/SKILL.md`）。所以产物可能是
  * `skill/<dir>/SKILL.md`。
  *
  * ⚠️ **只认位置，不改路径**（使用者："右侧产物的编辑也应该编辑它产生的"）：返回的是它**真正

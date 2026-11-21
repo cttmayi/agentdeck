@@ -233,12 +233,12 @@ export type MineHistory =
  */
 export async function listMineHistory(
   mineRoot: string,
-  slug: string,
+  name: string,
   gitPath = 'git',
 ): Promise<MineHistory> {
   const result = await runGit(
     gitPath,
-    ['log', '--follow', '--date=iso-strict', '--format=%H%x1f%h%x1f%cI%x1f%s', '--', `${slug}/`],
+    ['log', '--follow', '--date=iso-strict', '--format=%H%x1f%h%x1f%cI%x1f%s', '--', `${name}/`],
     mineRoot,
   )
   if (!result.ok) {
@@ -282,13 +282,13 @@ export type MineRevision =
  */
 export async function readMineRevision(
   mineRoot: string,
-  slug: string,
+  name: string,
   rev: string,
   gitPath = 'git',
 ): Promise<MineRevision> {
   const listed = await runGit(
     gitPath,
-    ['ls-tree', '-r', '--name-only', rev, '--', `${slug}/`],
+    ['ls-tree', '-r', '--name-only', rev, '--', `${name}/`],
     mineRoot,
   )
   if (!listed.ok) return { available: false, reason: listed.reason }
@@ -296,7 +296,7 @@ export async function readMineRevision(
   for (const full of listed.stdout.split('\n')) {
     const path = full.trim()
     if (path === '') continue
-    const rel = path.startsWith(`${slug}/`) ? path.slice(slug.length + 1) : path
+    const rel = path.startsWith(`${name}/`) ? path.slice(name.length + 1) : path
     const shown = await runGit(gitPath, ['show', `${rev}:${path}`], mineRoot)
     // 单个文件取不到不该让整棵树失败：如实留一句在正文里，界面看得见是哪个文件
     files[rel] = shown.ok ? shown.stdout : `（这一版里读不到它：${shown.reason}）`
@@ -316,7 +316,7 @@ export type MineCompare =
  */
 export async function compareMineRevisions(
   mineRoot: string,
-  slug: string,
+  name: string,
   from: { rev: string } | { current: Record<string, string> },
   to: { rev: string } | { current: Record<string, string> },
   gitPath = 'git',
@@ -325,7 +325,7 @@ export async function compareMineRevisions(
     side: { rev: string } | { current: Record<string, string> },
   ): Promise<{ ok: true; files: Record<string, string> } | { ok: false; reason: string }> => {
     if ('current' in side) return { ok: true, files: side.current }
-    const got = await readMineRevision(mineRoot, slug, side.rev, gitPath)
+    const got = await readMineRevision(mineRoot, name, side.rev, gitPath)
     return got.available ? { ok: true, files: got.files } : { ok: false, reason: got.reason }
   }
   const before = await load(from)

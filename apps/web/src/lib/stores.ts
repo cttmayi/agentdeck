@@ -583,8 +583,8 @@ export async function deleteAgent(id: string): Promise<void> {
 // 独有技能（2026-11，D111）
 // ════════════════════════════════════════════════════════════════
 // 与"挂载的技能"（`skillIds` 引用技能库）两码事：独有技能是**这个智能体目录里
-// 的文件**（`agents/<id>/skills/<slug>/SKILL.md`）。它不进技能库、不进技能页、
-// 不可卸载；删智能体连目录一起删。改它走 `PUT /api/agents/:id/skills/:slug`，
+// 的文件**（`agents/<名字>/skills/<名字>/SKILL.md`）。它不进技能库、不进技能页、
+// 不可卸载；删智能体连目录一起删。改它走 `PUT /api/agents/:id/skills/:name`，
 // 校验与安装接口同一关（服务端）。
 // ⚠️ 只读态（内置智能体）不调这三个——界面第一道闸，服务端第二道。
 
@@ -597,17 +597,17 @@ export async function listExclusiveSkills(agentId: string): Promise<AgentExclusi
 
 export async function saveExclusiveSkill(
   agentId: string,
-  slug: string,
+  name: string,
   body: string,
 ): Promise<void> {
-  await api(`/api/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(slug)}`, {
+  await api(`/api/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(name)}`, {
     method: 'PUT',
     body: JSON.stringify({ body }),
   })
 }
 
-export async function deleteExclusiveSkill(agentId: string, slug: string): Promise<void> {
-  await api(`/api/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(slug)}`, {
+export async function deleteExclusiveSkill(agentId: string, name: string): Promise<void> {
+  await api(`/api/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(name)}`, {
     method: 'DELETE',
   })
 }
