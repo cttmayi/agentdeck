@@ -1,3 +1,4 @@
+import { readFile, readdir, rename, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   ACTIVE_RUN_STATUSES,
@@ -420,8 +421,12 @@ export class FileStore implements Store {
   readonly #skillsRoot: string
   /** 使用者提炼技能（D80）的落点——与 `#skillsRoot` 物理分离，见 `FileStoreOptions`。 */
   readonly #mineRoot: string
-  /** workspace 记录单独存放——这样 getWorkspace 不必先打开它的目录。 */
-  readonly #wsIndex: JsonlLog<Workspace & { id: string }>
+  /**
+   * ★ 2026-11（D226）：workspace 记录**不是日志**，是一个普通 JSON 数组文件
+   *   （`<dataDir>/workspaces.json`）——见 `#loadWorkspaces` 上面那段。
+   *   单独存放是为了 `getWorkspace` 不必先打开它的目录。
+   */
+  readonly #workspaces = new Map<string, Workspace>()
   readonly #device = new Mutex()
   readonly #mutex = new Mutex()
   /** 智能体目录的写锁——目录是平的（`<dataDir>/agents/`），不属于某个 workspace。 */
@@ -447,9 +452,211 @@ export class FileStore implements Store {
     this.#skillsRoot = skillsRoot
     this.#mineRoot = mineRoot
     this.#onInfo = onInfo
-    this.#wsIndex = new JsonlLog<Workspace & { id: string }>(join(dataDir, 'workspaces.jsonl'), {
-      fsync,
-    })
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+   * workspace 记录：一个普通 JSON，不是日志（D226，2026-11）
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 之前它是 `workspaces.jsonl`——与 issue / run 那些**业务集合**共用同一套
+   * append-only 日志。量出来的代价：真机上**一个**工作区、**87 行**、65 KB，
+   * 因为每次保存设置都是 `put`（整条记录再追加一份），而 `compact()` 从来没有
+   * 生产调用点 ⇒ 只增不减。
+   *
+   * 而日志那三个好处对 workspace **一条都落不到实处**：
+   *   · 历史：没有任何代码读它的历史，界面上也没有"工作区版本/回滚"；
+   *   · 回放导入：回放是给业务实体用的（换存储实现时装载一次）；
+   *   · 崩溃安全：整文件原子写（tmp → fsync → rename）给的是**同一个**保证。
+   *
+   * 所以它退回成一个普通数组文件 `<dataDir>/workspaces.json`（今天是 1 条）。
+   *
+   * ⚠️ **这份文件是"数据目录的总钥匙"**：`#stores`（每个 workspace 的日志、
+   *    runs、blobs）全是按它登记的 id 打开的。它丢了 = daemon 会新建一个
+   *    「默认工作区」（新 id）= 界面看起来数据全没了，而文件其实还在
+   *    `workspaces/<老 id>/` 里。所以 `#loadWorkspaces` 里有一个**按目录自愈**
+   *    的兜底：索引为空、或索引里缺了盘上有的目录 ⇒ 用目录重建登记。
+   */
+
+  /** workspace 索引文件的落点。 */
+  #workspacesPath(): string {
+    return join(this.#dataDir, 'workspaces.json')
+  }
+
+  /** 老文件（append-only 日志）的落点——只用于一次性迁移。 */
+  #legacyWorkspacesPath(): string {
+    return join(this.#dataDir, 'workspaces.jsonl')
+  }
+
+  /** 整文件原子写（一个数组）。顺序固定为 `createdAt` 升序，diff 才稳定。 */
+  async #saveWorkspaces(): Promise<void> {
+    const list = [...this.#workspaces.values()].sort(
+      (a, b) => a.createdAt - b.createdAt || String(a.id).localeCompare(String(b.id)),
+    )
+    await atomicWrite(this.#workspacesPath(), `${JSON.stringify(list, null, 2)}\n`)
+  }
+
+  /** 盘上有哪些 workspace 目录（自愈与"孤儿"检查都靠它）。 */
+  async #workspaceDirsOnDisk(): Promise<string[]> {
+    const root = join(this.#dataDir, 'workspaces')
+    try {
+      const names = await readdir(root)
+      return names.filter((n) => !n.startsWith('.'))
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * 从**智能体目录**反推工作区 id。
+   *
+   * ⚠️ 为什么另一个来源也要有：智能体是**平铺**在 `<dataDir>/agents/<id>/` 的
+   *   （不属于哪个 `workspaces/<id>/` 目录），所以"只有智能体、还没有任务/run"的
+   *   数据目录光扫 `workspaces/` 会一无所获。少了这一来源，登记表一丢，
+   *   那些智能体就跟着"看不见"了（它们带着新 id 的 workspaceId，界面按 id 过滤）。
+   */
+  async #workspaceIdsFromAgentDirs(): Promise<string[]> {
+    const root = join(this.#dataDir, 'agents')
+    let ids: string[]
+    try {
+      ids = await readdir(root)
+    } catch {
+      return []
+    }
+    const out = new Set<string>()
+    for (const id of ids) {
+      if (id.startsWith('.')) continue
+      const rec = await readJsonOrNull<{ workspaceId?: unknown }>(
+        join(root, id, 'agent.json'),
+      )
+      if (rec && typeof rec.workspaceId === 'string' && rec.workspaceId !== '') {
+        out.add(rec.workspaceId)
+      }
+    }
+    return [...out]
+  }
+
+  /**
+   * 启动时装载 workspace 登记表。三步，后一步只在前一步什么都没拿到时才跑：
+   *
+   *   ① 读 `workspaces.json`（正常路径）；
+   *   ② 老 `workspaces.jsonl` 还在 ⇒ 回放成最后状态、写进新文件、把老文件改名
+   *      `.migrated` **留档不删**（回滚 = 发旧版代码 + 改回原名）；
+   *   ③ 还是一条都没有、但 `workspaces/` 下**有目录** ⇒ 按目录重建登记
+   *      （名称无从得知，用默认名 + 一条 `info` 说清楚）。这一步是那条
+   *      "索引丢了别让数据看起来消失"的兜底。
+   *
+   * 另外：登记表里**缺了**盘上有的目录（索引只坏了一半）也补进去——数据在那儿，
+   * 不登记就等于看不见它。
+   */
+  async #loadWorkspaces(): Promise<void> {
+    this.#workspaces.clear()
+    try {
+      const raw = await readFile(this.#workspacesPath(), 'utf8')
+      const parsed = JSON.parse(raw) as unknown
+      if (Array.isArray(parsed)) {
+        for (const ws of parsed) {
+          const rec = ws as Workspace
+          if (rec && typeof rec.id === 'string') this.#workspaces.set(rec.id, rec)
+        }
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        this.#onInfo(`workspace 登记表读不出来（将尝试用老日志/目录重建）：${String(err)}`)
+      }
+    }
+
+    if (this.#workspaces.size === 0) await this.#migrateLegacyWorkspaces()
+
+    // ── 自愈：盘上有的工作区，登记表里必须也有 ──
+    //   两个来源合起来看：`workspaces/<id>/` 目录 + `agents/<id>/agent.json` 里带的 workspaceId
+    const onDisk = new Set([
+      ...(await this.#workspaceDirsOnDisk()),
+      ...(await this.#workspaceIdsFromAgentDirs()),
+    ])
+    const missing = [...onDisk].filter((id) => !this.#workspaces.has(id))
+    if (missing.length > 0) {
+      const rebuilt: string[] = []
+      for (const id of missing) {
+        let at = Date.now()
+        try {
+          const info = await stat(join(this.#dataDir, 'workspaces', id))
+          at = Math.round(info.mtimeMs) || at
+        } catch {
+          // 目录刚被并发删掉 ⇒ 用当前时间，不影响后面重建
+        }
+        this.#workspaces.set(id, {
+          id: id as Workspace['id'],
+          // ⚠️ 名字在目录里没有（它原本只存在登记表里）⇒ 用默认名，并在日志里说清
+          name: '默认工作区',
+          createdAt: at,
+          updatedAt: at,
+        } as Workspace)
+        rebuilt.push(id)
+      }
+      await this.#saveWorkspaces()
+      this.#onInfo(
+        `workspace 登记表缺了盘上已有的 ${rebuilt.length} 个工作区，已按数据重建：` +
+          `${rebuilt.join('、')}（名称回到默认——原登记表里没有留档）`,
+      )
+    }
+  }
+
+  /**
+   * 老 `workspaces.jsonl`（append-only 日志）回放成一份普通 JSON。
+   *
+   * 回放规则与 `JsonlLog` 一致：`put` 整条覆盖、`patch` 合并（**绝对赋值**）、
+   * `del` 删除。迁完老文件改名 `.migrated`（已存在就带时间戳）**留档不删**。
+   */
+  async #migrateLegacyWorkspaces(): Promise<void> {
+    const legacy = this.#legacyWorkspacesPath()
+    let raw: string
+    try {
+      raw = await readFile(legacy, 'utf8')
+    } catch {
+      return // 没有老文件：全新数据目录，什么都不用做
+    }
+    const index = new Map<string, Record<string, unknown>>()
+    for (const line of raw.split('\n')) {
+      const text = line.trim()
+      if (text === '') continue
+      let entry: { op?: unknown; id?: unknown; value?: unknown; patch?: unknown }
+      try {
+        entry = JSON.parse(text) as typeof entry
+      } catch {
+        continue // 坏行跳过：回放是"尽量取回"，不是校验
+      }
+      const id = typeof entry.id === 'string' ? entry.id : null
+      if (id === null) continue
+      if (entry.op === 'put' && entry.value && typeof entry.value === 'object') {
+        index.set(id, entry.value as Record<string, unknown>)
+      } else if (entry.op === 'patch' && entry.patch && typeof entry.patch === 'object') {
+        const current = index.get(id)
+        if (current) index.set(id, { ...current, ...(entry.patch as Record<string, unknown>) })
+      } else if (entry.op === 'del') {
+        index.delete(id)
+      }
+    }
+    if (index.size === 0) return
+    for (const [id, rec] of index) {
+      this.#workspaces.set(id, { ...(rec as unknown as Workspace), id: id as Workspace['id'] })
+    }
+    await this.#saveWorkspaces()
+    let target = `${legacy}.migrated`
+    try {
+      await readFile(target)
+      target = `${legacy}.migrated-${Date.now()}`
+    } catch {
+      // 没有旧档案 ⇒ 用默认名
+    }
+    try {
+      await rename(legacy, target)
+    } catch {
+      // 改名失败不影响已经迁好的数据（下次启动会再看到老文件，但由于新文件已在，不会再迁）
+    }
+    this.#onInfo(
+      `workspace 登记表已从 workspaces.jsonl 迁成 workspaces.json：` +
+        `${index.size} 个工作区；老文件改名 \`.migrated\` 留档`,
+    )
   }
 
   static async open(options: FileStoreOptions): Promise<FileStore> {
@@ -477,7 +684,7 @@ export class FileStore implements Store {
     const store = new FileStore(dataDir, meta, fsync, skillsRoot, mineRoot, options.onInfo ?? (() => {}))
     // 锁必须在读日志之前拿到，否则第二个进程会先读到一半状态
     store.#releaseLock = await acquireLock(dataDir)
-    await store.#wsIndex.open()
+    await store.#loadWorkspaces()
 
     // 预加载所有已知 workspace。
     //
@@ -485,7 +692,7 @@ export class FileStore implements Store {
     // 方法是**跨 workspace 查找**的，它们遍历 `#stores`。如果 store 是懒建的，
     // 重开进程后 `#stores` 为空，查找会全部返回 null —— 表现为"数据丢了"，
     // 而数据其实好好躺在日志里。
-    for (const ws of store.#wsIndex.all()) {
+    for (const ws of store.#workspaces.values()) {
       await store.#ws(ws.id as WorkspaceId)
     }
 
@@ -668,11 +875,14 @@ export class FileStore implements Store {
   // ── Workspace 与 Device ──
 
   async getWorkspace(id: WorkspaceId): Promise<Workspace | null> {
-    return this.#wsIndex.get(id) ?? null
+    return this.#workspaces.get(String(id)) ?? null
   }
 
   async insertWorkspace(ws: Workspace): Promise<void> {
-    await this.#wsIndex.put(ws)
+    await this.#mutex.run(async () => {
+      this.#workspaces.set(String(ws.id), ws)
+      await this.#saveWorkspaces()
+    })
   }
 
   async getDevice(): Promise<Device | null> {
@@ -1344,7 +1554,7 @@ export class FileStore implements Store {
   }
 
   async listWorkspaceIds(): Promise<WorkspaceId[]> {
-    return this.#wsIndex.all().map((w) => w.id as WorkspaceId)
+    return [...this.#workspaces.values()].map((w) => w.id as WorkspaceId)
   }
 
   // ── 通知中心 ──
@@ -1380,7 +1590,6 @@ export class FileStore implements Store {
   /** 压缩全部日志：物化快照并丢弃已合并的增量。 */
   async compact(): Promise<void> {
     await this.#mutex.run(async () => {
-      await this.#wsIndex.compact()
       for (const ws of this.#stores.values()) await ws.compact()
     })
   }
@@ -1388,7 +1597,6 @@ export class FileStore implements Store {
   async close(): Promise<void> {
     for (const ws of this.#stores.values()) await ws.close()
     this.#stores.clear()
-    await this.#wsIndex.close()
     if (this.#releaseLock) {
       await this.#releaseLock()
       this.#releaseLock = null

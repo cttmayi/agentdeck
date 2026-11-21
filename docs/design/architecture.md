@@ -454,7 +454,7 @@ proposed ──┬──▶ auto_approved ──▶ executing ──┬──▶
 ├── meta.json               { formatVersion, instanceId }（formatVersion 高于本程序 ⇒ 拒绝打开）
 ├── lock                    单实例锁（"不存在才创建"，陈旧锁可接管）
 ├── device.json             本机 device 标识
-├── workspaces.jsonl        workspace 记录（全局，量小）
+├── workspaces.json         workspace 记录（普通 JSON 数组，不是日志——D226）
 ├── agents/<agentId>/       ★ 一个智能体 = 一个目录（D111）：agent.json + instructions.md + memory.jsonl + SKILL/
 ├── memory/<agentId>/MEMORY.md  记忆的**人可读镜像**（`memory/` 整个根是 git 仓库；权威仍是 store）
 ├── workflows/<workflowId>/ ★ 一条编排 = 一个目录（D224）：workflow.json + main.js

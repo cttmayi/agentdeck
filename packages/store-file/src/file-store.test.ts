@@ -211,6 +211,124 @@ describe('基本 CRUD 与持久化', () => {
  */
 
 
+describe('★ D226：workspace 登记表是普通 JSON（不是日志）', () => {
+  /** 一个最小可用的 workspace 记录。 */
+  const ws = (id: string, name = 'w'): Parameters<FileStore['insertWorkspace']>[0] =>
+    ({
+      executeTemplate: '',
+      reviewTemplate: '',
+      chatTemplate: '',
+      defaultAgentId: null,
+      locale: 'zh',
+      id: id as never,
+      name,
+      createdAt: 1,
+      updatedAt: 1,
+    }) as never
+
+  test('★★ 写的是 workspaces.json（一个数组）；同一条存两次不追加第二行', async () => {
+    const d = await makeTempDir('ws-json')
+    try {
+      const st = await FileStore.open({ dataDir: d, fsync: false })
+      await st.insertWorkspace(ws('ws-a', '甲'))
+      await st.insertWorkspace(ws('ws-a', '甲改名'))
+      await st.close()
+
+      const raw = await readFile(join(d, 'workspaces.json'), 'utf8')
+      const list = JSON.parse(raw) as Array<{ id: string; name: string }>
+      assert.equal(list.length, 1, '同一条两次写 ⇒ 文件里仍是一条（覆盖，不是追加）')
+      assert.equal(list[0]!.name, '甲改名', '后写的赢')
+      // 老的 .jsonl 不该再生成
+      await assert.rejects(() => readFile(join(d, 'workspaces.jsonl'), 'utf8'))
+    } finally {
+      await cleanup(d)
+    }
+  })
+
+  test('★★ 老 workspaces.jsonl ⇒ 回放成最后状态、迁成 .json、老文件改名留档', async () => {
+    const d = await makeTempDir('ws-legacy')
+    try {
+      await mkdir(join(d, 'workspaces'), { recursive: true })
+      /**
+       * 老日志的三条：put（首版）→ patch（改 locale）→ put（整条重写）。
+       * 回放必须按顺序应用：最后结果 = 最后那条 put。
+       */
+      const lines = [
+        { seq: 1, at: 1, op: 'put', id: 'ws-a', value: ws('ws-a', '首版') },
+        { seq: 2, at: 2, op: 'patch', id: 'ws-a', patch: { locale: 'en' } },
+        { seq: 3, at: 3, op: 'put', id: 'ws-a', value: { ...ws('ws-a', '最后版本'), locale: 'ja' } },
+      ]
+      await writeFile(
+        join(d, 'workspaces.jsonl'),
+        lines.map((l) => JSON.stringify(l)).join('\n') + '\n',
+        'utf8',
+      )
+
+      const st = await FileStore.open({ dataDir: d, fsync: false })
+      const got = await st.getWorkspace('ws-a' as never)
+      assert.equal(got?.name, '最后版本')
+      assert.equal(got?.locale, 'ja')
+      assert.deepEqual(await st.listWorkspaceIds(), ['ws-a'])
+      await st.close()
+
+      // 老文件改名留档（不删），新文件是普通数组
+      await assert.rejects(() => readFile(join(d, 'workspaces.jsonl'), 'utf8'))
+      assert.match(await readFile(join(d, 'workspaces.jsonl.migrated'), 'utf8'), /首版/)
+      const list = JSON.parse(await readFile(join(d, 'workspaces.json'), 'utf8')) as unknown[]
+      assert.equal(list.length, 1)
+    } finally {
+      await cleanup(d)
+    }
+  })
+
+  test('★★★ 登记表丢了 ⇒ 按 workspaces/ 目录自愈（数据不会"看起来消失"）', async () => {
+    const d = await makeTempDir('ws-heal')
+    try {
+      const a = await FileStore.open({ dataDir: d, fsync: false })
+      await a.insertWorkspace(ws('ws-a', '甲'))
+      await a.insertAgent(makeAgent({ id: 'heal-me', workspaceId: 'ws-a' as never }))
+      await a.close()
+
+      // 手工删掉登记表：模拟"这份文件丢了/坏了"
+      await rm(join(d, 'workspaces.json'), { force: true })
+
+      const b = await FileStore.open({ dataDir: d, fsync: false })
+      /*
+       * 不修的话，daemon 会以为"还没有工作区"⇒ 新建一个新 id ⇒ 界面一片空白。
+       * 自愈之后：登记表按目录重建，老数据仍然可读（名称回到默认名）。
+       */
+      assert.deepEqual(await b.listWorkspaceIds(), ['ws-a'])
+      assert.equal((await b.getAgent(agentId('heal-me')))?.id, 'heal-me', '老数据仍然读得到')
+      assert.equal((await b.getWorkspace('ws-a' as never))?.name, '默认工作区')
+      await b.close()
+      // 重建结果已经落盘
+      assert.equal(
+        (JSON.parse(await readFile(join(d, 'workspaces.json'), 'utf8')) as unknown[]).length,
+        1,
+      )
+    } finally {
+      await cleanup(d)
+    }
+  })
+
+  test('★ 登记表只坏了一半（盘上还有别的目录）⇒ 缺的那条也补上', async () => {
+    const d = await makeTempDir('ws-partial')
+    try {
+      const a = await FileStore.open({ dataDir: d, fsync: false })
+      await a.insertWorkspace(ws('ws-a', '甲'))
+      await a.close()
+      // 造一个"盘上有、登记表里没有"的目录（比如另一份数据被拷进来）
+      await mkdir(join(d, 'workspaces', 'ws-b'), { recursive: true })
+
+      const b = await FileStore.open({ dataDir: d, fsync: false })
+      assert.deepEqual((await b.listWorkspaceIds()).sort(), ['ws-a', 'ws-b'])
+      await b.close()
+    } finally {
+      await cleanup(d)
+    }
+  })
+})
+
 describe('★ 分批第 72 批：listRuns 的 order（"最近的一页"）', () => {
   /*
    * 这个方向是**被一个真 bug 逼出来的**：翻页是"按 id 升序取前 limit 条"，而 run 的

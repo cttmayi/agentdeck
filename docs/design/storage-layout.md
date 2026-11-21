@@ -18,8 +18,8 @@
    能 diff）。`agent.json` 里**没有** `instructions`，正文在 `instructions.md`——
    这是同一个决定的两半。
 2. **一个实体 = 一个目录**（而不是"一堆实体挤一个 JSON 文件"）。
-   智能体是 `agents/<id>/`、技能是 `<root>/<slug>/`、编排是 `workflows/<id>/`（§6）、
-   定时任务是 `schedules/<id>/`（§7）——都是「一个实体一个目录」。
+   智能体是 `agents/<id>/`、技能是 `<root>/<slug>/`、编排是 `workflows/<id>/`（§7）、
+   定时任务是 `schedules/<id>/`（§8）——都是「一个实体一个目录」。
    目录化换来三件好事：人能直接打开、删一个不影响别的、坏一个不会毁掉全部。
 3. **权威只有一个。** 正文文件（`.md` / `.js`）是权威，索引记录里只留元数据；
    镜像文件的第一句必须写明"改它不生效"。
@@ -38,7 +38,7 @@
 | 技能（提炼的） | `~/.agentdeck/skills-mine` | `source: 'mine'` 的技能正文，**同时是一个 git 仓库** | 提炼的和安装的**物理分离**（D80："不应该混在一起"），且要能回退 |
 | 语音 | `~/.agentdeck/asr` | `vocab.json`、`settings.json`、`models/`、`models.lock.json` | 词表是个人习惯、模型几百 MiB，人要看得见（第 277 批） |
 | 远端服务 | `~/.agentdeck/remote` | `remote.json`、`catalog-skills/`、`catalog-skills-local/` | 远端服务的库（账号/设定/公共目录），**不存使用者 payload** |
-| 工作目录 | `~/agentdeck-workspace/<类型>-<id>/` | agent 的真实产出 | 刻意**不隐藏**：agent 写的东西要能在 Finder 里直接翻（§10） |
+| 工作目录 | `~/agentdeck-workspace/<类型>-<id>/` | agent 的真实产出 | 刻意**不隐藏**：agent 写的东西要能在 Finder 里直接翻（§12） |
 
 > 核心层的兜底值都在数据目录之内（`<dataDir>/skills`、`<dataDir>/asr`……），
 > **绝不碰家目录**：测试与嵌入式调用忘了传参数时，不该在使用者家目录里造目录。
@@ -53,20 +53,20 @@
 ├── meta.json                     { formatVersion, instanceId }
 ├── lock                          { pid, startedAt } 单进程锁
 ├── device.json                   { id, name, createdAt, lastSeenAt }
-├── workspaces.jsonl              workspace 记录（全局，量小）
+├── workspaces.json               workspace 记录（普通 JSON 数组，**不是日志**，§6）
 ├── agents/<agentId>/             ★ 一个智能体 = 一个目录（§3）
 ├── memory/<agentId>/MEMORY.md    记忆的**人可读镜像**；`memory/` 整个根是一个 git 仓库
-├── workflows/<workflowId>/       ★ 一条编排 = 一个目录（§6）：workflow.json + main.js
+├── workflows/<workflowId>/       ★ 一条编排 = 一个目录（§7）：workflow.json + main.js
 ├── workflow-runs/<runId>.json    编排运行记录：一条运行一个文件
-├── schedules/<scheduleId>/        ★ 一条定时任务 = 一个目录（§7）：schedule.json + task.md + records.jsonl
-├── claude-config/                claude 的受管配置目录（D78，§9）
-├── codex-config/                 codex 的受管 CODEX_HOME（§9）
+├── schedules/<scheduleId>/        ★ 一条定时任务 = 一个目录（§8）：schedule.json + task.md + records.jsonl
+├── claude-config/                claude 的受管配置目录（D78，§11）
+├── codex-config/                 codex 的受管 CODEX_HOME（§11）
 ├── tool-tmp/                     脚本临时目录（跑完即删）
 └── workspaces/<wsId>/
-    ├── log/<collection>.jsonl    append-only 权威记录（§8）
+    ├── log/<collection>.jsonl    append-only 权威记录（§10）
     ├── log/<collection>.jsonl.snapshot  压缩后的快照（只有 compact 过才有）
     ├── blobs/<前两位>/<sha256>   内容寻址（不可变，路径即摘要）
-    └── runs/<runId>/messages.jsonl   这条 run 的消息流（§7）
+    └── runs/<runId>/messages.jsonl   这条 run 的消息流（§9）
 ```
 
 ---
@@ -182,7 +182,47 @@
 
 ---
 
-## 6. 编排 —— `workflows/<id>/`（D224，2026-11 已落地）
+## 6. 工作区登记表 —— `workspaces.json`（D226，2026-11 已落地）
+
+```
+~/.agentdeck/data/workspaces.json     一个普通 JSON 数组（今天 1 条），整文件原子写
+```
+
+**改了之前是什么**：`workspaces.jsonl`——与 issue / run 那些**业务集合**共用同一套
+append-only 日志。真机上量到的样子：**一个**工作区、**87 行**、**67 KB**（每次保存设置都是
+`put`，整条记录再追加一份），而 `compact()` **没有任何生产调用点** ⇒ 只增不减。
+迁移后同一个工作区是 **1060 字节 / 1 条**。
+
+| 文件 | 角色 |
+|---|---|
+| `workspaces.json` | workspace 记录（`locale` / `defaultAgentId` / `defaultRuntimeKey` / 三档模板 / `memoryPrefixes` / `localSkillDirs` / `runtimeConfigIsolation` / **`platformSlots`** 槽位表 / 时间），整文件原子写 |
+| `workspaces.jsonl.migrated` | 老日志的留档（**不在白名单里，不会被读**；回滚 = 改回原名 + 发旧版代码） |
+
+为什么日志对 workspace 没有用（逐条对照 `log.ts` 头注释里那三个理由）：
+历史——没有任何代码读它的历史，界面上也没有「工作区版本 / 回滚」；回放导入——那是给
+业务实体用的；崩溃安全——整文件原子写（tmp → fsync → rename）给的是**同一个**保证。
+
+> ⚠️ **这份文件是「数据目录的总钥匙」**：`#stores`（每个 workspace 的日志、runs、blobs）
+> 全是按它登记的 id 打开的。它丢了，daemon 会新建一个「默认工作区」（新 id）——
+> 界面看起来数据全没了，而文件其实还在 `workspaces/<老 id>/` 里。所以装载时有一条
+> **按数据自愈**的兜底（见下），这是这一轮比"省空间"更重要的那半。
+
+**装载三步**（`FileStore.#loadWorkspaces`）：
+
+1. 读 `workspaces.json`（正常路径）；
+2. 读不到且老 `workspaces.jsonl` 还在 ⇒ **回放**（`put` 覆盖 / `patch` 合并 / `del` 删除）
+   成最后状态、写进新文件、老文件改名 `.migrated` **留档不删**；
+3. 还是空的、或**登记表缺了盘上有的工作区** ⇒ **按数据重建**：来源是
+   `workspaces/<id>/` 目录 **+** `agents/<id>/agent.json` 里的 `workspaceId`
+   （智能体是平铺的，不属于哪个工作区目录——只扫目录会在"只有智能体"的数据目录上一无所获）。
+   名称在目录里没有留档 ⇒ 用默认名，并打一条 `info` 说清。
+
+> 实测（真数据的一份拷贝）：首开把 87 行回放成 1 条（`locale: zh` / `runtime: codex` /
+> 5 个槽位 / 2 个本地技能目录全都还在），老文件变 `workspaces.jsonl.migrated`；
+> 手工删掉 `workspaces.json` 再开 ⇒ 打印「登记表缺了盘上已有的 1 个工作区，已按数据重建」，
+> 11 个智能体照常读得到；第三次开没有任何迁移/自愈日志（幂等）。
+
+## 7. 编排 —— `workflows/<id>/`（D224，2026-11 已落地）
 
 ```
 ~/.agentdeck/data/workflows/<workflowId>/
@@ -225,7 +265,7 @@
 `agents/<id>/` 的形状在编排目录里加 `agents/<agentId>/{agent.json,instructions.md}`——
 **现在不建空目录**（那叫造死结构）。
 
-## 7. 定时任务 —— `schedules/<id>/`（D225，2026-11 已落地）
+## 8. 定时任务 —— `schedules/<id>/`（D225，2026-11 已落地）
 
 ```
 ~/.agentdeck/data/schedules/<scheduleId>/
@@ -263,7 +303,7 @@
 > 老文件变 `schedules.json.migrated`，第二次跑 `migrated: null`。新建 / 改正文 / 删除走 HTTP
 > 也各验过一遍（改的是 `task.md`，删的是整个目录）。
 
-## 8. run、消息流、会话
+## 9. run、消息流、会话
 
 | 位置 | 内容 | 权威 |
 |---|---|---|
@@ -282,7 +322,7 @@
 
 ---
 
-## 9. 集合白名单与历史残留
+## 10. 集合白名单与历史残留
 
 `packages/store-file/src/file-store.ts` 的 `COLLECTIONS` 是**读哪些集合**的白名单，今天 12 项：
 
@@ -305,7 +345,7 @@
 
 ---
 
-## 10. 运行时受管配置与临时目录
+## 11. 运行时受管配置与临时目录
 
 | 位置 | 是什么 | 硬约束 |
 |---|---|---|
@@ -319,7 +359,7 @@ skill、`~/.claude.json` 的 `mcpServers` 会拉起 npx/浏览器，天然在任
 
 ---
 
-## 11. 工作目录（不隐藏，agent 的产出在这里）
+## 12. 工作目录（不隐藏，agent 的产出在这里）
 
 ```
 ~/agentdeck-workspace/<类型>-<id>/            类型 = chat / issue / crystal …；id = 对应实体的 ULID
@@ -336,7 +376,7 @@ skill、`~/.claude.json` 的 `mcpServers` 会拉起 npx/浏览器，天然在任
 
 ---
 
-## 12. 写盘纪律（所有落点共用）
+## 13. 写盘纪律（所有落点共用）
 
 1. **整文件写 = 原子替换**：`atomicWrite()` 先写 `path.tmp-<pid>-<时间戳>`，`fsync`，
    再 `rename`（Windows 有重试）。所以任何时刻读到的都是**完整**的旧文件或新文件。
@@ -346,12 +386,12 @@ skill、`~/.claude.json` 的 `mcpServers` 会拉起 npx/浏览器，天然在任
 4. **并发写的 tmp 名要带随机后缀**（编排的 `persist` 会在多处 await 交错，
    两个同毫秒的 `Date.now()` 会撞名：先 rename 的移走源文件，后者 ENOENT）。
 5. **坏文件要说话**：能逐条读的地方逐条报（目录化的智能体/技能）；只读一个文件的地方
-   至少不要让"静默空数组"冒充"没有数据"（编排现状是反例，§6.2 要改）。
+   至少不要让"静默空数组"冒充"没有数据"（旧编排/定时任务存储就是反例：D224 / D225 已改）。
 6. **不写双份真相**：同一条事实只有一个权威落点（`run.json` 刻意不写就是这条）。
 
 ---
 
-## 13. 迁移纪律
+## 14. 迁移纪律
 
 - **幂等**：再跑一次不重复做。现存的三个启动迁移都在 `FileStore.open()` 里按序跑一次：
   `#migrateAgentsToDirs`（老 `log/agent.jsonl` → 目录）、`#migrateMemoryToAgentDirs`
@@ -366,13 +406,14 @@ skill、`~/.claude.json` 的 `mcpServers` 会拉起 npx/浏览器，天然在任
 
 ---
 
-## 14. 谁钉着这些形状
+## 15. 谁钉着这些形状
 
 | 形状 | 判据 |
 |---|---|
 | `agent.json` 不含指令、`instructions.md` 存组装前正文、缺文件不炸 | `packages/store-file/src/agent-dirs.test.ts` |
 | 技能正文落盘、`skillsRoot` 落点、覆盖安装清空旧支持文件、拒绝越界路径 | `packages/store-file/src/file-store.test.ts`、`apps/daemon/src/skills-install.test.ts`、`apps/daemon/src/skill-exec-check.test.ts` |
 | 日志 append-only、patch 绝对赋值、compact 顺序 | `packages/store-file/src/file-store.test.ts` |
+| workspace 登记表：普通 JSON（不追加）、老 `.jsonl` 回放迁移、按目录/智能体自愈、半坏补齐 | `packages/store-file/src/file-store.test.ts`（D226 那 4 条） |
 | 定时任务的目录形状、记录一行一条与顺序、坏条 / 缺 `task.md` 报错、迁移与幂等 | `apps/daemon/src/schedules.test.ts`（存储 7 条 + 整链 3 条） |
 | 编排的目录形状、逐条报错、缺 `main.js` 仍列出、老文件迁移与幂等、删除只删定义 | `apps/daemon/src/workflows.test.ts`；端上另有 `template-e2e.test.ts`、`startup-reconcile.test.ts` |
 | 记忆目录化与镜像 | `apps/daemon/src/{memory,memory-files}.test.ts` |
