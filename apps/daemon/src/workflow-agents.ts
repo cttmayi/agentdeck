@@ -23,9 +23,13 @@
 
 import type { Agent } from '@agentdeck/protocol'
 import { canBeReferencedByWorkflow, ownerOf } from './platform-member.ts'
+import type { WorkflowInlineAgent } from './workflows.ts'
 
 export type WorkflowAgentResolution =
-  | { ok: true; agent: Agent }
+  /** 全局池里的账号智能体。`shadowed` = 被本次命中"遮蔽"的全局同名那条（内建优先时才可能有）。 */
+  | { ok: true; kind: 'agent'; agent: Agent; shadowed?: Agent }
+  /** 本编排的内建智能体（D234：`workflows/<id>/agents/<名字>/`，不在智能体页里）。 */
+  | { ok: true; kind: 'inline'; inline: WorkflowInlineAgent; shadowed?: Agent }
   | { ok: false; error: string; code: 'agent_not_found' | 'agent_ambiguous' | 'agent_not_referenceable' }
 
 /**
@@ -58,8 +62,41 @@ export type AgentNameLookup =
 export function resolveWorkflowAgent(
   lookup: AgentNameLookup,
   name: string,
+  inline: ReadonlyArray<WorkflowInlineAgent> = [],
 ): WorkflowAgentResolution {
-  const matches = lookup.kind === 'found' ? [lookup.agent] : lookup.kind === 'ambiguous' ? lookup.agents : []
+  const wanted = name.trim()
+  /*
+   * ★★ D234：**两池**——本编排的内建智能体在前，全局池在后（局部遮蔽全局）。
+   *
+   *   同名是**允许**的（池子不同）。命中内建时把全局同名那条带出来当 `shadowed`，
+   *   界面要标「（遮蔽了全局同名那条）」——不说出来的话，使用者会以为跑的是智能体页
+   *   那条（D163 那个坑的翻版：看起来生效了）。
+   */
+  const inlineHits = inline.filter((a) => a.name === wanted)
+  const globalMatches =
+    lookup.kind === 'found' ? [lookup.agent] : lookup.kind === 'ambiguous' ? lookup.agents : []
+
+  if (inlineHits.length > 1) {
+    return {
+      ok: false,
+      code: 'agent_ambiguous',
+      error:
+        `「${wanted}」在本编排的内建智能体里有 ${inlineHits.length} 条同名（${inlineHits
+          .map((a) => a.id)
+          .join('、')}）——编排代码按名字引用，重名时不知道找的是哪一条。请给其中一条改名。`,
+    }
+  }
+  if (inlineHits.length === 1) {
+    const hit = inlineHits[0]!
+    return {
+      ok: true,
+      kind: 'inline',
+      inline: hit,
+      ...(globalMatches.length > 0 ? { shadowed: globalMatches[0]! } : {}),
+    }
+  }
+
+  const matches = globalMatches
   if (matches.length === 0) {
     return { ok: false, code: 'agent_not_found', error: `内嵌智能体不存在：${name}` }
   }
@@ -89,7 +126,7 @@ export function resolveWorkflowAgent(
         '换一个自己建的智能体。',
     }
   }
-  return { ok: true, agent: only }
+  return { ok: true, kind: 'agent', agent: only }
 }
 
 /**

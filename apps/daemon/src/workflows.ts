@@ -67,17 +67,30 @@ export interface Workflow {
 }
 
 /** 编排内嵌智能体：只在编排里有效的执行者/审核者（2026-11 使用者："可以给编排
- *  单独设置智能体（只在编排有用）"）。代码里用 `inline({...})` 引用。 */
+ *  单独设置智能体（只在编排有用）"）。代码里用 `agent('名字')` 引用。
+ *
+ * ★★ D234：**落成目录了**（`workflows/<id>/agents/<名字的 slug>/`，与 `agents/<名字>/` 同形）：
+ *
+ *   agents/<名字>/agent.json      { id, name, skillIds, createdAt, updatedAt }（**不含指令正文**）
+ *   agents/<名字>/instructions.md 它的指令（组装前正文，与账号智能体的规则一致）
+ *
+ *   · `id` 是**身份**（ULID，永不变）——`Run.agentRef.id` 存的是 `inline:<编排id>/<它>`；
+ *   · 目录名是**标签**（名字的 slug），改名跟着搬；与全局智能体同名**允许**（池子不同，
+ *     同名时"本编排内建优先"，遮蔽要可见）。
+ *   · `role` / `model` / `reviewStandard` 三个键**删了**：前两个是审核时代的遗留
+ *     （现在没有审核者这一档，runtime 跟随工作区默认），第三个随审核 run 一起退场。
+ */
 export interface WorkflowInlineAgent {
+  /** 身份（ULID）。run 引用它，改名不变。 */
   id: string
-  /** 名字（展示 + 代码里引用）。 */
+  /** 名字（展示 + 编排代码里 `agent('名字')` 引用）。 */
   name: string
-  /** 角色：执行者 / 审核者 / 执行（不审）。 */
-  role: 'executor' | 'reviewer' | 'executor-no-review'
-  /** 模型 runtime（claude / codex / generic…）。 */
-  model: string | null
-  /** 审核标准（role 是 reviewer 时）。 */
-  reviewStandard: string | null
+  /** 指令正文（`instructions.md` 的内容，组装前）。 */
+  instructions: string
+  /** 引用技能库里的哪几份（与账号智能体的 `skillIds` 同一个语义）。 */
+  skillIds: string[]
+  createdAt: number
+  updatedAt: number
 }
 
 /** 模板骨架：新建编排时插入代码。 */

@@ -15,6 +15,10 @@ import {
   workflowDirPath,
 } from './workflows.ts'
 import type { Workflow, WorkflowRun } from './workflows.ts'
+import {
+  listWorkflowAgents as daemonListWorkflowAgents,
+  writeWorkflowAgent as daemonWriteWorkflowAgent,
+} from './workflows-dirs.ts'
 
 /**
  * 编排存储/模板测试（引擎测试在 @agentdeck/orchestration 包内——
@@ -225,4 +229,68 @@ test('★★ 跑完但零产出 ⇒ 不提交审核（模型端空响应不能�
 
 test('★ 跑完且有产出 ⇒ 放行', () => {
   assert.equal(checkReviewable({ status: 'completed' }, '文章正文').ok, true)
+})
+
+/* ══════════════════════════════════════════════════════════════════
+ * D234：编排内建智能体（workflows/<id>/agents/<名字>/）
+ * ══════════════════════════════════════════════════════════════════ */
+
+test('★★ 内建智能体落成目录：agent.json（不含指令）+ instructions.md，与账号智能体同形', async () => {
+  await rm(TMP, { recursive: true, force: true })
+  const wf = freshWorkflow({ id: 'wf-inline' })
+  await saveWorkflow(TMP, wf)
+  await daemonWriteWorkflowAgent(TMP, 'wf-inline', {
+    id: 'i-1',
+    name: '本编排的写作员',
+    instructions: '你只写这一段',
+    skillIds: [],
+    createdAt: 1,
+    updatedAt: 1,
+  })
+
+  const json = JSON.parse(
+    await readFile(join(TMP, 'workflows', 'wf-inline', 'agents', '本编排的写作员', 'agent.json'), 'utf8'),
+  ) as Record<string, unknown>
+  assert.equal(json['name'], '本编排的写作员')
+  assert.equal(json['id'], 'i-1', '身份是 id，不是目录名')
+  assert.equal('instructions' in json, false, '指令不进 json（它在 instructions.md 里）')
+  assert.equal(
+    await readFile(join(TMP, 'workflows', 'wf-inline', 'agents', '本编排的写作员', 'instructions.md'), 'utf8'),
+    '你只写这一段',
+  )
+
+  // 读编排时从目录补出 inlineAgents（workflow.json 里没有它）
+  const loaded = await loadWorkflows(TMP)
+  const got = loaded.workflows.find((w) => w.id === 'wf-inline')!
+  assert.equal(got.inlineAgents.length, 1)
+  assert.equal(got.inlineAgents[0]!.name, '本编排的写作员')
+  assert.equal(got.inlineAgents[0]!.instructions, '你只写这一段')
+  const wfJson = JSON.parse(
+    await readFile(join(TMP, 'workflows', 'wf-inline', 'workflow.json'), 'utf8'),
+  ) as Record<string, unknown>
+  assert.equal('inlineAgents' in wfJson, false, 'workflow.json 里不许有第二个真相')
+})
+
+test('★★ 内建智能体改名 ⇒ 目录跟着搬；删编排 ⇒ 连内建智能体目录一起没', async () => {
+  await rm(TMP, { recursive: true, force: true })
+  await saveWorkflow(TMP, freshWorkflow({ id: 'wf-rn' }))
+  await daemonWriteWorkflowAgent(TMP, 'wf-rn', {
+    id: 'i-1', name: '甲', instructions: 'a', skillIds: [], createdAt: 1, updatedAt: 1,
+  })
+  await daemonWriteWorkflowAgent(TMP, 'wf-rn', {
+    id: 'i-1', name: '乙', instructions: 'a', skillIds: [], createdAt: 1, updatedAt: 2,
+  })
+  const dirs = await readdir(join(TMP, 'workflows', 'wf-rn', 'agents'))
+  assert.deepEqual(dirs, ['乙'], '目录跟着名字搬')
+  const list = await daemonListWorkflowAgents(TMP, 'wf-rn')
+  assert.deepEqual(list.map((a) => a.name), ['乙'])
+
+  // 与全局同名允许（那是两个池子）
+  await daemonWriteWorkflowAgent(TMP, 'wf-rn', {
+    id: 'i-2', name: '助手', instructions: '', skillIds: [], createdAt: 3, updatedAt: 3,
+  })
+  assert.equal((await daemonListWorkflowAgents(TMP, 'wf-rn')).length, 2)
+
+  await removeWorkflow(TMP, 'wf-rn')
+  await assert.rejects(() => readdir(join(TMP, 'workflows', 'wf-rn')), /ENOENT/)
 })

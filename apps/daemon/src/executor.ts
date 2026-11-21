@@ -1056,6 +1056,15 @@ export class RunExecutor {
       //   ——而它此前**从来没被送达过**（`ExecOptions` 里没有这个通道）：
       //   界面上能填、能存、能显示，运行时被丢掉。
       const agentConfig = await this.#deps.store.getAgentById(run.agentId as never)
+      /*
+       * ★★ D234：**编排内建智能体不在智能体库里**（它的 `agentId` 是 `inline:<编排id>/<id>`），
+       *   所以 `agentConfig` 是 null——这时身份从**这次提交带上的 `agentRef` 快照**里取。
+       *
+       *   为什么快照是对的而不是兜底：那份 `agentRef` 就是平台在提交那一刻组装好、
+       *   准备投递的身份（`{id,name,instructions}`）。用它比"跑起来之后再去库里查"更准
+       *   ——agent 在排队期间被改了指令的话，这条 run 该用它被提交时的版本。
+       */
+      const agentInstructions = agentConfig?.instructions ?? req.agentRef.instructions ?? null
 
       // ★ 第一句话的模版是**全局配置**（D32），挂在 workspace 上：一次设定，
       //   所有 agent 都按它来。空 = 平台默认。
@@ -1245,7 +1254,7 @@ export class RunExecutor {
               subject: req.subject,
               prompt: req.prompt,
               skills: skillsBrief,
-              instructions: agentConfig?.instructions ?? null,
+              instructions: agentInstructions,
               memory: memoryItems,
               language,
               template: migrated.chat,
@@ -1256,7 +1265,7 @@ export class RunExecutor {
               subject: req.subject,
               prompt: req.prompt,
               skills: skillsBrief,
-              instructions: agentConfig?.instructions ?? null,
+              instructions: agentInstructions,
               memory: memoryItems,
               language,
               // 派活全用**同一份**模版（任务 / 定时任务 / 编排的每个节点，含把关者）。

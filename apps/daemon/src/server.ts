@@ -59,6 +59,7 @@ import {
   type ConversationId,
   type Skill,
   type SkillId,
+  type SkillPayload,
   type ReviewStandard,
   type SubmitRunRequest,
   type Workspace,
@@ -101,6 +102,7 @@ import {
   type EngineHooks,
   type Workflow,
   type GateVerdict,
+  type WorkflowInlineAgent,
   type WorkflowRun,
   type WorkflowStep,
 } from './workflows.ts'
@@ -167,7 +169,12 @@ import {
   readMineRevision,
 } from './run-hooks/skill-mine.ts'
 import { loadInjectableSkills, skillSourcesOfAgent } from './agent-injectable-skills.ts'
-import { workflowAgentExclusiveSkillsDir } from './workflows-dirs.ts'
+import {
+  listWorkflowAgents,
+  removeWorkflowAgent,
+  workflowAgentExclusiveSkillsDir,
+  writeWorkflowAgent,
+} from './workflows-dirs.ts'
 import {
   builtinDefaultsOf,
   describeBuiltinAgent,
@@ -2573,6 +2580,8 @@ async function injectedSkillsOf(
             step.prompt = task
             const runId = ulid() as RunId
             let agentRef: SubmitRunRequest['agentRef']
+            /** 内建智能体那一步的显式技能（D234；账号智能体那条路是 undefined = 按配置解析）。 */
+            let inlineSkills: SkillPayload[] | undefined
             /*
              * ⚠️ 2026-11（D125）：这里原来是 `opts.reviewer`（`{ reviewer: 'inline:审查员' }`
              *   ——把审核者挂在执行 run 上，由执行器的 `autoChainReview` 串一条审核 run；
@@ -2600,13 +2609,46 @@ async function injectedSkillsOf(
                *   不再先 `listAgents` 再在这里 find 一遍——两处各查一遍，
                *   迟早出现"校验说行、跑起来必炸"。
                */
+              /*
+               * ★★ D234：**两池解析**——本编排的内建智能体在前，全局池在后。
+               *   命中内建时：`agentRef.id` 用 `inline:<编排id>/<它自己的 id>`（身份稳定、
+               *   不与账号智能体的 ULID 撞），并且把它的技能**显式传下去**
+               *   （`skillIds` 引用技能库 + 它目录下的独有技能，D228 的来源机制）。
+               *   命中全局时与改之前一模一样。
+               */
               const resolved = resolveWorkflowAgent(
                 await store.getAgentByName(agentName),
                 agentName,
+                wf.inlineAgents ?? [],
               )
               if (!resolved.ok) return { ok: false, runId: null, error: resolved.error }
-              const agent = resolved.agent
-              agentRef = { id: agent.id as AgentId, name: agent.name as string, instructions: agent.instructions ?? '' }
+              if (resolved.kind === 'inline') {
+                const inlineAgent = resolved.inline
+                agentRef = {
+                  id: `inline:${wf.id}/${inlineAgent.id}` as AgentId,
+                  name: inlineAgent.name,
+                  instructions: inlineAgent.instructions,
+                }
+                /*
+                 * 内建的技能走"来源"机制（D228）：`skillIds` 是库引用，独有技能在
+                 * `workflows/<wid>/agents/<aid>/skills/`。显式传给 `submitRunRequest`：
+                 * 它拿到显式 skills 就不再按 agent 配置去解析（那条路对内建智能体是空）。
+                 */
+                inlineSkills = await loadInjectableSkills(store, {
+                  workspaceId,
+                  libraryIds: inlineAgent.skillIds ?? [],
+                  exclusive: { kind: 'workflow-agent', workflowId: wf.id, agentId: inlineAgent.id },
+                })
+                if (resolved.shadowed !== undefined) {
+                  warn(
+                    `编排「${wf.name}」的内建智能体「${agentName}」遮蔽了智能体页里的同名那条（${resolved.shadowed.id}）——` +
+                      '编排代码按名字引用时，本编排内建的优先。',
+                  )
+                }
+              } else {
+                const agent = resolved.agent
+                agentRef = { id: agent.id as AgentId, name: agent.name as string, instructions: agent.instructions ?? '' }
+              }
             } else {
               /*
                * ⚠️ 2026-11（S3）：这里原来是"组节点"——`step.nodeId` 是组名，按组展开成
@@ -2630,6 +2672,8 @@ async function injectedSkillsOf(
               agentRef,
               subject: { type: 'issue', id: run.issueId as Issue['id'] },
               prompt: task,
+              // ★ D234：内建智能体的技能是**算好的**（来源机制），不再让 daemon 按 agent 配置解析
+              ...(inlineSkills !== undefined ? { skills: inlineSkills } : {}),
                     // ★ 2026-11（统一模型）重写轮续会话：resume 上一轮执行 run（executor
               //   取它的 sessionId 交给 CLI 恢复——agent 记得上一版和打回意见）。
               ...(opts?.resumeFromRunId ? { resumeFromRunId: opts.resumeFromRunId } : {}),
@@ -5322,6 +5366,96 @@ async function injectedSkillsOf(
       sendJson(res, 200, { items: workflows })
       return
     }
+    /*
+     * ── 编排内建智能体（D234）：`workflows/<id>/agents/<名字>/` ──
+     *
+     * 它们**只在编排里有效**：不进智能体页、不参与聊天/派活/槽位，名字只在本编排内要求唯一
+     * （与全局同名**允许**——解析时内建优先，命中时会说出来）。
+     *
+     * 存储形状与账号智能体同形（`agent.json` 不含指令 + `instructions.md`），
+     * 目录名是名字的 slug、`agent.json` 里的 `id` 是身份（run 引用 `inline:<wid>/<id>`）。
+     */
+    const wfAgentsMatch = /^\/api\/workflows\/([^/]+)\/agents$/.exec(path)
+    const wfAgentMatch = /^\/api\/workflows\/([^/]+)\/agents\/([^/]+)$/.exec(path)
+    if (wfAgentsMatch && (req.method === 'GET' || req.method === 'POST')) {
+      const wf = workflowById(wfAgentsMatch[1]!)
+      if (!wf) {
+        sendJson(res, 404, { error: '编排不存在', code: 'workflow_not_found' })
+        return
+      }
+      if (req.method === 'GET') {
+        sendJson(res, 200, { items: wf.inlineAgents ?? [] })
+        return
+      }
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      const name = typeof body.name === 'string' ? body.name.trim() : ''
+      if (name === '') {
+        sendJson(res, 400, { error: '名字必填', code: 'wf_agent_name_missing' })
+        return
+      }
+      // 名字在本编排内唯一（与全局同名允许——那是两个池子）
+      if ((wf.inlineAgents ?? []).some((a) => a.name === name)) {
+        sendJson(res, 409, { error: `本编排里已经有叫「${name}」的内建智能体了`, code: 'wf_agent_name_dup' })
+        return
+      }
+      const now = Date.now()
+      const agent: WorkflowInlineAgent = {
+        id: ulid() as string,
+        name,
+        instructions: typeof body.instructions === 'string' ? body.instructions : '',
+        skillIds: Array.isArray(body.skillIds) ? (body.skillIds as string[]).map(String) : [],
+        createdAt: now,
+        updatedAt: now,
+      }
+      await writeWorkflowAgent(options.dataDir, wf.id, agent)
+      wf.inlineAgents = await listWorkflowAgents(options.dataDir, wf.id)
+      sendJson(res, 201, { agent, workflow: wf })
+      return
+    }
+    if (wfAgentMatch && (req.method === 'PATCH' || req.method === 'DELETE')) {
+      const wf = workflowById(wfAgentMatch[1]!)
+      if (!wf) {
+        sendJson(res, 404, { error: '编排不存在', code: 'workflow_not_found' })
+        return
+      }
+      const target = (wf.inlineAgents ?? []).find((a) => a.id === wfAgentMatch[2])
+      if (!target) {
+        sendJson(res, 404, { error: '内建智能体不存在', code: 'wf_agent_not_found' })
+        return
+      }
+      if (req.method === 'DELETE') {
+        await removeWorkflowAgent(options.dataDir, wf.id, target.id)
+        wf.inlineAgents = await listWorkflowAgents(options.dataDir, wf.id)
+        sendJson(res, 200, { ok: true, workflow: wf })
+        return
+      }
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      const name =
+        typeof body.name === 'string' && body.name.trim() !== '' ? body.name.trim() : target.name
+      if (
+        name !== target.name &&
+        (wf.inlineAgents ?? []).some((a) => a.id !== target.id && a.name === name)
+      ) {
+        sendJson(res, 409, { error: `本编排里已经有叫「${name}」的内建智能体了`, code: 'wf_agent_name_dup' })
+        return
+      }
+      const next: WorkflowInlineAgent = {
+        ...target,
+        name,
+        instructions:
+          typeof body.instructions === 'string' ? body.instructions : target.instructions,
+        skillIds: Array.isArray(body.skillIds)
+          ? (body.skillIds as string[]).map(String)
+          : target.skillIds,
+        updatedAt: Date.now(),
+      }
+      // 改名 ⇒ 目录跟着搬（`writeWorkflowAgent` 里做，与账号智能体同一套）
+      await writeWorkflowAgent(options.dataDir, wf.id, next)
+      wf.inlineAgents = await listWorkflowAgents(options.dataDir, wf.id)
+      sendJson(res, 200, { agent: next, workflow: wf })
+      return
+    }
+
     // 固定模板清单（新建编排「从模板」入口的数据源）。
     if (req.method === 'GET' && path === '/api/workflows/templates') {
       sendJson(res, 200, { items: WORKFLOW_TEMPLATES })
@@ -8259,6 +8393,11 @@ async function injectedSkillsOf(
        * ★★ 2026-11（D163）：**先查"名字能不能唯一解析"**，再走语法/名字校验——
        *   重名是"名字存在但选不出是哪条"，`validateWorkflowCode` 那层看不出来（它只查有没有）。
        *   ⚠️ 与引擎解析同一句话（`resolveWorkflowAgent`），否则就是"校验说行、跑起来必炸"。
+       */
+      /*
+       * ★ D234：采纳校验与运行时**同一套池子**（本编排内建 + 全局）。
+       *   这一层没有 wf（编排还没建出来），所以内建池是空的——与"新建的编排还没有内建智能体"
+       *   一致；等编排建好之后再改代码添加内建智能体时，走的是保存/运行那条路。
        */
       const refs = await checkWorkflowAgentRefs(
         (name) => store.getAgentByName(name),

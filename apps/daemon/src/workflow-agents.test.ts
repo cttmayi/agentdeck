@@ -61,7 +61,7 @@ describe('★ 编排里的名字解析：唯一才放行', () => {
     const a = agent({ id: 'a1', name: '撰稿员' })
     const r = resolveWorkflowAgent(lookup([a], '撰稿员'), '撰稿员')
     assert.equal(r.ok, true)
-    assert.equal(r.ok === true ? (r.agent.id as string) : '', 'a1')
+    assert.equal(r.ok === true && r.kind === 'agent' ? (r.agent.id as string) : '', 'a1')
   })
 
   test('没有这个名字 ⇒ agent_not_found', () => {
@@ -156,5 +156,50 @@ describe('★ 采纳之前的歧义体检（与引擎同一句话）', () => {
       (await checkWorkflowAgentRefs(async () => ({ kind: 'none' }), `await flow([])`)).ok,
       true,
     )
+  })
+})
+
+describe('★★ D234：编排内建智能体与全局同名 ⇒ 内建优先，且**说出被遮蔽的那条**', () => {
+  test('同名时命中内建，shadowed 带上全局那条', () => {
+    const global = agent({ id: 'g-1', name: '写作员' })
+    const inline = [
+      { id: 'i-1', name: '写作员', instructions: '你只写这一段', skillIds: [], createdAt: 1, updatedAt: 1 },
+    ]
+    const r = resolveWorkflowAgent(lookup([global], '写作员'), '写作员', inline)
+    assert.equal(r.ok, true)
+    assert.equal(r.ok === true ? r.kind : null, 'inline')
+    assert.equal(r.ok === true && r.kind === 'inline' ? r.inline.id : '', 'i-1')
+    // ★ 遮蔽要可见：调用方拿它去打日志/界面标注
+    assert.equal(r.ok === true ? (r.shadowed?.id as string | undefined) : undefined, 'g-1')
+  })
+
+  test('只有内建、全局没有同名 ⇒ 命中内建且 shadowed 为空（不虚报遮蔽）', () => {
+    const inline = [
+      { id: 'i-2', name: '只有内建', instructions: '', skillIds: [], createdAt: 1, updatedAt: 1 },
+    ]
+    const r = resolveWorkflowAgent({ kind: 'none' }, '只有内建', inline)
+    assert.equal(r.ok, true)
+    assert.equal(r.ok === true && r.kind === 'inline' ? r.inline.id : '', 'i-2')
+    assert.equal(r.ok === true ? r.shadowed : undefined, undefined)
+  })
+
+  test('本编排内两条同名 ⇒ agent_ambiguous（不猜，与全局池同一条规矩）', () => {
+    const inline = [
+      { id: 'i-3', name: '重名', instructions: '', skillIds: [], createdAt: 1, updatedAt: 1 },
+      { id: 'i-4', name: '重名', instructions: '', skillIds: [], createdAt: 2, updatedAt: 2 },
+    ]
+    const r = resolveWorkflowAgent({ kind: 'none' }, '重名', inline)
+    assert.equal(r.ok, false)
+    assert.equal(r.ok === false ? r.code : '', 'agent_ambiguous')
+  })
+
+  test('内建池里没有 ⇒ 落到全局池（内建不是"拦住"全局，只是优先）', () => {
+    const g = agent({ id: 'g-2', name: '撰稿员' })
+    const r = resolveWorkflowAgent(lookup([g], '撰稿员'), '撰稿员', [
+      { id: 'i-5', name: '别人', instructions: '', skillIds: [], createdAt: 1, updatedAt: 1 },
+    ])
+    assert.equal(r.ok, true)
+    assert.equal(r.ok === true ? r.kind : null, 'agent')
+    assert.equal(r.ok === true && r.kind === 'agent' ? (r.agent.id as string) : '', 'g-2')
   })
 })

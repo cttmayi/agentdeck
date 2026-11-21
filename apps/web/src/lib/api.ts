@@ -207,12 +207,23 @@ export interface Workflow {
   updatedAt: number
 }
 
-/** 编排内嵌智能体（只在编排里有效，不占智能体组页）。 */
+/**
+ * 编排内嵌智能体（只在编排里有效，不占智能体页——D234 落成 `workflows/<id>/agents/<名字>/`）。
+ *
+ * 与账号智能体同一副形状：`id` 是身份（run 引用它）、目录名是名字的 slug（改名跟着搬）、
+ * 指令在 `instructions.md` 里、技能用 `skillIds` 引用技能库。
+ */
 export interface WorkflowInlineAgent {
   id: string
   name: string
-  role: 'executor' | 'reviewer' | 'executor-no-review'
-  model: string | null
+  instructions?: string
+  skillIds?: string[]
+  createdAt?: number
+  updatedAt?: number
+  /** @deprecated 审核时代的遗留键，D234 起不再有；留着是为了老响应不炸。 */
+  role?: 'executor' | 'reviewer' | 'executor-no-review'
+  /** @deprecated 同上（runtime 跟随工作区默认）。 */
+  model?: string | null
   reviewStandard: string | null
 }
 
