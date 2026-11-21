@@ -240,6 +240,19 @@ function isActiveRun(run: Run): boolean {
  * 从磁盘补回来。写出去的对象少这两个键是安全的：读取路径上本来就没有 zod
  * 校验（整条记录以 JSON 存，见 `Skill.files` 那段注释）。
  */
+/** 一次压缩的结果（`POST /api/maintenance/compact` 的返回体，也是启动日志的来源）。 */
+export interface CompactionReport {
+  workspaceId: string
+  /** 集合名（`skill` / `run` …）。 */
+  name: string
+  /** 压缩前日志字节数。 */
+  before: number
+  /** 压缩后日志字节数（压缩成功即为 0——增量日志被丢弃了）。 */
+  after: number
+  /** 现存记录数（快照里的条数）。 */
+  records: number
+}
+
 /** 字节数给人看（"4.3 MB" / "812 KB"）。日志里报压缩收益用。 */
 function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`
@@ -312,6 +325,11 @@ class WorkspaceStore {
   /** 工作区根目录（`<dataDir>/workspaces/<wsId>`）。D111 删老 jsonl 要用。 */
   get root(): string {
     return this.#root
+  }
+
+  /** 这个工作区自己的 id（压缩报告里要点名是哪个工作区）。 */
+  get workspaceId(): WorkspaceId {
+    return this.#wsId
   }
 
   /** 强类型取日志——避免到处写 `as unknown as`。 */
@@ -714,7 +732,7 @@ export class FileStore implements Store {
     await store.#migrateSkillsToDisk()
 
     // ── D227：日志的回收（`compact()` 以前**没有任何调用点**，所以只增不减）──
-    await store.#autoCompact()
+    await store.#compactIfNeeded()
     // ── 迁移留档的清理（使用者："migrated 文件也清掉"）──
     await store.#dropStaleMigratedFiles()
     return store
@@ -739,7 +757,8 @@ export class FileStore implements Store {
    *
    * 压完把省下的字节数打出来——"省了多少"必须看得见，否则这条机制没人知道它生效过。
    */
-  async #autoCompact(): Promise<void> {
+  async #compactIfNeeded(): Promise<CompactionReport[]> {
+    const reports: CompactionReport[] = []
     for (const ws of this.#stores.values()) {
       for (const name of COLLECTIONS) {
         const log = ws.logs[name]
@@ -752,12 +771,37 @@ export class FileStore implements Store {
         if (!tooLong && !tooFat) continue
         await log.compact()
         const after = await stat(path).then((s) => s.size).catch(() => 0)
+        const report: CompactionReport = {
+          workspaceId: String(ws.workspaceId),
+          name,
+          before,
+          after,
+          records: log.size,
+        }
+        reports.push(report)
         this.#onInfo(
           `日志已压缩：log/${name}.jsonl 从 ${fmtBytes(before)} 降到 ${fmtBytes(after)}` +
             `（现存 ${log.size} 条记录）`,
         )
       }
     }
+    return reports
+  }
+
+  /**
+   * **手动压一次**（`POST /api/maintenance/compact`，D227）。
+   *
+   * 为什么要有这个入口：压缩本来只在**开库时**自动跑一次，而"想立刻把 4 MB 的
+   * 日志压掉"不该逼人重启 daemon（重启会打断正在跑的 agent）。这个方法是**在活着的
+   * `JsonlLog` 上**压——`compact()` 自己会关掉追加句柄、写快照、删日志，之后再有
+   * 写入会自动重建文件，所以运行中的 daemon 调它是安全的（与"外部脚本改文件"根本
+   * 不是一回事：那会让追加句柄指向一个已被删除的 inode）。
+   *
+   * 判据与开库时**同一套**（`#compactIfNeeded`），所以"手动按一下"不会压缩那些
+   * 本来就不该压的集合；返回值把压了哪几个、省了多少都报出来。
+   */
+  async compactNow(): Promise<CompactionReport[]> {
+    return this.#mutex.run(() => this.#compactIfNeeded())
   }
 
   /**

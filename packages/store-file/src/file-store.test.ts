@@ -362,6 +362,40 @@ describe('★ D227：日志回收（compact 终于有调用点）与迁移留档
     }
   })
 
+  test('★★ `compactNow()`：按一下就能压（给 `POST /api/maintenance/compact` 用），返回省了多少', async () => {
+    const d = await makeTempDir('compact-now')
+    try {
+      const a = await FileStore.open({ dataDir: d, fsync: false })
+      await a.insertWorkspace({
+        executeTemplate: '', reviewTemplate: '', chatTemplate: '',
+        defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1,
+      })
+      for (let i = 0; i < 250; i += 1) {
+        await a.insertSkill(makeSkill({ id: 's1', workspaceId: WS, slug: 'bloat', name: `v${i}` }))
+      }
+      /*
+       * ⚠️ 这一步是这条判据的关键：自动压缩只在**开库时**跑，而现在这个 store 还活着
+       *   ——所以这里量的是"运行中能不能安全地压"（活着的 JsonlLog 自己关句柄、写快照、
+       *   删日志）。外部脚本改文件会让句柄指向已删除的 inode，那是另一回事。
+       */
+      const report = await a.compactNow()
+      assert.equal(report.length, 1)
+      assert.equal(report[0]!.name, 'skill')
+      assert.ok(report[0]!.before > 0)
+      assert.equal(report[0]!.after, 0, '增量日志被丢弃')
+      assert.equal(report[0]!.records, 1, '快照里是 1 条现存记录')
+      // 压完还能读能写（句柄自动重建）
+      assert.equal((await a.getSkill(skillId('s1')))?.name, 'v249')
+      await a.insertSkill(makeSkill({ id: 's2', workspaceId: WS, slug: 'after', name: '压后新增' }))
+      assert.equal((await a.getSkill(skillId('s2')))?.name, '压后新增')
+      // 再按一次：没有可压的了（幂等）
+      assert.deepEqual(await a.compactNow(), [])
+      await a.close()
+    } finally {
+      await cleanup(d)
+    }
+  })
+
   test('★ 迁移留下的 `.migrated` 档案在开库时清掉（agents/.migrated 是标记，不许动）', async () => {
     const d = await makeTempDir('drop-migrated')
     try {

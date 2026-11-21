@@ -2809,6 +2809,29 @@ async function injectedSkillsOf(
       return
     }
 
+    /*
+     * **手动压一次日志**（D227，2026-11）。
+     *
+     * 为什么有这条：压缩平时只在**开库时**自动跑一次；而"想立刻把这 4 MB 的
+     *   `skill.jsonl` 压掉"不该逼人重启 daemon（重启会打断正在跑的 agent）。
+     *
+     * ⚠️ 只有 daemon 自己能安全地压：它在**活着的 `JsonlLog` 上**调 `compact()`
+     *   （关掉追加句柄 → 写快照 → 删日志，之后再写会自动重建文件）。外部脚本直接
+     *   改这些文件则会让追加句柄指向已被删除的 inode，重启后数据就没了。
+     *
+     * 判据与开库时同一套，所以"按一下"不会压本来不该压的集合；返回体把压了哪几个、
+     * 省了多少、现存几条都报出来（界面暂时没有按钮，这是运维入口）。
+     */
+    if (req.method === 'POST' && path === '/api/maintenance/compact') {
+      const compacted = await store.compactNow()
+      sendJson(res, 200, {
+        ok: true,
+        compacted,
+        freed: compacted.reduce((n, r) => n + Math.max(0, r.before - r.after), 0),
+      })
+      return
+    }
+
     if (req.method === 'GET' && path === '/api/identity') {
       const device = await store.getDevice()
       const probe = await backend.probe()
