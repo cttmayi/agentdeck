@@ -1,0 +1,346 @@
+# 落盘格式（存储地图）
+
+> 这份文档回答一件事：**东西到底存在哪个文件里、哪个文件说了算、能不能直接改**。
+> 讲的是"现在程序真会写出来的形状"，不是设想。凡是还没落地的（编排的目录化）单独标出。
+>
+> 相关文档：[`architecture.md`](./architecture.md) §5（存储端口与适配器）、
+[`agent-directory.md`](./agent-directory.md)（智能体目录化的设计与理由）、
+[`../reference/skills.md`](../reference/skills.md)（技能手册）。
+
+---
+
+## 0. 三条不变式
+
+这三条是**判据**，不是风格偏好。新加一种东西时先对一遍：
+
+1. **结构化的进 json，成篇的正文进独立文本文件。**
+   json 给机器读（会变、要校验、要索引）；正文给人读（要能 `cat`、能改、能 `git log`、
+   能 diff）。`agent.json` 里**没有** `instructions`，正文在 `instructions.md`——
+   这是同一个决定的两半。
+2. **一个实体 = 一个目录**（而不是"一堆实体挤一个 JSON 文件"）。
+   智能体已经是 `agents/<id>/`；技能是 `<root>/<slug>/`；编排按同一形状定为目标（§6）。
+   目录化换来三件好事：人能直接打开、删一个不影响别的、坏一个不会毁掉全部。
+3. **权威只有一个。** 正文文件（`.md` / `.js`）是权威，索引记录里只留元数据；
+   镜像文件的第一句必须写明"改它不生效"。
+   两处都能改、谁赢说不清，是本仓库最恨的那类缺陷（"看起来生效了"）。
+
+---
+
+## 1. 五个根（+ 工作目录）
+
+`~/.agentdeck/` 下面按**谁会去翻**分开。数据目录是"应用自己的事"，其余是"使用者的东西"：
+
+| 根 | 缺省 | 放什么 | 为什么在这个位置 |
+|---|---|---|---|
+| 数据目录 | `~/.agentdeck/data` | store 记录、run 日志、blob、智能体目录、编排、定时任务、运行时受管配置 | 程序内部状态，刻意隐藏（`cli.ts` 的 `DEFAULT_DATA_DIR`） |
+| 技能（安装的） | `~/.agentdeck/skills` | 每个技能的 `SKILL.md` + 支持文件 | 使用者会想打开看、想改 |
+| 技能（提炼的） | `~/.agentdeck/skills-mine` | `source: 'mine'` 的技能正文，**同时是一个 git 仓库** | 提炼的和安装的**物理分离**（D80："不应该混在一起"），且要能回退 |
+| 语音 | `~/.agentdeck/asr` | `vocab.json`、`settings.json`、`models/`、`models.lock.json` | 词表是个人习惯、模型几百 MiB，人要看得见（第 277 批） |
+| 远端服务 | `~/.agentdeck/remote` | `remote.json`、`catalog-skills/`、`catalog-skills-local/` | 远端服务的库（账号/设定/公共目录），**不存使用者 payload** |
+| 工作目录 | `~/agentdeck-workspace/<类型>-<id>/` | agent 的真实产出 | 刻意**不隐藏**：agent 写的东西要能在 Finder 里直接翻（§10） |
+
+> 核心层的兜底值都在数据目录之内（`<dataDir>/skills`、`<dataDir>/asr`……），
+> **绝不碰家目录**：测试与嵌入式调用忘了传参数时，不该在使用者家目录里造目录。
+> 面向使用者的默认值只在 `apps/daemon/src/cli.ts` 一处算（`--skills-root` / `--asr-root` 可覆盖）。
+
+---
+
+## 2. 数据目录全图
+
+```
+~/.agentdeck/data/
+├── meta.json                     { formatVersion, instanceId }
+├── lock                          { pid, startedAt } 单进程锁
+├── device.json                   { id, name, createdAt, lastSeenAt }
+├── workspaces.jsonl              workspace 记录（全局，量小）
+├── agents/<agentId>/             ★ 一个智能体 = 一个目录（§3）
+├── memory/<agentId>/MEMORY.md    记忆的**人可读镜像**；`memory/` 整个根是一个 git 仓库
+├── workflows.json                编排定义（**将改成目录**，§6）
+├── workflow-runs.json            编排运行记录（同上）
+├── schedules.json                定时任务
+├── claude-config/                claude 的受管配置目录（D78，§9）
+├── codex-config/                 codex 的受管 CODEX_HOME（§9）
+├── tool-tmp/                     脚本临时目录（跑完即删）
+└── workspaces/<wsId>/
+    ├── log/<collection>.jsonl    append-only 权威记录（§8）
+    ├── log/<collection>.jsonl.snapshot  压缩后的快照（只有 compact 过才有）
+    ├── blobs/<前两位>/<sha256>   内容寻址（不可变，路径即摘要）
+    └── runs/<runId>/messages.jsonl   这条 run 的消息流（§7）
+```
+
+---
+
+## 3. 智能体 —— `agents/<id>/`
+
+```
+~/.agentdeck/data/agents/<agentId>/
+├── agent.json          结构化（**不含指令正文**）
+├── instructions.md     指令正文（**组装前**：内置 = 身份块，自建 = 全文）
+├── memory.jsonl        这个智能体自己的记忆（逐条 op 日志，§5）
+└── SKILL/<slug>/SKILL.md   它**独有**的技能（文件资产，不进技能库、不进技能页、不可卸载）
+```
+
+**`agent.json` 里有什么**（一条真实记录，字段顺序为落盘顺序）：
+
+```json
+{
+  "id": "01M2BK765WFDGEPXZR2SC8RXN8",
+  "workspaceId": "01M2BK765DFY6N007DBF6QWDP4",
+  "name": "助手审核员",
+  "model": null,
+  "runtimeKey": "default",
+  "workDir": null,
+  "skillIds": [],
+  "toolIds": [],
+  "env": {},
+  "createdAt": 1789243136173,
+  "updatedAt": 1795100185223,
+  "reviewStandard": null,
+  "memoryEnabled": false,
+  "instructionsAssembled": false,
+  "owner": "user",
+  "entries": ["chat", "task", "workflow"]
+}
+```
+
+平台成员还会带 `builtin: true` / `builtinKind`（老记录）、`owner: "platform"`。
+
+⚠️ `toolIds` 是**历史字段**：工具包随动作能力退场（D123），协议里已经删了这个键，
+所以只有老记录里还留着 `"toolIds": []`；新写入不会再出现它。同理 `reviewStandard`
+只剩"老数据的判断依据正文"一个作用（搬家入口还在），`instructionsAssembled` 只有迁移过的老记录才有。
+
+| 文件 | 谁写 | 谁读 | 语义 |
+|---|---|---|---|
+| `agent.json` | `writeAgentDir()`（`packages/store-file/src/agent-dirs.ts`） | `readAgentDir()` | 结构化信息；**永远不含 `instructions`** |
+| `instructions.md` | 同上 | 同上（读回时拼成一条 `Agent.instructions`） | 组装**前**正文 |
+| `memory.jsonl` | store 端口 `insertMemoryEntry` | `listMemoryEntries` | 记忆的**权威** |
+| `SKILL/<slug>/SKILL.md` | store 端口 `writeExclusiveSkillBody` | `listExclusiveSkillBodies` | 这个智能体独有的技能 |
+
+**为什么 `agent.json` 不含指令**：人打开目录看到的应该是"这个智能体自己的话"（`.md`），
+机器要的是字段（`.json`）。混在一起，改一句话就得动结构，而且 diff 出来满屏 JSON。
+
+**组装前 vs 组装后**：内置成员存的是**身份块**，平台守则由 `effectiveInstructions()`
+**运行时**拼（`apps/daemon/src/builtin-drafter.ts`）。所以"改平台守则"不该改写每一条
+内置的记录；`instructionsAssembled === true` 只出现在老数据（那时存的就是全文），读时不再拼。
+
+**坏文件的语义（刻意这样）**：
+- `agent.json` 读不到 ⇒ 这条当**不存在**（`readAgentDir` 返回 `null`），跳过继续读别的目录；
+- `instructions.md` 读不到 ⇒ 正文空串——内置会被启动自愈补回，自建的会露出"指令空"。
+
+---
+
+## 4. SKILL —— 一个技能一个目录
+
+```
+~/.agentdeck/skills/<slug>/                ← 装进来的（source: github / local）
+├── SKILL.md                               ← 权威正文
+└── references/…                           ← 支持文件（任意相对路径）
+
+~/.agentdeck/skills-mine/<slug>/SKILL.md   ← 自己提炼的（source: 'mine'），**整个根是 git 仓库**
+```
+
+**正文在磁盘、索引在日志**（2026-10 起，没有例外）：
+
+| 在哪 | 有什么 |
+|---|---|
+| `<root>/<slug>/SKILL.md` + 支持文件 | **权威**：正文与全部文件。改这里就生效 |
+| `log/skill.jsonl`（一条 put 记录） | 索引与元数据：`id` / `workspaceId` / `slug` / `name` / `description` / `source` / `sourceRef` / `version` / 时间 |
+
+> ⚠️ 层次要说清：**索引是按 workspace 的**（`workspaces/<ws>/log/skill.jsonl`），
+> **正文是全局一个根**（`skillsRoot`，跨 workspace 共享）。同一个 slug 在两个 workspace
+> 里装两次，盘上是一份文件、日志里是两条索引。
+
+**新记录不再带 `body`**（正文在磁盘上）。老记录里仍可能有 `body` / `allowedActions` /
+`verdictSchemaVersion`——那是 2026-10 之前的形状，**只读兼容**，不迁移、不重写。
+
+三条配套纪律：
+- **覆盖安装先清空再写**（`writeSkillFiles`）：上一版有、这一版没有的支持文件必须消失，
+  否则"磁盘为准"下会留着幽灵文件，下次注入又被写进工作目录；
+- **支持文件路径必须待在技能目录里**（拒 `..`、绝对值、`\` 开头、盘符开头——Windows 形态也挡）；
+- **`skills-mine` 是 git 仓库**：daemon 自动 commit，人能 `git log` 看"这条什么时候沉淀的、怎么变的"。
+
+**注入到工作目录时的归属清单**：`<workDir>/<skills.dir>/.agentdeck-managed.json`
+（内容 `{ slugs: [...] }`；**它落在工作目录的注入目录里，不在技能根里**——技能根本身没有
+任何清单文件，`<root>/<slug>/` 下只有 SKILL.md 与支持文件）。清理时读的是**这份盘上的清单**，不是内存里的数组——
+所以哪怕参数传错，也删不到使用者自己放的技能；清单读不到/坏掉 ⇒ 当空（**宁可少删**）。
+
+---
+
+## 5. 记忆 —— 权威在 store，镜像给人看
+
+| 位置 | 角色 |
+|---|---|
+| `agents/<agentId>/memory.jsonl` | **权威**。逐条 `{seq, at, op: 'put'\|'del', id, value}`（与 `log/*.jsonl` 同一种日志形状） |
+| `memory/<agentId>/MEMORY.md` | **镜像**（人可读，四类小标题：约定 / 偏好 / 事实 / 教训）。`memory/` **整个根是一个 git 仓库**（commit 形如 `memory 文章写作员（5 条）`）。**文件头明写"改它不会生效"** |
+
+- 记忆**跟着智能体走**（D112）：删智能体连目录一起删，不留孤儿。
+- 镜像按 **id** 分目录（改名不搬家）。
+- 注入时按 `sortMemoryForInjection` 排序（置顶 → 类别 → 时间），这是唯一排序出处。
+
+> 一个看起来能改、改了却没用的文件，比没有这个文件更糟——所以镜像是**明写的不生效**。
+
+---
+
+## 6. 编排 —— 现状 vs 目标
+
+### 6.1 现状（本文写作时的代码）
+
+```
+~/.agentdeck/data/workflows.json        全部编排定义，一个数组（真机上 1 条 / 848 B）
+~/.agentdeck/data/workflow-runs.json    全部运行记录，一个数组（真机上 23 条 / 47 KB，每步 prompt 全文在内）
+```
+
+每条编排的形状（`apps/daemon/src/workflows.ts` 的 `Workflow`）：
+`id` / `workspaceId` / `name` / `code`（**代码就存在 json 字符串里**）/ `source` /
+`templateKey` / `inlineAgents`（**死字段，永远是 `[]`**）/ `createdAt` / `updatedAt`。
+
+写入是**整文件**原子替换（tmp + rename）；读取失败时 `catch { return [] }`——
+**一个坏字节 = 编排页全空，而且不说原因**。运行记录同理，23 条挤在一个文件里。
+
+### 6.2 目标形状（与智能体同形，已定，代码未迁）
+
+```
+~/.agentdeck/data/workflows/<workflowId>/
+├── workflow.json        结构化（id / name / source / templateKey / 时间）——**不含代码**
+├── main.js              编排代码本体（纯文本）——与 instructions.md 同一个角色
+└── agents/<agentId>/    编排内建智能体（只在编排里有效），**与 agents/<id>/ 同形**
+    ├── agent.json       name / runtimeKey / skillIds …（不含指令）
+    └── instructions.md  它的话
+
+~/.agentdeck/data/workflow-runs/<runId>.json    一条运行一个文件（**兄弟目录**，不进编排目录）
+```
+
+| 智能体（现在就有） | 编排（目标） | 作用 |
+|---|---|---|
+| `agents/<id>/agent.json`（不含正文） | `workflows/<id>/workflow.json`（不含代码） | 机器读的结构化信息 |
+| `agents/<id>/instructions.md` | `workflows/<id>/main.js` | 人读的正文，磁盘为准 |
+| `agents/<id>/SKILL/<slug>/` | `workflows/<id>/agents/<agentId>/` | 一条一个目录 |
+
+三条照抄过来的纪律：**正文不塞进 json**；**读写只有一处**（新建 `workflows-dirs.ts`，
+形状照 `agent-dirs.ts`，复用 `fs-utils` 的 `atomicWrite` / `ensureDir` /
+`readJsonOrNull` / `removeQuietly`）；**坏文件要说话**（逐条读、逐条报，坏的那条点名，
+其余照常——而不是整页变空）。
+
+**运行记录为什么放兄弟目录**：`DELETE /api/workflows/:id` 现在只删定义、保留历史。
+若把运行记录挂在编排目录下面，删一条编排就把它 23 条运行历史一起埋了——那是**行为改变**，
+不是存储搬家。
+
+**迁移**：老 `workflows.json` / `workflow-runs.json` 一次性拆进目录，原文件改名
+`.migrated` 保留（可回滚）；再跑不重复（幂等）；启动日志点名迁了几条。
+
+---
+
+## 7. run、消息流、会话
+
+| 位置 | 内容 | 权威 |
+|---|---|---|
+| `workspaces/<ws>/log/run.jsonl` | run 记录（一条 run 一行 put，状态变化是 patch） | **权威** |
+| `workspaces/<ws>/runs/<runId>/messages.jsonl` | 这条 run 的消息流（`{type, seq, at, tool, content, input, output, …}`，**只追加不修改**） | **权威** |
+| `workspaces/<ws>/log/{conversation,chat-turn}.jsonl` | 对话本体 + 回合 | 权威 |
+
+**刻意没写 `runs/<runId>/run.json`**：run 记录已经在 `run.jsonl` 里，再存一份就是
+**双份真相**，迟早不一致。`runs/<runId>/` 只放消息流。
+
+**消息流为什么单独存**：一次 run 可能几千条消息，而实体记录是低频状态变更。
+混在一起会让实体日志压缩得又大又频繁。消息**只追加**，所以不需要 `JsonlLog` 那套索引，
+只维护内存里的 `lastSeq`。
+
+**智能体的聊天回复不在 `chat-turn` 里**：它就是那条 run 的 `messages`（存两份必然分叉）。
+
+---
+
+## 8. 集合白名单与历史残留
+
+`packages/store-file/src/file-store.ts` 的 `COLLECTIONS` 是**读哪些集合**的白名单，今天 12 项：
+
+| 集合 | 状态 |
+|---|---|
+| `issue` / `comment` / `conversation` / `chat-turn` / `run` / `artifact` / `audit` / `inbox` | **在用**（有写入方、有消费方） |
+| `skill` | **在用**（只留索引，正文在磁盘，§4） |
+| `agent` / `memory` / `tool` | **只剩读**：智能体与记忆已目录化（§3/§5），工具包已退场（D123）——这三个名字**没有写入方，端口上也没有消费方**，留着只是历史包袱（删掉不影响数据，只是那几个老文件不再被读进索引） |
+
+**磁盘上还躺着、程序完全不读的**（不在白名单里）：`group.jsonl` / `report.jsonl` /
+`verdict.jsonl` / `action.jsonl`——对应的能力逐个退场了，文件**不删**（那是使用者的历史）。
+
+**白名单就是这条边界的实现**：名单外的文件不会被读、更不会被连带删除；名单内坏掉的一行
+也只影响那一条记录，不会拖垮整份。
+
+**压缩（compact）**：把当前状态物化成 `log/<collection>.jsonl.snapshot` 再丢弃增量日志。
+顺序不可颠倒——**先 fsync 快照落地，再删日志**（反过来崩溃会同时丢两者 = 清空工作区）。
+⚠️ 现状：`FileStore.compact()` **今天没有任何生产调用点**（store 暴露了方法，daemon 没接
+路由也没接定时器），所以真机上**看不到** `.snapshot` 文件。它现在只被测试与"要用时手动调"用到。
+
+---
+
+## 9. 运行时受管配置与临时目录
+
+| 位置 | 是什么 | 硬约束 |
+|---|---|---|
+| `claude-config/` | claude 的受管配置目录，run 时 `CLAUDE_CONFIG_DIR` 指向它（D78） | ① **绝不放工作目录**（agent 能读自己的工作目录，放那儿等于把 key 递给它）；② **跨 run 稳定复用**（会话状态在 config dir 下，每 run 新建会让 `--resume` 找不到） |
+| `codex-config/` | codex 的受管 `CODEX_HOME`，同一个理由 | 同上；复制失败时退化为"不注入"（= 关掉隔离的样子），并记一条 note |
+| `tool-tmp/` | 脚本类动作的临时目录（本次一个子目录，跑完 `finally` 里递归删） | 只放临时产物 |
+
+隔离的目的只有一个：**用户级的 skill / MCP 不进任务**（`~/.claude/skills/` 里的个人
+skill、`~/.claude.json` 的 `mcpServers` 会拉起 npx/浏览器，天然在任务边界之外）。
+认证不丢的做法是把 `~/.claude/settings.json` 的 `env` 复制进受管目录。
+
+---
+
+## 10. 工作目录（不隐藏，agent 的产出在这里）
+
+```
+~/agentdeck-workspace/<类型>-<id>/            类型 = chat / issue / crystal …；id = 对应实体的 ULID
+├── <agent 写的东西>                          ← 真实产出，人直接看这个
+├── .agentdeck/rounds/<轮次>-task.md          ← 这一轮收到的任务（原文）
+├── .agentdeck/rounds/<轮次>-result.md        ← 这一轮的产出（多轮不覆盖）
+└── <skills.dir>/<slug>/SKILL.md              ← 本次注入的技能（跑完只删平台自己放的）
+```
+
+- 轮次 = `chainDepth + 1`（首轮 1）。落盘在**清理之后**：目录已收拾干净，而这两份是我们自己的文件。
+  它是"上次那一版到底写了什么"的出处，落盘失败不拦执行，但要记 warn。
+- **第一句话的副本已经不再落盘**（2026-09 撤）：看 run 日志就够（①②③ 分开带标签、不截断）。
+- 不隐藏是刻意的：藏在 `~/.agentdeck/data/work/` 里等于找不到。
+
+---
+
+## 11. 写盘纪律（所有落点共用）
+
+1. **整文件写 = 原子替换**：`atomicWrite()` 先写 `path.tmp-<pid>-<时间戳>`，`fsync`，
+   再 `rename`（Windows 有重试）。所以任何时刻读到的都是**完整**的旧文件或新文件。
+2. **追加写每次 fsync**（`AppendHandle`）：本机写入量低，用性能换正确性划算。
+   **测试里可关**（`fsync: false`），生产不许关。
+3. **覆盖一个目录先清空再写**（技能）：否则旧版本的幽灵文件会被当成这一版的一部分。
+4. **并发写的 tmp 名要带随机后缀**（编排的 `persist` 会在多处 await 交错，
+   两个同毫秒的 `Date.now()` 会撞名：先 rename 的移走源文件，后者 ENOENT）。
+5. **坏文件要说话**：能逐条读的地方逐条报（目录化的智能体/技能）；只读一个文件的地方
+   至少不要让"静默空数组"冒充"没有数据"（编排现状是反例，§6.2 要改）。
+6. **不写双份真相**：同一条事实只有一个权威落点（`run.json` 刻意不写就是这条）。
+
+---
+
+## 12. 迁移纪律
+
+- **幂等**：再跑一次不重复做。现存的三个启动迁移都在 `FileStore.open()` 里按序跑一次：
+  `#migrateAgentsToDirs`（老 `log/agent.jsonl` → 目录）、`#migrateMemoryToAgentDirs`
+  （workspace 级记忆 → `agents/<id>/memory.jsonl`，孤儿丢掉并计数）、
+  `#migrateSkillsToDisk`（老记录里的正文 → `<skillsRoot>/<slug>/`）；
+  字段级的那个是 `migratePlatformMemberFields`（`owner` / `entries`）。
+- **只补缺的**：已经有新字段的记录一律不动（那是迁移过的，或是使用者后来改的）。
+- **不删老字段/老文件**：`builtin` / `builtinKind` / 老 `skill.jsonl` 的 `body` 都留着——
+  回滚只需发旧版代码。真正删除由人确认（有过一次："可以删老 agent.jsonl 了"）。
+- **启动时点名**：迁了几条、哪条是坏的（半内置、编排引用不可引用的人），
+  启动日志要说出来——只报不改。
+
+---
+
+## 13. 谁钉着这些形状
+
+| 形状 | 判据 |
+|---|---|
+| `agent.json` 不含指令、`instructions.md` 存组装前正文、缺文件不炸 | `packages/store-file/src/agent-dirs.test.ts` |
+| 技能正文落盘、`skillsRoot` 落点、覆盖安装清空旧支持文件、拒绝越界路径 | `packages/store-file/src/file-store.test.ts`、`apps/daemon/src/skills-install.test.ts`、`apps/daemon/src/skill-exec-check.test.ts` |
+| 日志 append-only、patch 绝对赋值、compact 顺序 | `packages/store-file/src/file-store.test.ts` |
+| 编排的存储与运行记录（现状：单文件；迁移后：目录） | `apps/daemon/src/workflows.test.ts`、`template-e2e.test.ts`、`startup-reconcile.test.ts` |
+| 记忆目录化与镜像 | `apps/daemon/src/{memory,memory-files}.test.ts` |
+| 注入的归属清单（`.agentdeck-managed.json`） | `packages/agent-core/src/skill-injection.test.ts` |
+| 测试不许写进真实家目录 | `tests/test-safety.test.ts`（禁 `tmpdir()`、禁对危险目录递归删） |
