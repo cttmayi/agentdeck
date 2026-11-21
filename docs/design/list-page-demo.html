@@ -3097,8 +3097,27 @@ a > button { width: 100%; }
       .demo-rule-pairs { display: flex; gap: var(--sp-4); align-items: flex-start; flex-wrap: wrap; }
       .demo-rule-frames > * { flex: 1 1 18rem; min-width: 0; }
       .demo-rule-pairs > * { flex: 1 1 20rem; min-width: 0; }
-      /* 速查块里的静态浮层：不要阴影/遮罩，它只是"一块有头体脚的东西" */
-      .demo-rule .modal { box-shadow: none; }
+      /*
+       * 速查块里的"浮层"是**摆在那儿看的**，不是真浮层 ⇒ 必须拔掉它的浮层身份：
+       * 全局 `.modal` 是 `position: fixed; top/left 50%; translate(-50%,-50%); z-index: 50`，
+       * 照搬到页面中间就是"一块浮层永远钉在屏幕中央"——2026-11 使用者报的原话：
+       * **「那个"浮层"一直在上面，挡住我了」**。原来这里只删了 `box-shadow`
+       * （以为它只是"一块有头体脚的东西"），位置没拔 ⇒ 页面被它压住。
+       * 现在回到文档流里，跟左边那块面板平级（`.demo-rule-frames > *` 的 flex 生效），
+       * 内距一个都不改——第 ② 条判据量的正是内距。
+       */
+      .demo-rule .modal {
+        position: static;
+        top: auto;
+        left: auto;
+        transform: none;
+        width: 100%;
+        max-height: none;
+        z-index: auto;
+        box-shadow: none;
+        flex: 1 1 18rem;
+        min-width: 0;
+      }
       .demo-rule-weights { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
       /* ── 设置页层级对比（D193/D195）：同一张设置卡片渲染两遍，只差 h3 的取值 ── */
       .demo-rule-settings { display: flex; gap: var(--sp-4); align-items: flex-start; flex-wrap: wrap; }
@@ -4033,7 +4052,7 @@ a > button { width: 100%; }
             })(),
           ],
           [
-            '② 面板与浮层的内距逐条相等（头 16/24/12、体 16/24、脚 12/24）',
+            '② 面板与浮层的内距逐条相等（头 16/24/12、体 16/24、脚 12/24），且摆着的浮层在文档流里',
             (() => {
               const panel = q('#demo-rule-panel')
               const modal = q('#demo-rule-modal')
@@ -4044,6 +4063,16 @@ a > button { width: 100%; }
                 [panel.querySelector('.main-panel-foot'), modal.querySelector('.modal-foot')],
               ]
               if (pairs.some(([a, b]) => !a || !b)) return false
+              // ★ 2026-11（使用者：「那个"浮层"一直在上面，挡住我了」）：摆着看的浮层
+              //   必须是文档流里的普通块——钉在视口上就等于把整页压住。
+              if (C(modal).position !== 'static') return false
+              const sec = modal.closest('.demo-rule')
+              if (!sec) return false
+              const mr = R(modal)
+              const sr = R(sec)
+              const inside = mr.top >= sr.top - 1 && mr.bottom <= sr.bottom + 1 &&
+                mr.left >= sr.left - 1 && mr.right <= sr.right + 1
+              if (!inside) return false
               return pairs.every(([a, b]) => {
                 const ca = C(a)
                 const cb = C(b)
