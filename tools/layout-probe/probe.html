@@ -12318,6 +12318,51 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           }
           return seen
         })()
+        /**
+         * ★★ D220（使用者："建立对话的时候，只是新建一个 Item，不需要发送第一句话"）：
+         *   放在**最后**执行——它会"新建一条空对话 → 删掉"，中途会改变聊天页状态，
+         *   放中间会把后面一串判据的现场搞乱。
+         */
+        facts['chat.createEmptyConversation'] = await (async () => {
+          f.contentWindow.location.hash = '#/chat'
+          await until(() => !!d().querySelector('.list-pane'), 80)
+          await wait(500)
+          const before = (await f.contentWindow.fetch('/api/conversations').then((r) => r.json())).items ?? []
+          const newBtn = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
+            (text(b) ?? '').includes('新建对话'),
+          )
+          if (!newBtn) {
+            errors.push('聊天页顶栏找不到「新建对话」')
+            return null
+          }
+          click(newBtn)
+          const draftOpen = await until(() => !!d().querySelector('#chat-agent'), 40)
+          const createBtn = d().querySelector('[data-chat-create]')
+          if (!createBtn) {
+            errors.push('起草态没有「创建对话」这颗按钮（[data-chat-create]）')
+            return { 起草态: draftOpen, 有创建键: false }
+          }
+          click(createBtn)
+          await wait(1500)
+          const after = (await f.contentWindow.fetch('/api/conversations').then((r) => r.json())).items ?? []
+          const created = after.find((c) => !before.some((b) => b.id === c.id)) ?? null
+          // 建好之后已经是**对话态** ⇒ 标题在 `.detail-head` 里（起草态的 `.pane-head` 没了）
+          const head = text(d().querySelector('.detail-pane .detail-head h2')) ?? ''
+          const result = {
+            起草态: draftOpen,
+            有创建键: true,
+            多了一条: created !== null,
+            标题是未命名: head === '未命名对话',
+            轮数: created ? created.turnCount : null,
+            建好之后有输入条: !!d().querySelector('.detail-pane textarea'),
+          }
+          // 收尾：删掉这条测试对话（别把探针的现场留给后面的运行）
+          if (created) {
+            await f.contentWindow.fetch('/api/conversations/' + created.id, { method: 'DELETE' })
+          }
+          return result
+        })()
+
         publish(true)
       }
 

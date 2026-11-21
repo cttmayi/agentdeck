@@ -301,6 +301,12 @@ export const chatText = {
   'chat.settingsMemoryRemove': { zh: '删掉触发词「{word}」', en: 'Remove the trigger "{word}"' },
   'chat.settingsMemoryReset': { zh: '恢复默认', en: 'Restore defaults' },
   'chat.settingsMemoryOff': { zh: '（空：这个功能关着）', en: '(empty: this feature is off)' },
+  'chat.untitled': { zh: '未命名对话', en: 'Untitled conversation' },
+  'chat.createConversation': { zh: '创建对话', en: 'Create conversation' },
+  'chat.createHint': {
+    zh: '建好之后在下面输入第一句话——标题会用它来命名。',
+    en: 'After creating it, type the first message below — it becomes the title.',
+  },
   'chat.placeholder': { zh: '说点什么…（Enter 发送，Shift+Enter 换行）', en: 'Say something… (Enter to send, Shift+Enter for a new line)' },
   'chat.send': { zh: '发送', en: 'Send' },
   // ★ 分批第 232 批：`chat.enterHint`（输入框下面那行"Enter 发送 · Shift+Enter 换行"）

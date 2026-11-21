@@ -7627,12 +7627,19 @@ async function injectedSkillsOf(
       return
     }
 
-    // ── 新建一个对话：★ 它由**第一句话**诞生 ──
-    //
-    // 刻意**不**提供"先建一个空对话、再往里说话"：那样标题就没有出处，只能
-    // 先填一个占位（「新对话」），然后等第一句话来了再覆盖它——而"我改了名却
-    // 被第一次发言覆盖掉"是那种看得见、说不清的坏结果。对话从第一句话开始，
-    // 标题就是那句话，没有第二个状态。
+    /**
+     * ── 新建一个对话 ──
+     *
+     * ★★ D220（使用者："建立对话的时候，只是新建一个 Item，不需要发送第一句话"）：
+     *   **空对话是一个正常状态**——先有这条 item，进到对话页再敲第一句。
+     *
+     * 标题怎么来（这是当年"刻意不提供空对话"的理由，现在仍然成立，只是换了写法）：
+     *   建的时候可传 `title`（界面目前不传）；不传就写**空标题 = 还没命名**，
+     *   由**第一句话**来命名——`submitChatTurn` 里只在 `title === ''` 时补，
+     *   而改名（`PATCH`）写进去的是非空标题 ⇒ **改了名就不会再被覆盖**。
+     *   所以"标题没有出处"这个问题被压到了"从没命名过"这一种情况下。
+     */
+    // ⚠️ `text` 可以省略 = 只建 item，不跑第一轮。
     if (req.method === 'POST' && path === '/api/conversations') {
       const body = (await readJsonBody(req)) as {
         agentId?: unknown
@@ -7647,10 +7654,6 @@ async function injectedSkillsOf(
         return
       }
       const text = typeof body?.text === 'string' ? body.text.trim() : ''
-      if (text === '') {
-        sendJson(res, 400, { error: '缺少 text（第一句话）', code: 'text_required' })
-        return
-      }
       const agent = await store.getAgent(agentIdRaw as Agent['id'])
       if (!agent || agent.workspaceId !== workspaceId) {
         sendJson(res, 400, { error: `执行者不存在（${agentIdRaw}）`, code: 'agent_not_found' })
@@ -7730,10 +7733,13 @@ async function injectedSkillsOf(
         workspaceId,
         agentId: agent.id,
         skillIds,
+        // ★ D220：`text === ''` ⇒ 空标题（未命名），由第一句话来命名
         title:
           typeof body.title === 'string' && body.title.trim() !== ''
             ? body.title.trim().slice(0, 200)
-            : titleFromText(text),
+            : text === ''
+              ? ''
+              : titleFromText(text),
         workDir:
           typeof body.workDir === 'string' && body.workDir.trim() !== ''
             ? body.workDir.trim()
@@ -7744,6 +7750,14 @@ async function injectedSkillsOf(
         turnCount: 0,
       }
       await store.insertConversation(conversation)
+      /**
+       * ★ D220：**没有第一句话就不跑任何 run**——只把这条 item 建出来。
+       *   返回的 `turn` 是 `null`：前端据此进入"空对话"（标题显示未命名）。
+       */
+      if (text === '') {
+        sendJson(res, 201, { conversation, turn: null, runId: null, failure: null })
+        return
+      }
       const out = await submitChatTurn(store, executor, conversation, agent, text, now, workRoot)
       sendJson(res, 201, out)
       return

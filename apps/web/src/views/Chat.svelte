@@ -91,6 +91,11 @@
   /** 正在"起一个新对话"（还没说第一句话，所以服务端还没有这条对话）。 */
   let drafting = false
   /**
+   * ★★ D220：正在**创建这条空对话**（按钮 loading 用；也防连点建出两条）。
+   * 与 `drafting` 分开：`drafting` = "还没建"，`creating` = "正在建"。
+   */
+  let creating = false
+  /**
    * 栏头带的搜索（D63）：与任务/智能体同款。只过滤**标题**——对话没有别的
    * 可搜的正文（轮数/相对时间是元信息，不是检索词）。
    */
@@ -453,6 +458,39 @@
     })()
   })
 
+  /**
+   * ★★ D220：**建出这条 item，不发第一句**。
+   *
+   * 使用者："建立对话的时候，只是新建一个 Item，不需要发送第一句话，等到了聊天的页，
+   * 用户再敲第一句话"。所以这里只调 `startConversation`（不带 `text`）：
+   *   · 后端建一条**空对话**（标题为空 = 还没命名）；
+   *   · 前端立刻进那条对话（`startConversation` 里已经 `openConversation`），
+   *   · 输入条随对话出现，第一句话在那里敲；它就是标题（daemon 只补空标题，
+   *     改了名之后不再覆盖）。
+   */
+  async function createDraftConversation(): Promise<void> {
+    if (creating) return
+    if (draftPick.agentId === '') {
+      errorText = $t('chat.noExecutor')
+      return
+    }
+    creating = true
+    errorText = ''
+    try {
+      await startConversation({
+        agentId: draftPick.agentId,
+        ...(draftWorkDir.trim() === '' ? {} : { workDir: draftWorkDir.trim() }),
+        ...(draftPick.skillId === '' ? {} : { skillIds: [draftPick.skillId] }),
+      })
+      drafting = false
+      input = ''
+    } catch (err) {
+      errorText = err instanceof Error ? err.message : String(err)
+    } finally {
+      creating = false
+    }
+  }
+
   function startDrafting(): void {
     drafting = true
     errorText = ''
@@ -606,8 +644,14 @@
         drafting = false
         input = ''
         chatLiveRunId.set(out.runId)
-        if (out.runId === null) errorText = out.turn.error ?? ''
-        if (memoryToSave !== null) {
+        /**
+         * ★ D220：`startConversation` 的 `turn` 现在可能是 `null`（只建 item、不发第一句）。
+         *   这条老路径（起草态里直接打第一句）一定带 `text` ⇒ 后端一定会跑一轮，
+         *   所以这里 `turn` 不会是 null；用可选链把类型收紧，同时保住"万一没有 turn
+         *   就别去碰记忆"这条语义。
+         */
+        if (out.runId === null) errorText = out.turn?.error ?? ''
+        if (memoryToSave !== null && out.turn !== null) {
           await captureMemory(
             out.conversation.agentId,
             [
@@ -1025,7 +1069,10 @@
             {#snippet children()}
               <!-- ★ `title` 必须有：这一格是单行省略的，没有它标题一长就**永远看不全**
                  （任务列表、技能/工具的名称列都有） -->
-              <span class="conv-title ellipsis" title={conversation.title}>{conversation.title}</span>
+              <!-- ★ D220：空标题 = 还没命名（新建的空对话）⇒ 显示「未命名对话」 -->
+              <span class="conv-title ellipsis" title={conversation.title || $t('chat.untitled')}
+                >{conversation.title || $t('chat.untitled')}</span
+              >
               <!-- ★ 「N 轮 · 最近 X 分钟前」：轮数说明它有多重，相对时间说明
                    它有多旧——两者一起才是「这一条还值不值得点开」的答案。
                    ⚠️ 这句用的是 `chat.summary`，它**一直存在却没人用**：原本就
@@ -1080,8 +1127,24 @@
         {#if chatSettingsOpen}
           <!-- ★ 295 批：设置进了主区 ⇒ 右栏整块换成面板，它自己带栏头（不给双栏头） -->
         {:else if drafting}
+          <!--
+            ★★ D220（使用者："建立对话的时候只是新建一个 Item，不需要发送第一句话"）：
+              栏头还是原来的 `pane-head`（不换类名：探针按它认"起草态"），右边多一颗
+              「创建对话」——按它就直接建出一条**空对话**，进对话页再敲第一句话
+              （标题由那句话命名）。输入条照旧在（打第一句就建对话那条老路仍然可用）。
+          -->
           <div class="pane-head">
             <h2>{$t('chat.newConversation')}</h2>
+            <button
+              type="button"
+              class="btn btn--primary"
+              data-chat-create
+              disabled={creating || draftPick.agentId === ''}
+              title={$t('chat.createHint')}
+              onclick={() => void createDraftConversation()}
+            >
+              {creating ? $t('common.creating') : $t('chat.createConversation')}
+            </button>
           </div>
         {:else if activeConversation !== null}
       <div class="detail-head chat-head">
@@ -1116,7 +1179,7 @@
                   startRename()
                 }
               }}
-            >{activeConversation.title}</h2>
+            >{activeConversation.title || $t('chat.untitled')}</h2>
           {/if}
           <span class="detail-sub ellipsis">
             {agentOfActive?.name ?? '—'} ·
@@ -1491,6 +1554,11 @@
           >
         </div>
       {/if}
+      <!--
+        ★★ D220：起草态**保留输入条**（这是原有的"打第一句就建对话"那条路），
+          但同时栏头多了一颗「创建对话」——先建 item、再进对话页敲第一句。
+          两条路并存是**故意的**：想马上说就用输入条，想先建再说就按「创建对话」。
+      -->
       <ChatComposer
         bind:value={input}
         placeholder={$t('chat.placeholder')}

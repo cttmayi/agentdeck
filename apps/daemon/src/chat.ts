@@ -236,11 +236,23 @@ export async function submitChatTurn(
   const finalTurn: ChatTurn =
     failure === null ? { ...turn, runId } : { ...turn, error: errorText ?? '这一轮没有跑起来' }
   await store.insertChatTurn(finalTurn)
+  /**
+   * ★★ D220（使用者："建立对话的时候只是新建一个 Item，不需要发送第一句话"）：
+   *   **空标题 = 还没命名**。这样的对话由它的**第一句话**来命名——只在这一刻命名，
+   *   之后永远不再动它（`title !== ''` 就跳过）。
+   *
+   * 为什么这条规则不会重犯当年那个错（"我改了名却被第一次发言覆盖掉"）：
+   *   改名走 `PATCH /api/conversations/:id`，它写进去的是**非空**标题 ⇒ 到这一步
+   *   `conversation.title !== ''`，不会再被覆盖。只有"从没命名过"的空标题才会被补。
+   */
+  const titlePatch =
+    (conversation.title ?? '') === '' ? { title: titleFromText(text) } : {}
   const updatedConversation =
     (await store.updateConversation(conversation.id, {
       lastTurnAt: now,
       updatedAt: now,
       turnCount: seq,
+      ...titlePatch,
     })) ?? conversation
 
   return {

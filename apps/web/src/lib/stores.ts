@@ -337,15 +337,19 @@ export async function openConversation(id: string): Promise<ChatDetail | null> {
 }
 
 /**
- * 说第一句话——**对话由第一句话诞生**。
+ * 新建对话。
  *
- * 刻意没有"先建一个空对话"这条路：那样标题就没有出处，只能先填一个占位，
- * 等第一句话来了再覆盖它，而"我改了名却被第一次发言覆盖掉"是那种看得见、
- * 说不清的坏结果。
+ * ★★ D220（使用者："建立对话的时候，只是新建一个 Item，不需要发送第一句话"）：
+ *   **`text` 可以省略**——省略就是"只建这条 item"，之后在对话页里敲第一句
+ *   （走 `sendChatTurn`）。标题由第一句话来命名，改名之后不再被覆盖（规则在
+ *   daemon 的 `submitChatTurn` 里，只补空标题）。
+ *
+ * 传了 `text` 则是"建对话并把第一句发出去"——「新对话」那条快捷路仍然用它。
  */
 export async function startConversation(input: {
   agentId: string
-  text: string
+  /** 省略 = 只建 item，不发第一句。 */
+  text?: string
   workDir?: string
   /**
    * 这个对话额外带的 skill。
@@ -354,14 +358,18 @@ export async function startConversation(input: {
    * 选那个人"，执行者自己就带着它，不需要在这里再传一遍。省略 = 不带。
    */
   skillIds?: string[]
-}): Promise<{ conversation: Conversation; turn: ChatTurnView; runId: string | null }> {
-  const out = await api<{ conversation: Conversation; turn: ChatTurnView; runId: string | null }>(
+}): Promise<{ conversation: Conversation; turn: ChatTurnView | null; runId: string | null }> {
+  const out = await api<{
+    conversation: Conversation
+    turn: ChatTurnView | null
+    runId: string | null
+  }>(
     '/api/conversations',
     {
       method: 'POST',
       body: JSON.stringify({
         agentId: input.agentId,
-        text: input.text,
+        ...(input.text !== undefined ? { text: input.text } : {}),
         ...(input.workDir ? { workDir: input.workDir } : {}),
         ...(input.skillIds && input.skillIds.length > 0 ? { skillIds: input.skillIds } : {}),
       }),
