@@ -124,6 +124,101 @@
         }
       }
 
+      /**
+       * ★★ D199：**可点元素的高度只有三种来源**——档位（写死的值）/ 内容（文字折行的按钮更高）/
+       *   容器（列表行、导航行、拖拽条、分组头撑开）。
+       *
+       * 把全站可点元素摊开，会看到 13/20/22/24/28/30/34/42/53/60/62/64/65/89/848 这一列，
+       * 看着像十五个档位，其实只有"五个档位 + 内容 + 容器"。这条把它们分开量：
+       * 归不到任何一类的**新类名**会进 `unexpected`（那就是"漏了一个档"的样子，
+       * 比如 `.theme-picker button` 曾经是 28.8）。
+       *
+       * 累计器：探针跨页面跑，任务页 / 设置页 / 技能页各扫一次，合并成一个事实。
+       */
+      function sweepCtl(label) {
+      const doc = d()
+      const win = f.contentWindow
+      const styleOf = (el) => win.getComputedStyle(el)
+      const acc = facts['ctl.heights'] ?? {
+        pages: [],
+        total: 0,
+        at30: 0,
+        rail: 0,
+        containers: 0,
+        textLinks: 0,
+        registered: {},
+        wrapped: [],
+        unexpected: [],
+      }
+      /** 登记表：[选择器, 档名, 允许的高度] —— 不在表里的东西一律归"控件 30 / 折行 / 容器" */
+      const REG = [
+        ['.list-row-action', '行内动作', [28]],
+        ['.stage-chips button', '标签胶囊', [24]],
+        ['.view-switch button', '标签胶囊', [22]],
+        ['.expand-toggle', '内联小件', [13]],
+        ['.switch', '内联小件', [20]],
+      ]
+      /** 容器类：高度跟着内容/容器走（列表行、导航行、拖拽条、分组头），不是控件 */
+      const CONTAINER = ['.list-row-main', '.nav-item', '.split-grip', '.list-group-head']
+      const clickable = [
+        ...doc.querySelectorAll(
+          'button, a[href], select, input:not([type=hidden]), label[for], summary, [role=button]',
+        ),
+      ].filter((el) => {
+        const r = el.getBoundingClientRect()
+        const st = styleOf(el)
+        return r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none'
+      })
+      if (clickable.length === 0) return
+      acc.pages.push(`${label}(${String(clickable.length)})`)
+      acc.total += clickable.length
+      for (const el of clickable) {
+        const h = Math.round(el.getBoundingClientRect().height)
+        const cls =
+          String(el.className || el.tagName)
+            .split(/\s+/)
+            .filter((c) => c !== '' && !c.startsWith('svelte-'))
+            .slice(0, 3)
+            .join('.') || el.tagName
+        const reg = REG.find(([sel]) => el.matches(sel))
+        if (reg) {
+          const key = `${String(reg[1])} · ${String(reg[0])}`
+          acc.registered[key] = [...new Set([...(acc.registered[key] ?? []), h])]
+          continue
+        }
+        if (CONTAINER.some((sel) => el.matches(sel))) {
+          acc.containers += 1
+          continue
+        }
+        /**
+         * **文字不是控件**：`<label for>`（字段名，点它只是把焦点给输入框）与行内 `<a>`
+         * （正文里的链接）的高度就是行盒高度（21 / 17）——它们没有"档位"这回事，
+         * 算进控件里会把这条判据变成噪声（第一版就是这么报红的）。
+         */
+        const tag = el.tagName
+        if (tag === 'LABEL' || (tag === 'A' && styleOf(el).display === 'inline')) {
+          acc.textLinks += 1
+          continue
+        }
+        // 轨道里的常驻控件 = `--rail-h`(34)。⚠️ 不能只看 `.topbar`：顶栏的「更多」菜单
+        // 也挂在 `.topbar` 里，但菜单项是普通控件（30）——所以要排除菜单容器。
+        if (el.closest('.topbar') && !el.closest('[data-page-more-menu], [role=menu]') && h === 34) {
+          acc.rail += 1
+          continue
+        }
+        if (h === 30) {
+          acc.at30 += 1
+          continue
+        }
+        if (h > 30) {
+          acc.wrapped.push(`${label}:${cls}=${String(h)}`)
+          continue
+        }
+        acc.unexpected.push(`${label}:${cls}=${String(h)}`)
+      }
+      facts['ctl.heights'] = acc
+    }
+
       /** 计算样式；元素不在时给空对象（读到的字段是 undefined ⇒ 那条断言红，正是要的）。 */
       function cs(el) {
         if (!el) {
@@ -1930,6 +2025,7 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
           text(rows[0]?.querySelector('.task-meta')),
         )
         // ── 行高：长标题不许把一行撑高 ──
+        sweepCtl('任务页')
         facts['tasks.rowHeights'] = need('各行高度', () =>
           rows.map((r) => Math.round(r.getBoundingClientRect().height)),
         )
@@ -2718,6 +2814,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         await until(() => text(d().querySelector('.page-name')) === '技能')
         facts['entry.技能.actual'] = text(d().querySelector('.page-name'))
         await wait(500)
+        sweepCtl('技能页')
         facts['skills.title'] = need('技能页标题', () => text(d().querySelector('.page-name')))
         // ⚠️ 两代老结构都不该再存在，各自是**不同**的一课：
         //   · `.install-panel`（最早那版"插在页头和列表之间的正文面板"）——它
@@ -5814,6 +5911,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               rowAction: [...new Set([...doc.querySelectorAll('.list-row-action')].filter(visible).map(h))],
             }
           })()
+          sweepCtl('设置页')
           facts['headings.levels'] = (() => {
             const px = (el) => (el ? Math.round(parseFloat(cs(el).fontSize)) : null)
             const h1 = d().querySelector('.topbar .page-name')
@@ -6075,6 +6173,21 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
                 令牌: cs(d().documentElement).getPropertyValue('--list-row-min-h').trim(),
               }
             })()
+            /**
+             * ★★ D199：**可点元素的高度只由三样东西决定**（不同页面上把这三样混在一起看，
+             *   就得到一列"13/20/22/24/28/30/34/42/53/60/62/64/65/89/848"的乱账）：
+             *
+             *   ① **档位**：控件 30（含裸 `<button>`，不只看 `.btn`）、轨道常驻 34、
+             *      行内动作 28、标签胶囊 22/24、内联小件 13/20；
+             *   ② **内容**：文字折行的按钮会比 30 高（实测 42/53/64）——这是内容决定的，
+             *      不是第五个档位，所以**不报红、但要报出来**（silently 放宽才是坑）；
+             *   ③ **容器**：列表行（60–89，跟着行内容走）、拖拽条（撑满高度）——它们不是控件。
+             *
+             * 这条判据在每个页面扫描**所有**可点元素（`button` / `a[href]` / `select` /
+             *   `input` / `label[for]` / `[role=button]`），按上面三类归类：
+             *   · 归到"档位"的，高度必须等于登记值；
+             *   · 归不到任何一类的**一个新类名** ⇒ 报红（这就是"漏档"的样子）。
+             */
             facts['btn.uniform'] = (() => {
               const m = (el) => {
                 if (!el) return null

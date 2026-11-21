@@ -4582,6 +4582,31 @@ const CHECKS = [
       `分段 ${String(v.section)}px · 小节 ${String(v.sub)}px`,
   },
   {
+    key: 'ctl.heights',
+    /**
+     * ★★ D199：**可点元素的高度只有三种来源**——档位（写死的值）/ 内容（折行的按钮更高）/
+     * 容器（列表行、拖拽条撑满）。这条判据在**每个向量里都跑**（`view: null` ⇒ 所有视图），
+     * 要求：归不到任何一类的**新类名一个都不许有**。
+     *
+     * 为什么值得单列一条：把全站可点元素的高度摊开，会看到
+     * 13/20/22/24/28/30/34/42/53/60/62/64/65/89/848 这一列——看着像十五个档位，
+     * 其实只有"五个档位 + 内容 + 容器"。这条判据把这三类分开量，于是"漏了一个档"
+     * （比如 `.theme-picker` 曾经是 28.8）会变成 `unexpected`，而不是淹没在长数字列表里。
+     */
+    label: '★★ 可点元素高度只有三种来源（档位 / 内容 / 容器），没有第四类',
+    ok: (v) =>
+      !!v &&
+      Array.isArray(v.unexpected) &&
+      v.unexpected.length === 0 &&
+      typeof v.at30 === 'number' &&
+      v.at30 > 0,
+    show: (v) =>
+      `${String(v.total)} 个可点元素：控件 30 ${String(v.at30)} · 轨道 34 ${String(v.rail)} · ` +
+      `文字 ${String(v.textLinks)} · 容器 ${String(v.containers)} · 登记 ${JSON.stringify(v.registered)}` +
+      (v.wrapped.length ? ` · 折行 ${v.wrapped.join(' ')}` : '') +
+      (v.unexpected.length ? ` · ✗ 没归类 ${v.unexpected.join(' ')}` : ''),
+  },
+  {
     view: '设置页',
     key: 'ctl.sweep',
     /**
