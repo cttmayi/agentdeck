@@ -35,10 +35,10 @@
   let diagnosticsOpen = false
 </script>
 
-<div class="view-intro">
-  <p>{$t('about.sub')}</p>
-</div>
-
+<!--
+  ★★ D223（与设置页同一次）：页头说明段（`.view-intro`：「这一版界面在跑什么、它连着
+     哪个 daemon、agent 的边界在哪里——都在这页。」）整段删除——第一行就是「应用」这张卡。
+-->
 {#if !$identity}
   <div class="skeleton"></div>
 {:else}

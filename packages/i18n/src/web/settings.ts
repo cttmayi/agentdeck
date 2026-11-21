@@ -21,10 +21,11 @@ export const settingsText = {
   'settings.navTitle': { zh: '设置', en: 'Settings' },
   // ⚠️ 侧栏减半纪律：辅助文字 4–6 个字、一行放得下。
   'settings.navHint': { zh: '主题 · 语言', en: 'Theme · language' },
-  'settings.headIntro': {
-    zh: '这一台怎么配：主题、语言、默认运行时，界面上的宽度，成本与审计导出，以及远端账号。',
-    en: 'How this machine is configured: theme, language, default runtime, on-screen widths, costs & audit export, and the remote account.',
-  },
+  /*
+   * ★★ D223：`settings.headIntro` 删除（页头说明段「这一台怎么配：主题、语言、默认
+   *    运行时，界面上的宽度，成本与审计导出，以及远端账号。」）。理由见 `about.ts`
+   *    同一次删除的注释：页面第一行已经就是「通用」那张卡，这段话是把卡片名念一遍。
+   */
   'settings.general': { zh: '通用', en: 'General' },
   // ── 抽屉外壳 ──
   // 2026-11：抽屉没了——`settings.title` / `settings.titleRemote`（抽屉标题）

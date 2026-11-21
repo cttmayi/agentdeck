@@ -15,10 +15,14 @@ export const aboutText = {
   // ⚠️ 侧栏减半纪律：辅助文字 4–6 个字、一行放得下（`shell.navChatHint` 同款）。
   'about.navHint': { zh: '版本 · 环境', en: 'Version · env' },
 
-  'about.sub': {
-    zh: '这一版界面在跑什么、它连着哪个 daemon、agent 的边界在哪里——都在这页。',
-    en: 'Which build you are running, which daemon it talks to, and where agent limits are.',
-  },
+  /*
+   * ★★ D223（使用者："还有些页面也是第一行写些描述，不符合当前规格"）：
+   *    `about.sub` / `settings.headIntro` 两条页头说明一起删掉——它们是全站最后两处
+   *    「这页是什么」的解释句（技能页那段 D222 已删，智能体页那段 D63 已删）。
+   *    共同理由：顶栏页名 + 下面第一张卡 / 第一个面板头已经把这件事说清；解释句唯一
+   *    的作用是把卡片名再念一遍，占掉页面最贵的那一行。页头说明从此**全站没有**，
+   *    连带 `.view-intro` 与 `--measure` 一起退场（见 app.css）。
+   */
 
   // ── ① 应用 ──
   'about.app': { zh: '应用', en: 'Application' },

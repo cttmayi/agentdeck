@@ -2121,6 +2121,12 @@ const CHECKS = [
     ok: (v) => v === true,
   },
   {
+    view: '关于（2026-11）',
+    key: 'about.firstIsCardGrid',
+    label: '★ 关于页第一行就是「应用」那张卡（D223 删掉页头说明段之后没有过渡文字）',
+    ok: (v) => v === true,
+  },
+  {
     view: '聊天',
     key: 'chat.createEmptyConversation',
     /**
@@ -3692,8 +3698,8 @@ const CHECKS = [
   },
   {
     view: '设置（2026-11）',
-    key: 'settings.viewIntroPresent',
-    label: '★ 设置页是**主窗口视图**（有 .view-intro 页头说明，不是浮层）',
+    key: 'settings.firstIsCardGrid',
+    label: '★ 设置页是**主窗口视图**（主区第一块就是卡片网格，不是浮层）——D223 起改为量它的意图，原来量的是 .view-intro',
     ok: (v) => v === true,
   },
   {

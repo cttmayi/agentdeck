@@ -4793,6 +4793,14 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           '[data-ab-app]', '[data-ab-env]', '[data-ab-storage]',
           '[data-ab-security]', '[data-ab-diagnostics]', '[data-ab-docs]',
         ].every((sel) => !!d().querySelector(sel))
+        // ★★ D223：页头说明段（`about.sub`）删了 ⇒ 这一页**第一行就是「应用」那张卡**。
+        //    与设置页 `settings.firstIsCardGrid` 成对：两页都"从真实内容开始"。
+        facts['about.firstIsCardGrid'] = (() => {
+          const main = d().querySelector('.main')
+          if (!main) return null
+          const first = [...main.children].find((e) => e.tagName !== 'STYLE')
+          return first ? String(first.className).includes('card-grid') : null
+        })()
         /**
          * ★★ D179：**卡片只有一套壳**——关于页六卡与设置页同一套（`.card-grid` + `.main-panel`）。
          * 量在**这一页已经打开的时候**（这一段本来就要量网格）：另起一次 `#/about` 往返会把
@@ -5632,7 +5640,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           } else {
             click(settingsIcon)
             const opened = await until(() => !!d().querySelector('[data-set-general]'), 60)
-            // ★ 2026-11：设置页三卡片（通用/成本/远端能力）都在、页头导语在、
+            // ★ 2026-11：设置页三卡片（通用/成本/远端能力）都在、第一条就是卡片、
             //    没有遮罩（主窗口视图不是浮层）
             facts['settings.sections'] =
               !!d().querySelector('[data-set-general]') &&
@@ -5648,7 +5656,17 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               setGrid &&
               getComputedStyle(d().querySelector('[data-set-remote]')).gridColumn === '1 / -1'
             )
-            facts['settings.viewIntroPresent'] = !!d().querySelector('.view-intro')
+            // ★★ D223：这里原来钉的是"有 `.view-intro` 页头说明"——那是为了证明
+            //    **设置是主窗口视图、不是浮层**（浮层里不会有页头说明）。使用者要求
+            //    去掉页头说明（"第一行写些描述，不符合当前规格"）之后，`.view-intro`
+            //    这个类整个不存在了，于是判据换成量**它的意图**：主区第一块就是卡片
+            //    网格（说明这页从第一行起就是真实内容，且它是主区里的东西，不是浮层）。
+            facts['settings.firstIsCardGrid'] = (() => {
+              const main = d().querySelector('.main')
+              if (!main) return null
+              const first = [...main.children].find((e) => e.tagName !== 'STYLE')
+              return first ? String(first.className).includes('card-grid') : null
+            })()
             facts['settings.noBackdropWhenOpen'] = !d().querySelector('.drawer-backdrop')
             const drSection = d().querySelector('[data-set-general] [data-default-runtime]')
             facts['settings.defaultRuntimePresent'] = !!drSection
