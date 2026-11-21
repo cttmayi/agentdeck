@@ -59,7 +59,7 @@ function instructionsMdPath(dataDir: string, dirName: string): string {
  * 独有技能根（这个智能体自己的技能文件）。
  *
  * ★ D228：`agent` 这一种来源的路径由**本文件**负责（它拥有智能体目录的形状）；
- *   另一种来源（编排内建智能体，`workflows/<wid>/agents/<aid>/skills/`）的形状归
+ *   另一种来源（编排内建智能体，`workflows/<wid>/agents/<名字>/skills/`）的形状归
  *   `apps/daemon/src/workflows-dirs.ts`，由 daemon 在装配时把解析函数注入进来
  *   （`FileStoreOptions.exclusiveSkillsDir`）。这样"谁知道路径"仍然只有一处。
  */
@@ -275,7 +275,7 @@ export async function listExclusiveSkillBodiesIn(
  * 原先是 `(dataDir, agentId, slug)`——路径在里面拼死。改成吃目录之后，
  * "这份技能文件属于谁、它的目录在哪"由调用方（`FileStore`）按
  * `ExclusiveSkillOwner` 解析：账号智能体走 `agents/<id>/skills/`，
- * 编排内建智能体走 `workflows/<wid>/agents/<aid>/skills/`——**同一份实现**
+ * 编排内建智能体走 `workflows/<wid>/agents/<名字>/skills/`（D235）——**同一份实现**
  * 服务两种来源，路径形状仍然只有各自的拥有者知道。
  */
 export async function getExclusiveSkillBodyIn(

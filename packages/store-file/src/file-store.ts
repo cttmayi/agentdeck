@@ -79,7 +79,7 @@ import { agentDirNameMatches, slugForAgentName, uniqueAgentDirName } from './age
  *   ├── lock                          单进程锁
  *   ├── device.json                   本机设备标识
  *   ├── workspaces.jsonl              workspace 记录（全局，量小）
- *   ├── agents/<agentId>/              ★ 智能体目录（D111，2026-11）——
+ *   ├── agents/<名字>/                 ★ 智能体目录（D111，目录名是名字的 slug，D231）——
  *   │   ├── agent.json               结构化资讯（不含指令正文）
  *   │   ├── instructions.md          指令**组装前**正文（内置 = 身份块；自建 = 全文）
  *   │   └── skills/<slug>/SKILL.md    这个智能体**独有**的技能（文件资产，不进技能库）
@@ -178,15 +178,19 @@ export interface FileStoreOptions {
   /**
    * **独有技能的目录解析**（D228）——`owner → 目录`。
    *
-   * 缺省只认 `kind: 'agent'`（`agents/<id>/skills/`，形状归 `agent-dirs.ts`）。
+   * 缺省只认 `kind: 'agent'`（`agents/<目录名>/skills/`，形状归 `agent-dirs.ts`）。
    * 另一种来源（编排内建智能体）的目录形状归 daemon 的 `workflows-dirs.ts`，
    * 所以由 daemon 在装配时把整张解析函数注入进来（与 `skillsRoot` 同一个套路）：
    * **谁拥有路径，谁提供解析**——而不是让两个包各拼一遍、迟早分叉。
    *
    * 缺省实现遇到 `kind: 'workflow-agent'` 会**明确报错**：没注入解析却去读，
    * 说明装配漏了一处，静默返回空数组会让"编排自带技能坏了"变成"它本来就没有技能"。
+   *
+   * ★ D235：返回值可以是 `Promise`，`null` 表示"这个人不存在"（读 ⇒ 空列表、
+   *   写 ⇒ 调用方抛错，与账号智能体同一口径）。编排内建智能体的目录名是**名字的
+   *   slug**，要读一眼 `agent.json` 才知道，所以这里不能再是同步的纯字符串拼接。
    */
-  exclusiveSkillsDir?: (owner: ExclusiveSkillOwner) => string
+  exclusiveSkillsDir?: (owner: ExclusiveSkillOwner) => string | null | Promise<string | null>
   /**
    * **使用者提炼**技能（D80）的落点（`source: 'mine'` 的技能正文）。
    *
@@ -477,8 +481,13 @@ export class FileStore implements Store {
   readonly #skillsRoot: string
   /** 使用者提炼技能（D80）的落点——与 `#skillsRoot` 物理分离，见 `FileStoreOptions`。 */
   readonly #mineRoot: string
-  /** 独有技能目录解析（D228）：`owner → 目录`。见 `FileStoreOptions.exclusiveSkillsDir`。 */
-  readonly #injectedExclusiveDirOf: ((owner: ExclusiveSkillOwner) => string) | null
+  /**
+   * 独有技能目录解析（D228）：`owner → 目录 | null`。
+   * 见 `FileStoreOptions.exclusiveSkillsDir`；D235 起可以是异步、可以返回 `null`（人不存在）。
+   */
+  readonly #injectedExclusiveDirOf:
+    | ((owner: ExclusiveSkillOwner) => string | null | Promise<string | null>)
+    | null
   /**
    * ★ 2026-11（D226）：workspace 记录**不是日志**，是一个普通 JSON 数组文件
    *   （`<dataDir>/workspaces.json`）——见 `#loadWorkspaces` 上面那段。
@@ -512,7 +521,7 @@ export class FileStore implements Store {
     skillsRoot: string,
     mineRoot: string,
     onInfo: (message: string) => void = () => {},
-    exclusiveSkillsDir?: (owner: ExclusiveSkillOwner) => string,
+    exclusiveSkillsDir?: (owner: ExclusiveSkillOwner) => string | null | Promise<string | null>,
   ) {
     this.#dataDir = dataDir
     this.#fsync = fsync
@@ -1250,7 +1259,11 @@ export class FileStore implements Store {
           `装配处漏了 ${owner.kind} 那一种来源。别静默当"没有技能"`,
       )
     }
-    return this.#injectedExclusiveDirOf(owner)
+    /*
+     * ★ D235：解析函数可以是异步、也可以说"这个人不存在"（`null`）。
+     *   编排内建智能体的目录名是名字的 slug，要读一眼 `agent.json` 才知道。
+     */
+    return await this.#injectedExclusiveDirOf(owner)
   }
 
   /** 当前已占用的目录名（建新目录 / 改名时算唯一名用）。 */

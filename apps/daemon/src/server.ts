@@ -66,7 +66,7 @@ import {
   type WorkspaceId,
   type MemoryEntry,
 } from '@agentdeck/protocol'
-import { agentExclusiveSkillsDir, FileStore } from '@agentdeck/store-file'
+import { FileStore } from '@agentdeck/store-file'
 import { resolveReviewStandard } from './review-standard.ts'
 import { readAgentDraftArtifacts, parseAgentDraft } from './agent-maker.ts'
 import {
@@ -1361,15 +1361,26 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     skillsMineRoot,
     /*
      * ★ D228：**独有技能"在哪"的解析**——两种来源各归自己的拥有者：
-     *   · `agent` → `agents/<id>/skills/`（形状归 store-file 的 `agent-dirs.ts`）；
-     *   · `workflow-agent` → `workflows/<wid>/agents/<aid>/skills/`（形状归
+     *   · `agent` → `agents/<目录名>/skills/`，**由 store-file 自己解析**
+     *     （要走它的 `id → 目录名` 索引，形状归 `agent-dirs.ts`）；
+     *   · `workflow-agent` → `workflows/<wid>/agents/<名字>/skills/`（形状归
      *     `workflows-dirs.ts`，也就是这个 daemon 自己）。
      *   注入这一层因此只需要一个目录，不需要知道有两类来源（同一份注入实现）。
+     *
+     * ⚠️ D235：`agent` 那一种**永远到不了这里**（`FileStore.#exclusiveSkillsDirOf`
+     *   提前 return 了），所以这里不再有那个分支。改之前它还在，而且传的是
+     *   `agentId` 给一个已改吃"目录名"的函数——死代码 + 传错参数，纯靠上游
+     *   提前 return 保命。真要有第三种来源，在这里加分支，别让第二种悄悄走错路。
      */
-    exclusiveSkillsDir: (owner) =>
-      owner.kind === 'agent'
-        ? agentExclusiveSkillsDir(options.dataDir, owner.agentId)
-        : workflowAgentExclusiveSkillsDir(options.dataDir, owner.workflowId, owner.agentId),
+    exclusiveSkillsDir: (owner) => {
+      if (owner.kind !== 'workflow-agent') {
+        throw new Error(
+          `编排这一层不解析 ${owner.kind} 来源的独有技能目录——` +
+            '账号智能体的目录由 store-file 自己按 id → 目录名索引解析（D231/D235）',
+        )
+      }
+      return workflowAgentExclusiveSkillsDir(options.dataDir, owner.workflowId, owner.agentId)
+    },
   })
 
   // ══════════════════════════════════════════════════════════════════
@@ -2631,7 +2642,7 @@ async function injectedSkillsOf(
                 }
                 /*
                  * 内建的技能走"来源"机制（D228）：`skillIds` 是库引用，独有技能在
-                 * `workflows/<wid>/agents/<aid>/skills/`。显式传给 `submitRunRequest`：
+                 * `workflows/<wid>/agents/<名字>/skills/`（D235）。显式传给 `submitRunRequest`：
                  * 它拿到显式 skills 就不再按 agent 配置去解析（那条路对内建智能体是空）。
                  */
                 inlineSkills = await loadInjectableSkills(store, {

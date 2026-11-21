@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
+import { readdir } from 'node:fs/promises'
+import { join } from 'node:path'
 import { FileStore } from '@agentdeck/store-file'
 import type { SkillPayload } from '@agentdeck/protocol'
 import { loadInjectableSkills, skillSourcesOfAgent, type SkillSources } from './agent-injectable-skills.ts'
 import { agentExclusiveSkillsDir } from '@agentdeck/store-file'
-import { workflowAgentExclusiveSkillsDir } from './workflows-dirs.ts'
+import { workflowAgentExclusiveSkillsDir, writeWorkflowAgent } from './workflows-dirs.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
@@ -26,10 +28,17 @@ async function openStore(dir: string): Promise<FileStore> {
   return FileStore.open({
     dataDir: dir,
     fsync: false,
-    exclusiveSkillsDir: (owner) =>
-      owner.kind === 'agent'
-        ? agentExclusiveSkillsDir(dir, owner.agentId)
-        : workflowAgentExclusiveSkillsDir(dir, owner.workflowId, owner.agentId),
+    /*
+     * 与 `server.ts` 的装配逐字同形（D235：解析是异步的，`agent` 那种根本不进来）。
+     * 这里故意保留一个显式抛错分支——解析函数要是被人改成"两种都归我"，
+     * 这条测试当场红，而不是悄悄拼出 `agents/<agentId>` 那种错路径。
+     */
+    exclusiveSkillsDir: (owner) => {
+      if (owner.kind !== 'workflow-agent') {
+        throw new Error(`测试装配只解析 workflow-agent，收到了 ${owner.kind}`)
+      }
+      return workflowAgentExclusiveSkillsDir(dir, owner.workflowId, owner.agentId)
+    },
   })
 }
 
@@ -82,6 +91,24 @@ async function seed(dir: string): Promise<FileStore> {
       updatedAt: 1,
     } as never)
   }
+  /*
+   * ★ D235：编排内建智能体也有同样的门槛——**实体目录不在就写不了它自己的技能**，
+   *   否则又会造出一个没有 `agent.json` 的孤儿目录（改之前正是这个毛病：
+   *   `workflows/<wid>/agents/<agentId>/skills/` 与实体目录 `<名字>/` 各存一份）。
+   */
+  for (const [wid, id, name] of [
+    ['wf-1', 'wa-1', '内建甲'],
+    ['wf-2', 'wa-2', '内建乙'],
+  ] as const) {
+    await writeWorkflowAgent(dir, wid, {
+      id,
+      name,
+      instructions: '',
+      skillIds: [],
+      createdAt: 1,
+      updatedAt: 1,
+    })
+  }
   return store
 }
 
@@ -100,7 +127,7 @@ describe('★ D228：独有技能按"来源"定位，两种来源同一份实现
       }
       const fromAgent = await loadInjectableSkills(store, agentSources)
 
-      // ② 编排内建智能体那条：workflows/<wid>/agents/<aid>/skills/<slug>/SKILL.md
+      // ② 编排内建智能体那条：workflows/<wid>/agents/<名字>/skills/<slug>/SKILL.md
       await store.writeExclusiveSkill(
         { kind: 'workflow-agent', workflowId: 'wf-1', agentId: 'wa-1' },
         'private-notes',
@@ -131,12 +158,19 @@ describe('★ D228：独有技能按"来源"定位，两种来源同一份实现
 
       // ③ 两边落在**不同目录**（真实落盘位置不能撞）
       assert.match(
-        agentExclusiveSkillsDir(dir, 'a-1'),
-        /agents[/\\]a-1[/\\]skills$/,
+        agentExclusiveSkillsDir(dir, '甲'),
+        /agents[/\\]甲[/\\]skills$/,
+        '账号智能体：目录名是名字的 slug（D231）',
       )
-      assert.match(
-        workflowAgentExclusiveSkillsDir(dir, 'wf-1', 'wa-1'),
-        /workflows[/\\]wf-1[/\\]agents[/\\]wa-1[/\\]skills$/,
+      /*
+       * ★ D235：内建智能体的技能目录**就在它自己的实体目录里面**
+       *   （`workflows/<wid>/agents/<名字>/skills`），不是旁边一个 `<agentId>/`。
+       *   这条是整轮的判据：改之前这里会拼出 `agents/wa-1/skills`——
+       *   实体在 `agents/内建甲/`、技能在 `agents/wa-1/`，一个实体两个目录。
+       */
+      assert.equal(
+        await workflowAgentExclusiveSkillsDir(dir, 'wf-1', 'wa-1'),
+        join(dir, 'workflows', 'wf-1', 'agents', '内建甲', 'skills'),
       )
       await store.close()
     } finally {
@@ -167,6 +201,32 @@ describe('★ D228：独有技能按"来源"定位，两种来源同一份实现
       })
       assert.equal(asWorkflow.length, 1)
       assert.equal(asWorkflow[0]!.slug, 'only-in-workflow')
+      await store.close()
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
+  /*
+   * ★★ D235 的回归判据：这条内建智能体**不存在**时——
+   *   · 读 ⇒ 空列表（不该抛：定时任务/编排被删掉后残留的引用不该炸整页）；
+   *   · 写 ⇒ 抛错（往不存在的实体写技能只会造出一个没有 `agent.json` 的孤儿目录）；
+   *   · 而且**盘上不许出现以 id 命名的目录**——那正是改之前的毛病。
+   */
+  test('★★ 内建智能体不存在 ⇒ 读空、写抛，且盘上不留以 id 命名的目录', async () => {
+    const dir = await makeTempDir('skill-sources-ghost')
+    try {
+      const store = await seed(dir)
+      const ghost = { kind: 'workflow-agent', workflowId: 'wf-1', agentId: 'wa-不存在' } as const
+      assert.deepEqual(await store.listExclusiveSkills(ghost), [], '读不许抛，也不许编出技能')
+      assert.equal(await store.getExclusiveSkill(ghost, 'private-notes'), null)
+      assert.equal(await store.removeExclusiveSkill(ghost, 'private-notes'), false)
+      await assert.rejects(
+        () => store.writeExclusiveSkill(ghost, 'private-notes', BODY),
+        /不存在/,
+        '写要抛，而不是悄悄造目录',
+      )
+      assert.deepEqual(await readdir(join(dir, 'workflows', 'wf-1', 'agents')), ['内建甲'])
       await store.close()
     } finally {
       await cleanup(dir)

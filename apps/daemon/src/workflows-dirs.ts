@@ -64,21 +64,33 @@ function workflowCodePath(dir: string, id: string): string {
 }
 
 /**
- * **编排内建智能体的独有技能目录**（D228）。
+ * **编排内建智能体的独有技能目录**（D228 的概念、D235 的解析方式）。
  *
- * `workflows/<id>/agents/<agentId>/skills/` —— 与 `agents/<id>/skills/` 逐字同形，
+ * `workflows/<id>/agents/<名字>/skills/` —— 与 `agents/<名字>/skills/` 逐字同形，
  * 这样技能注入那一层不需要知道两种来源的差别（它只拿到一个目录）。
  *
  * ⚠️ 这个形状归本文件（workflow 目录的拥有者）；daemon 在装配 `FileStore` 时
  *   把"owner → 目录"的解析函数注入进去，store-file 只认目录、不认 workflow
  *   的布局（`packages/domain` 的端口里也不许出现路径词汇，见 FR-STOR-03）。
+ *
+ * ★ D235：**按 id 精确找到它自己的目录**，不再拼 `agents/<agentId>/`。
+ *   改之前这里直接拿 `agentId` 当目录名——那是 D228 提前定形状时留下的（内建智能体
+ *   当时还没落地），D234 落地时目录名变成了名字的 slug，这个函数**结构上改不动**
+ *   （它手上没有名字），于是同一条内建智能体会被拆成两个目录：
+ *   `agents/<名字>/`（实体）与 `agents/<ULID>/skills/`（技能）。
+ *   现在返回 `null` 表示"没有这条内建智能体"——与账号智能体同一口径：
+ *   **读 ⇒ 空列表、写 ⇒ 调用方报错**（往不存在的实体写技能只会造出孤儿目录）。
+ *
+ * 所以是 `async`：要先读一眼各条内建智能体目录里的 `agent.json`。
  */
-export function workflowAgentExclusiveSkillsDir(
+export async function workflowAgentExclusiveSkillsDir(
   dir: string,
   workflowId: string,
   agentId: string,
-): string {
-  return join(workflowDirPath(dir, assertSafeId(workflowId)), 'agents', assertSafeId(agentId), 'skills')
+): Promise<string | null> {
+  const entry = await findWorkflowAgentEntry(dir, workflowId, agentId)
+  if (entry === null) return null
+  return join(workflowAgentsRoot(dir, workflowId), entry.dirName, 'skills')
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -103,18 +115,32 @@ function workflowAgentDirPath(dir: string, workflowId: string, dirName: string):
   return join(workflowAgentsRoot(dir, workflowId), dirName)
 }
 
-/** 列出这个编排的内建智能体（目录是真相；按创建时间排，与 `listAgentDirs` 同一条规矩）。 */
-export async function listWorkflowAgents(
+/**
+ * 一条内建智能体的**目录条目**：目录名 + 内容。
+ *
+ * ★ D235：`id → 目录名` 的对应关系**只有这一处读**（`listWorkflowAgentEntries`）。
+ *   改之前 `writeWorkflowAgent` / `removeWorkflowAgent` 各自用
+ *   `readdir(...).find(n => n.startsWith(slug(name)))` 猜目录——两个内建智能体叫
+ *   「甲」和「甲乙」时，改甲的名字/删甲会**找上甲乙的目录**（`readdir` 顺序不保证），
+ *   等于删错人的数据。现在一律按 `agent.json` 里的 `id` **精确匹配**。
+ */
+export interface WorkflowAgentEntry {
+  dirName: string
+  agent: WorkflowInlineAgent
+}
+
+/** 列出这个编排的内建智能体目录条目（目录是真相；坏一条不牵连别的）。 */
+async function listWorkflowAgentEntries(
   dir: string,
   workflowId: string,
-): Promise<WorkflowInlineAgent[]> {
+): Promise<WorkflowAgentEntry[]> {
   let dirNames: string[]
   try {
     dirNames = await readdir(workflowAgentsRoot(dir, workflowId))
   } catch {
     return [] // 没有内建智能体 ≠ 出错
   }
-  const out: WorkflowInlineAgent[] = []
+  const out: WorkflowAgentEntry[] = []
   for (const dirName of dirNames) {
     if (dirName.startsWith('.')) continue
     const base = workflowAgentDirPath(dir, workflowId, dirName)
@@ -133,16 +159,37 @@ export async function listWorkflowAgents(
     }
     const id = typeof json['id'] === 'string' && json['id'] !== '' ? json['id'] : dirName
     out.push({
-      id,
-      name: typeof json['name'] === 'string' && json['name'] !== '' ? json['name'] : dirName,
-      instructions,
-      skillIds: Array.isArray(json['skillIds']) ? (json['skillIds'] as string[]) : [],
-      createdAt: typeof json['createdAt'] === 'number' ? json['createdAt'] : 0,
-      updatedAt: typeof json['updatedAt'] === 'number' ? json['updatedAt'] : 0,
+      dirName,
+      agent: {
+        id,
+        name: typeof json['name'] === 'string' && json['name'] !== '' ? json['name'] : dirName,
+        instructions,
+        skillIds: Array.isArray(json['skillIds']) ? (json['skillIds'] as string[]) : [],
+        createdAt: typeof json['createdAt'] === 'number' ? json['createdAt'] : 0,
+        updatedAt: typeof json['updatedAt'] === 'number' ? json['updatedAt'] : 0,
+      },
     })
   }
-  out.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+  out.sort((a, b) => a.agent.createdAt - b.agent.createdAt || a.agent.id.localeCompare(b.agent.id))
   return out
+}
+
+/** 按 id 找那一条（找不到 ⇒ `null`）。 */
+async function findWorkflowAgentEntry(
+  dir: string,
+  workflowId: string,
+  agentId: string,
+): Promise<WorkflowAgentEntry | null> {
+  const entries = await listWorkflowAgentEntries(dir, workflowId)
+  return entries.find((e) => e.agent.id === agentId) ?? null
+}
+
+/** 列出这个编排的内建智能体（按创建时间排，与 `listAgentDirs` 同一条规矩）。 */
+export async function listWorkflowAgents(
+  dir: string,
+  workflowId: string,
+): Promise<WorkflowInlineAgent[]> {
+  return (await listWorkflowAgentEntries(dir, workflowId)).map((e) => e.agent)
 }
 
 /**
@@ -158,36 +205,29 @@ export async function writeWorkflowAgent(
   agent: WorkflowInlineAgent,
 ): Promise<void> {
   const wid = assertSafeId(workflowId)
-  const existing = await listWorkflowAgents(dir, workflowId)
-  const current = existing.find((a) => a.id === agent.id)
+  const entries = await listWorkflowAgentEntries(dir, workflowId)
+  const current = entries.find((e) => e.agent.id === agent.id)
   const taken = new Set(
-    existing.filter((a) => a.id !== agent.id).map((a) => slugForAgentName(a.name)),
+    entries.filter((e) => e.agent.id !== agent.id).map((e) => slugForAgentName(e.agent.name)),
   )
   const wanted = uniqueAgentDirName(agent.name, taken)
 
+  const target = workflowAgentDirPath(dir, wid, wanted)
   if (current !== undefined) {
-    const currentDirName = slugForAgentName(current.name)
-    // 已有的目录名可能带唯一性后缀，按"目录里真有哪个"找回来
-    const onDisk = (await readdir(workflowAgentsRoot(dir, wid))).find(
-      (n) => !n.startsWith('.') && n.toLowerCase().startsWith(currentDirName.toLowerCase()),
-    )
-    if (onDisk !== undefined && onDisk !== wanted) {
-      const from = workflowAgentDirPath(dir, wid, onDisk)
-      const to = workflowAgentDirPath(dir, wid, wanted)
-      const tmp = `${to}.tmp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+    // ★ D235：旧目录名直接从条目里拿（它就在盘上），不靠名字前缀猜
+    if (current.dirName !== wanted) {
+      const from = workflowAgentDirPath(dir, wid, current.dirName)
+      const tmp = `${target}.tmp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
       await rename(from, tmp)
-      await rename(tmp, to)
+      await rename(tmp, target)
     }
   } else {
-    await ensureDir(workflowAgentDirPath(dir, wid, wanted))
+    await ensureDir(target)
   }
 
   const { instructions, ...structured } = agent
-  await atomicWrite(
-    join(workflowAgentDirPath(dir, wid, wanted), 'agent.json'),
-    `${JSON.stringify(structured, null, 2)}\n`,
-  )
-  await atomicWrite(join(workflowAgentDirPath(dir, wid, wanted), 'instructions.md'), instructions)
+  await atomicWrite(join(target, 'agent.json'), `${JSON.stringify(structured, null, 2)}\n`)
+  await atomicWrite(join(target, 'instructions.md'), instructions)
 }
 
 /** 删掉一条内建智能体（连它的独有技能目录一起）。 */
@@ -197,14 +237,9 @@ export async function removeWorkflowAgent(
   agentId: string,
 ): Promise<boolean> {
   const wid = assertSafeId(workflowId)
-  const existing = await listWorkflowAgents(dir, workflowId)
-  const target = existing.find((a) => a.id === agentId)
-  if (target === undefined) return false
-  const base = slugForAgentName(target.name)
-  const dirNames = await readdir(workflowAgentsRoot(dir, wid)).catch(() => [] as string[])
-  const onDisk = dirNames.find((n) => !n.startsWith('.') && n.toLowerCase().startsWith(base.toLowerCase()))
-  if (onDisk === undefined) return false
-  await rm(workflowAgentDirPath(dir, wid, onDisk), { recursive: true, force: true })
+  const entry = await findWorkflowAgentEntry(dir, wid, agentId)
+  if (entry === null) return false
+  await rm(workflowAgentDirPath(dir, wid, entry.dirName), { recursive: true, force: true })
   return true
 }
 

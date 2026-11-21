@@ -18,7 +18,7 @@
    能 diff）。`agent.json` 里**没有** `instructions`，正文在 `instructions.md`——
    这是同一个决定的两半。
 2. **一个实体 = 一个目录**（而不是"一堆实体挤一个 JSON 文件"）。
-   智能体是 `agents/<id>/`、技能是 `<root>/<slug>/`、编排是 `workflows/<id>/`（§7）、
+   智能体是 `agents/<名字>/`、技能是 `<root>/<slug>/`、编排是 `workflows/<id>/`（§7）、
    定时任务是 `schedules/<id>/`（§8）——都是「一个实体一个目录」。
    目录化换来三件好事：人能直接打开、删一个不影响别的、坏一个不会毁掉全部。
 3. **权威只有一个。** 正文文件（`.md` / `.js`）是权威，索引记录里只留元数据；
@@ -67,13 +67,13 @@
 ├── workflows/<workflowId>/       ★ 一条编排 = 一个目录（§7）
 │   ├── workflow.json             结构化（**不含代码**）
 │   ├── main.js                   编排代码本体
-│   └── agents/<agentId>/         **编排内建智能体**（只在编排里有效）——与 agents/<id>/ 同形：
-│       ├── agent.json            name / runtimeKey / skillIds …（不含指令）
-│       ├── instructions.md       它的话
+│   └── agents/<名字>/            **编排内建智能体**（D234 已落地；只在编排里有效）——与 agents/<名字>/ 同形：
+│       ├── agent.json            id / name / skillIds / 时间（不含指令）
+│       ├── instructions.md       它的话（组装前正文）
 │       └── skills/<slug>/SKILL.md 它的独有技能（D228：注入通道按**来源**取目录，
 │                                  不再要求"这个智能体在库里有一条 AgentId"）
-│       ⚠️ 这一层**功能尚未落地**（`Workflow.inlineAgents` 字段已在、原语没接）；
-│          落地的位置就是这里，别在别处再造一套"编排专用智能体"的存法
+│       ⚠️ 目录名是**名字的 slug**（D235）；技能就在**它自己的目录里面**——
+│          绝不另开 `agents/<agentId>/skills/`（一个实体一个目录）
 │
 ├── workflow-runs/<runId>.json    编排运行记录：一条运行一个文件
 │
@@ -170,7 +170,7 @@
 | 来源 | 目录 | 谁能用 |
 |---|---|---|
 | `{ kind: 'agent' }` | `agents/<id>/skills/` | 智能体页里的那条记录 |
-| `{ kind: 'workflow-agent' }` | `workflows/<wid>/agents/<aid>/skills/` | **编排内建智能体**（不在库里、没有 AgentId） |
+| `{ kind: 'workflow-agent' }` | `workflows/<wid>/agents/<名字>/skills/` | **编排内建智能体**（不在库里、没有 AgentId） |
 
 > ⚠️ **目录名是小写 `skills/`**（D229，2026-11 使用者定的）。文件名仍然是 `SKILL.md`
 > ——那是技能规范约定的**文件**名，与目录名无关，别跟着改。
@@ -243,7 +243,7 @@ daemon 在装配 `FileStore` 时把"owner → 目录"的解析函数注入进去
 
 | 位置 | 角色 |
 |---|---|
-| `agents/<agentId>/memory.jsonl` | **权威**。逐条 `{seq, at, op: 'put'\|'del', id, value}`（与 `log/*.jsonl` 同一种日志形状） |
+| `agents/<名字>/memory.jsonl` | **权威**。逐条 `{seq, at, op: 'put'\|'del', id, value}`（与 `log/*.jsonl` 同一种日志形状） |
 | `memory/<agentId>/MEMORY.md` | **镜像**（人可读，四类小标题：约定 / 偏好 / 事实 / 教训）。`memory/` **整个根是一个 git 仓库**（commit 形如 `memory 文章写作员（5 条）`）。**文件头明写"改它不会生效"** |
 
 - 记忆**跟着智能体走**（D112）：删智能体连目录一起删，不留孤儿。
@@ -299,8 +299,12 @@ append-only 日志。真机上量到的样子：**一个**工作区、**87 行**
 
 ```
 ~/.agentdeck/data/workflows/<workflowId>/
-├── workflow.json     结构化（id / name / source / templateKey / inlineAgents / 时间）——**不含代码**
-└── main.js           编排代码本体（纯文本）——与 instructions.md 同一个角色
+├── workflow.json     结构化（id / name / source / templateKey / 时间）——**不含代码、不含 inlineAgents**
+├── main.js           编排代码本体（纯文本）——与 instructions.md 同一个角色
+└── agents/<名字>/    **编排内建智能体**（D234；目录是真相，`workflow.json` 里不存第二份）
+    ├── agent.json      id / name / skillIds / 时间
+    ├── instructions.md 指令
+    └── skills/<slug>/SKILL.md 它的独有技能（D228 的来源机制；D235 起就在这个目录里）
 
 ~/.agentdeck/data/workflow-runs/<runId>.json    一条运行一个文件
 ```
@@ -311,8 +315,8 @@ append-only 日志。真机上量到的样子：**一个**工作区、**87 行**
 
 | 智能体 | 编排 | 作用 |
 |---|---|---|
-| `agents/<id>/agent.json`（不含正文） | `workflows/<id>/workflow.json`（不含代码） | 机器读的结构化信息 |
-| `agents/<id>/instructions.md` | `workflows/<id>/main.js` | 人读的正文，磁盘为准 |
+| `agents/<名字>/agent.json`（不含正文） | `workflows/<id>/workflow.json`（不含代码） | 机器读的结构化信息 |
+| `agents/<名字>/instructions.md` | `workflows/<id>/main.js` | 人读的正文，磁盘为准 |
 
 三条随之而来的行为（都在 `apps/daemon/src/workflows-dirs.ts`）：
 
@@ -334,18 +338,25 @@ append-only 日志。真机上量到的样子：**一个**工作区、**87 行**
 > （`workflow.json` 无 code、`main.js` 339 字）+ `workflow-runs/` 23 个文件；
 > 老文件核对通过后被删除；第二次跑 `migrated: null`。
 
-**还没做**：编排内建智能体（`Workflow.inlineAgents`，现在恒为 `[]`）。它落地时按
-`agents/<id>/` 的形状在编排目录里加 `agents/<agentId>/{agent.json,instructions.md}`
-（§2 的全图里已经把这一层画进去了，并标了"功能尚未落地"）——
-**现在不建空目录**（那叫造死结构）。
+**编排内建智能体**（D234，2026-11 已落地）：`workflows/<id>/agents/<名字>/`，形状与账号
+智能体逐个对齐（`agent.json` 不含指令、`instructions.md` 是正文、`skills/` 是它的独有技能）。
+两条规矩与 §3 一致：**目录名是名字的 slug（标签）**、**`agent.json` 里的 `id` 是身份**
+（`Run.agentRef.id` 存 `inline:<编排id>/<id>`），所以改名只搬目录、引用一个不动。
+`inlineAgents` **不写进 `workflow.json`**——它是从目录读出来的（目录是真相）。
 
-**它要不要也带 `skills/<slug>/`（文件资产）？形状上可以，但第一版刻意不做。**
-判断依据是"有没有第二个真相 / 有没有编辑落点"：
+> ⚠️ **D235 的坑**（这一层刚落地时就踩了）：独有技能的目录**必须在它自己的目录里面**
+> （`agents/<名字>/skills/`）。D228 提前定形状时写的是 `agents/<agentId>/skills/`——那时
+> 内建智能体还没落地、手上只有 id；D234 把实体目录改成名字后，那个函数**结构上改不动**
+> （它拿不到名字），于是同一条内建智能体会被拆成 `agents/<名字>/`（实体）与
+> `agents/<ULID>/skills/`（技能）两个目录，后者在列表里还看不见（没有 `agent.json`）。
+> 现在 `workflowAgentExclusiveSkillsDir` 是 **async**、按 `id` 精确读目录、找不到返回 `null`
+> （读 ⇒ 空列表、写 ⇒ 抛错，与账号智能体同一口径）。
+> **一条通用教训**：谁算出"实体目录名"，谁就得是唯一的路径来源——别让第二个函数自己拼。
 
 | 方案 | 代价 | 结论 |
 |---|---|---|
-| 只带 `skillIds`（**引用技能库**里的技能） | 零：`loadAgentInjectableSkills` 已经在做"库 id → 注入"，inline agent 只是多传一份 id | ✅ **第一版就这个**，覆盖"这一步的人该带哪几份参考资料" |
-| 带 `skills/<slug>/SKILL.md`（**该编排独有**的文件资产） | 注入通道现在只从 `agents/<id>/skills/` 读（`store.listExclusiveSkills(agent.id)`，而 inline agent 没有库 id）；更要紧的是**编排页只有代码编辑器**，加了就是"盘上有文件、界面上没有落点"的死接口 | ⛔ 先不做；真要做，形状是 `workflows/<id>/agents/<agentId>/skills/<slug>/SKILL.md`（与 `agents/<id>/` 逐字同形），并且**必须同时**给编排页一个"内建智能体 → 它带的技能"面板 |
+| 只带 `skillIds`（**引用技能库**里的技能） | 零：`loadInjectableSkills` 已经在做"库 id → 注入"，内建智能体只是多传一份 id | ✅ 已落地（D234） |
+| 带 `skills/<slug>/SKILL.md`（**该编排独有**的文件资产） | 存储与注入都已接好（`agents/<名字>/skills/`）；但**编排页还没有"内建智能体 → 它带的技能"面板**，写了就是"盘上有文件、界面上没有落点" | ⏳ 存储已就绪、**面板尚未做**；做面板时一起开放写入口 |
 
 > 口径一句话：**能引用就别复制。** 库技能是共享的（`skillIds` 引用，改一处全生效）；
 > 只有"这条编排专属、且使用者真会去编辑"的东西才值得落成文件资产——而"真会去编辑"

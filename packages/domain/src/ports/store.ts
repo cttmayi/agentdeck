@@ -168,7 +168,7 @@ export const ACTIVE_RUN_STATUSES = [
  *
  * 两种来源今天都真实存在：
  *   · `agent` —— 智能体页里那条记录（`agents/<id>/skills/`）；
- *   · `workflow-agent` —— 编排内建智能体（`workflows/<wid>/agents/<aid>/skills/`），
+ *   · `workflow-agent` —— 编排内建智能体（`workflows/<wid>/agents/<名字>/skills/`，D235），
  *     它**不在智能体库里**，所以没有 `AgentId` 可用——这正是这一层存在的理由。
  */
 export type ExclusiveSkillOwner =

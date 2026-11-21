@@ -17,6 +17,7 @@ import {
 import type { Workflow, WorkflowRun } from './workflows.ts'
 import {
   listWorkflowAgents as daemonListWorkflowAgents,
+  removeWorkflowAgent as daemonRemoveWorkflowAgent,
   writeWorkflowAgent as daemonWriteWorkflowAgent,
 } from './workflows-dirs.ts'
 
@@ -269,6 +270,41 @@ test('★★ 内建智能体落成目录：agent.json（不含指令）+ instruc
     await readFile(join(TMP, 'workflows', 'wf-inline', 'workflow.json'), 'utf8'),
   ) as Record<string, unknown>
   assert.equal('inlineAgents' in wfJson, false, 'workflow.json 里不许有第二个真相')
+})
+
+/*
+ * ★★ D235 的回归判据：改之前"找已有目录"是按**名字前缀**猜的
+ *    （`readdir(...).find(n => n.startsWith(slug(name)))`），而 `readdir` 顺序不保证。
+ *    于是「甲」和「甲乙」并存时，改甲的名字 / 删甲会**找上甲乙的目录**——
+ *    删错人的数据比目录名不对严重得多。现在按 `agent.json` 里的 id 精确匹配。
+ */
+test('★★ 内建智能体「甲」与「甲乙」并存：改名/删除只动自己的目录', async () => {
+  await rm(TMP, { recursive: true, force: true })
+  await saveWorkflow(TMP, freshWorkflow({ id: 'wf-prefix' }))
+  await daemonWriteWorkflowAgent(TMP, 'wf-prefix', {
+    id: 'i-jia', name: '甲', instructions: '甲的话', skillIds: [], createdAt: 1, updatedAt: 1,
+  })
+  await daemonWriteWorkflowAgent(TMP, 'wf-prefix', {
+    id: 'i-jiayi', name: '甲乙', instructions: '甲乙的话', skillIds: [], createdAt: 2, updatedAt: 2,
+  })
+
+  // 改「甲」的名字：只搬甲，甲乙原样不动（内容包括指令）
+  await daemonWriteWorkflowAgent(TMP, 'wf-prefix', {
+    id: 'i-jia', name: '丙', instructions: '甲的话', skillIds: [], createdAt: 1, updatedAt: 3,
+  })
+  assert.deepEqual((await readdir(join(TMP, 'workflows', 'wf-prefix', 'agents'))).sort(), ['丙', '甲乙'].sort())
+  assert.equal(
+    await readFile(join(TMP, 'workflows', 'wf-prefix', 'agents', '甲乙', 'instructions.md'), 'utf8'),
+    '甲乙的话',
+    '甲乙一个字都不许动',
+  )
+
+  // 删「甲乙」：只删它，丙还在
+  assert.equal(await daemonRemoveWorkflowAgent(TMP, 'wf-prefix', 'i-jiayi'), true)
+  assert.deepEqual(await readdir(join(TMP, 'workflows', 'wf-prefix', 'agents')), ['丙'])
+  // 删不存在的 ⇒ false（不是抛错，也不是误删别人）
+  assert.equal(await daemonRemoveWorkflowAgent(TMP, 'wf-prefix', 'i-jia'), true)
+  assert.deepEqual(await readdir(join(TMP, 'workflows', 'wf-prefix', 'agents')).catch(() => []), [])
 })
 
 test('★★ 内建智能体改名 ⇒ 目录跟着搬；删编排 ⇒ 连内建智能体目录一起没', async () => {
