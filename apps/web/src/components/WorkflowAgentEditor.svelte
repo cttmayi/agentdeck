@@ -24,7 +24,6 @@
   import NewAgentForm from './NewAgentForm.svelte'
   import MainArea from './MainArea.svelte'
   import WorkDirTree from './WorkDirTree.svelte'
-  import { Modal } from '@agentdeck/ui/components'
 
   export let workflowId: string
   /** `'new'` = 新建；否则是内建智能体的 id。 */
@@ -111,12 +110,29 @@
         oncreated={ondone}
       />
     {:else if asAgent}
-      <div class="field-row" style="margin-bottom:var(--sp-2)">
-        <button type="button" class="btn btn--secondary btn--sm" data-dir-open onclick={() => (dirOpen = true)}>
-          {$t('workflows.agentsOpenDir')}
+      <!--
+        ★ D245（使用者："我心目中可以作为某种高级默认隐藏目录显示，而不是有一个
+        打开目录的按钮"）：**不是按钮 + 浮层**，而是页面上**一节默认收起**的目录树
+        ——折叠段头一行，展开就是它的文件；点文件名仍是那个 FileViewer 浮层。
+      -->
+      {#if !isNew}
+      <div class="fold-section" data-wf-agent-dir>
+        <button type="button" class="fold-head" aria-expanded={dirOpen} onclick={() => (dirOpen = !dirOpen)}>
+          <span class="chevron" aria-hidden="true">{dirOpen ? '▾' : '▸'}</span>
+          <span class="fold-title">{$t('workflows.agentsOpenDir')}</span>
+          <span class="fold-summary">{$t('workflows.agentsOpenDirHint')}</span>
         </button>
-        <span class="faint fs-xs">{$t('workflows.agentsOpenDirHint')}</span>
+        {#if dirOpen}
+          <div class="fold-body">
+            <WorkDirTree
+              base={`/api/fs/wf-agent:${workflowId}/${agentId}`}
+              reloadKey={`${workflowId}/${agentId}/${dirOpen}`}
+              bind:count={dirCount}
+            />
+          </div>
+        {/if}
       </div>
+      {/if}
       <AgentDetail
         agent={asAgent}
         scope={{ kind: 'workflow', workflowId, workflowName: wf?.name ?? '' }}
@@ -132,17 +148,4 @@
   `PUT /api/fs/wf-agent:<wid>/<aid>/file`）。独有技能就是 `skills/<名字>/SKILL.md`，
   所以这里就是"独有技能写入口"的落点，不再单造一个面板。
 -->
-<Modal
-  open={dirOpen}
-  size="wide"
-  ariaLabel={$t('workflows.agentsOpenDir')}
-  title={$t('workflows.agentsOpenDir')}
-  closeLabel={$t('common.close')}
-  onclose={() => (dirOpen = false)}
->
-  <WorkDirTree
-    base={`/api/fs/wf-agent:${workflowId}/${agentId}`}
-    reloadKey={`${workflowId}/${agentId}/${dirOpen}`}
-    bind:count={dirCount}
-  />
-</Modal>
+

@@ -206,6 +206,10 @@
       // 这个问题（image / pdf 是服务端的明确表态，PNG 解出来必然带 NUL）。
       // 见 file-view.ts 的 `refineKind`。
       kind = refineKind(kind, text)
+      // ★ D245：编辑缓冲与只读文本**同一刻**同步——漏了这一行，原文面是空的、
+      //   dirty 恒真（"没改动也提示"就是这个）
+      edited = text
+      saveError = ''
       face = defaultFace(kind)
       await prepare(kind, target.path)
     } catch (err) {
