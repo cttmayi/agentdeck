@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>目录 / 文件编辑器（草稿 v1）</title>
+    <!--
+      2026-11 设计稿：通用的目录 / 文件编辑器 —— 把已有的 WorkDirTree + FileViewer +
+      GET …/files 那条链**泛化成按 scope 打开一个目录**，并加一个白名单内的可写口子。
+
+      动机（使用者）："对于『独有技能写入口』，我就想设计一个通用的目录编辑入口，不需要
+      特殊设计。打开任何文件，直接进行编辑和保存。"
+
+      样式直接引真 app.css（同目录相对路径），所以颜色/字号/内距就是产品里的样子。
+    -->
+    <link rel="stylesheet" href="../../packages/ui/src/styles/app.css" />
+    <style>
+      body { background: var(--bg); }
+      .doc { max-width: 84rem; margin: 0 auto; padding: var(--sp-6) var(--sp-5) var(--sp-8); }
+      .doc > h1 { font-size: var(--fs-2xl); margin: 0 0 var(--sp-2); }
+      .doc > h2 { font-size: var(--fs-xl); margin: var(--sp-8) 0 var(--sp-2); padding-bottom: var(--sp-1); border-bottom: 1px solid var(--line); }
+      .doc > p { margin: 0 0 var(--sp-2); }
+      .doc .lead { color: var(--text-dim); max-width: 64rem; }
+      .doc table.table { font-size: var(--fs-xs); }
+      .doc .tag { display:inline-block; font-size: var(--fs-2xs); padding: 0 var(--sp-2); border-radius: var(--radius-pill); border: 1px solid var(--line-strong); color: var(--text-faint); }
+      .mock-frame { height: 32rem; border: 1px solid var(--line-strong); border-radius: var(--radius); overflow: hidden; background: var(--bg); }
+      .mock-frame > .split-layout { height: 100%; }
+      .code-mock { margin:0; padding: var(--sp-3); background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.7; white-space: pre; overflow: auto; color: var(--text-dim); }
+      .toolbar { display:flex; gap: var(--sp-2); align-items:center; margin-bottom: var(--sp-2); }
+    </style>
+  </head>
+  <body>
+    <div class="doc">
+      <h1>目录 / 文件编辑器 <span class="tag">草稿 v1 · 待拍板</span></h1>
+      <p class="lead">
+        一句话：**打开一个目录（按 scope 解析），左树右文件；正文类文件直接编辑保存，
+        结构化文件改完先过 schema 校验，账本与日志只读。**
+        不是新造阅读器——是 <code>WorkDirTree</code> + <code>FileViewer</code> +
+        <code>GET …/files</code> 这条已有链的扩展（换 scope、加一个 PUT）。
+      </p>
+
+      <h2>1. 五个入口，同一个编辑器（不是五套）</h2>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>入口</th><th>scope</th><th>打开哪个目录</th><th>能干的事</th></tr></thead>
+        <tbody>
+          <tr><td>智能体详情 →「打开目录」</td><td><code>agent:&lt;id&gt;</code></td><td><code>agents/&lt;名字&gt;/</code></td><td>读 + 正文可写</td></tr>
+          <tr><td><b>编排内建智能体编辑页 →「打开目录」</b></td><td><code>wf-agent:&lt;wid&gt;/&lt;aid&gt;</code></td><td><code>workflows/&lt;wid&gt;/agents/&lt;名字&gt;/</code></td><td><b>独有技能就在这里写</b>（1 号遗留的落点）</td></tr>
+          <tr><td>编排详情 →「打开目录」</td><td><code>workflow:&lt;id&gt;</code></td><td><code>workflows/&lt;id&gt;/</code></td><td>读 + <code>main.js</code> 可写</td></tr>
+          <tr><td>技能页每行 →「打开目录」</td><td><code>skill:&lt;名字&gt;</code></td><td><code>&lt;skillsRoot&gt;/&lt;名字&gt;/</code></td><td>读 + SKILL.md 可写</td></tr>
+          <tr><td>运行画面 / 聊天（已有，保持只读）</td><td><code>run:&lt;id&gt;</code> / <code>conversation:&lt;id&gt;</code></td><td>那条 run / 对话的工作目录</td><td>只读</td></tr>
+        </tbody>
+      </table></div>
+
+      <h2>2. 屏 ①：内建智能体的目录（正文可写）</h2>
+      <div class="mock-frame">
+        <div class="split-layout with-detail">
+          <section class="pane list-pane">
+            <div class="pane-head list-toolbar"><span class="faint fs-xs">编排内建智能体 · 审稿员</span></div>
+            <div class="pane-body"><ul class="list-stack">
+              <li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">skills/</span><span class="faint fs-xs">2 个技能</span></button></li>
+              <li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">  weekly-shape/SKILL.md</span><span class="faint fs-xs">可写</span></button></li>
+              <li class="list-row active"><button class="list-row-main" type="button"><span class="mono fs-sm">  weekly-shape/SKILL.md</span><span class="faint fs-xs">可写</span></button></li>
+              <li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">  tone-check/SKILL.md</span></button></li>
+              <li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">agent.json</span><span class="badge">校验后写</span></button></li>
+              <li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">instructions.md</span><span class="faint fs-xs">可写</span></button></li>
+            </ul></div>
+          </section>
+          <section class="pane detail-pane">
+            <header class="detail-head">
+              <div class="detail-head-main">
+                <p class="detail-sub" style="margin:0 0 var(--sp-1)"><button type="button" class="btn btn--ghost btn--sm">← 返回编排</button></p>
+                <h2>weekly-shape/SKILL.md</h2>
+                <p class="detail-sub"><span class="badge">可写 · 256 KB 上限</span></p>
+              </div>
+              <div class="detail-actions"><button type="button" class="btn btn--secondary">编辑</button></div>
+            </header>
+            <div class="pane-body detail-scroll">
+              <pre class="code-mock">---
+name: weekly-shape
+description: 周报的三段结构：结论 / 证据 / 下一步
+---
+
+# 怎么排周报
+
+## When to Use
+每周写周报时。
+
+## Procedure
+1. 先写结论一行。
+2. 每条结论下面挂一条证据。
+3. 结尾写下一步与需要谁拍板。</pre>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <h2>3. 屏 ②：结构化文件——能改，但保存前过同一关</h2>
+      <div class="mock-frame">
+        <div class="split-layout with-detail">
+          <section class="pane list-pane">
+            <div class="pane-head list-toolbar"><span class="faint fs-xs">编排内建智能体 · 审稿员</span></div>
+            <div class="pane-body"><ul class="list-stack">
+              <li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">skills/</span></button></li>
+              <li class="list-row active"><button class="list-row-main" type="button"><span class="mono fs-sm">agent.json</span><span class="badge">校验后写</span></button></li>
+              <li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">instructions.md</span><span class="faint fs-xs">可写</span></button></li>
+            </ul></div>
+          </section>
+          <section class="pane detail-pane">
+            <header class="detail-head">
+              <div class="detail-head-main">
+                <p class="detail-sub" style="margin:0 0 var(--sp-1)"><button type="button" class="btn btn--ghost btn--sm">← 返回编排</button></p>
+                <h2>agent.json</h2>
+                <p class="detail-sub"><span class="badge">保存前校验</span></p>
+              </div>
+              <div class="detail-actions"><button type="button" class="btn btn--secondary">编辑</button></div>
+            </header>
+            <div class="pane-body detail-scroll">
+              <p class="faint fs-xs">改坏了不会落盘——规则与正规入口同一套（schema + 名字禁改）。</p>
+              <pre class="code-mock">{
+  "id": "01M80XY3HC43DNBDNF8SMN5RQ6",
+  "name": "审稿员",          ← 灰色不可改（改名要搬目录，走正规入口）
+  "skillIds": [],
+  "runtimeKey": "default"
+}</pre>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <h2>4. 屏 ③：写失败——原话留在编辑器上，不跳走</h2>
+      <div class="mock-frame" style="height:18rem">
+        <section class="pane detail-pane" style="height:100%">
+          <header class="detail-head">
+            <div class="detail-head-main"><h2>agent.json</h2><p class="detail-sub"><span class="badge">保存失败 · 未写入</span></p></div>
+            <div class="detail-actions">
+              <button type="button" class="btn btn--ghost">还原</button>
+              <button type="button" class="btn btn--secondary">保存</button>
+            </div>
+          </header>
+          <div class="pane-body detail-scroll">
+            <div class="notice bad">JSON 解析失败：第 4 行第 3 列期望 <code>,</code>——没有写入任何东西。</div>
+            <pre class="code-mock">{
+  "id": "01M80…",
+  "name": "审稿员"
+  "skillIds": []   ← 漏了逗号
+}</pre>
+          </div>
+        </section>
+      </div>
+
+      <h2>5. 哪些能改（这张表就是实现范围）</h2>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>文件</th><th>能改吗</th><th>为什么</th></tr></thead>
+        <tbody>
+          <tr><td><code>instructions.md</code>、<code>skills/&lt;名&gt;/SKILL.md</code>、<code>main.js</code>、<code>task.md</code></td><td>✅ 正文直接改</td><td>磁盘为准，与技能的 frontmatter 规范化同一条链</td></tr>
+          <tr><td><code>agent.json</code> / <code>workflow.json</code> / <code>schedule.json</code></td><td>⚠️ 校验后写</td><td>里面有 <code>id</code> 与引用键，写坏了 run / issue 全指空</td></tr>
+          <tr><td><code>agent.json</code> 的 <code>name</code></td><td>❌ 拒绝</td><td>D231：目录名 = 名字的 slug，改名要搬目录 ⇒ 走正规入口</td></tr>
+          <tr><td><code>memory.jsonl</code>、<code>log/*.jsonl</code>、<code>migrations.json</code></td><td>❌ 只读</td><td>append-only 日志与平台账本</td></tr>
+          <tr><td>二进制 / 非 UTF-8</td><td>❌ 拒绝并说明</td><td>与技能安装"只收文本"同一口径；十六进制那一面仍可看</td></tr>
+        </tbody>
+      </table></div>
+
+      <h2>6. 接口：把已有的那对端点 scope 化</h2>
+      <pre class="code-mock">GET /api/fs/&lt;scope&gt;/files?dir=      ← 一层目录（与 /api/runs/:id/files 同一份实现）
+GET /api/fs/&lt;scope&gt;/file?path=      ← 一个文件的文本（FileViewer 已有三面渲染）
+PUT /api/fs/&lt;scope&gt;/file {text}     ← 白名单 + 校验 + 原子写（二期）
+scope ∈ agent:&lt;id&gt; | workflow:&lt;id&gt; | wf-agent:&lt;wid&gt;/&lt;aid&gt; | skill:&lt;名字&gt; | run:&lt;id&gt; | conversation:&lt;id&gt;</pre>
+
+      <h2>7. 明确不做 / 待拍板</h2>
+      <div class="table-wrap"><table class="table">
+        <tbody>
+          <tr><td>新建 / 删除 / 改名文件</td><td>一期不做（独有技能的新增删除仍走"放进目录 + 刷新"或正规入口）</td></tr>
+          <tr><td>在浏览器里执行脚本 / html 预览</td><td>仍走 <code>sandbox allow-scripts</code>，**绝不加 allow-same-origin**</td></tr>
+          <tr><td>智能体页那个"独有技能"专用编辑器</td><td>通用编辑器上线后**一起删**——同一件事不并存两个入口</td></tr>
+        </tbody>
+      </table></div>
+
+      <p class="lead" style="margin-top:var(--sp-4)">
+        <b>要你拍的一句</b>：一期就到「正文可写」为止（<code>agent.json</code> 仍只读、走正规入口），
+        还是连结构化文件也开写（schema 校验 + <code>name</code> 禁改两条规则一起上）？
+      </p>
+    </div>
+  </body>
+</html>
