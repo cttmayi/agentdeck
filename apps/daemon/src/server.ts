@@ -112,6 +112,8 @@ import {
 } from './agent-maker-skills.ts'
 import { MEMORY_EXISTING_MEMORY_FILE, MEMORY_TRANSCRIPT_FILE } from './platform-actions.ts'
 import { checkWorkflowAgentRefs, resolveWorkflowAgent } from './workflow-agents.ts'
+import { dirOfScope, listScope, parseScope, readScopeFile, writeScopeFile } from './fs-scope.ts'
+import { slugForAgentName } from '@agentdeck/store-file'
 import { builtinAccountingRows, reconcileStartup } from './startup-reconcile.ts'
 import {
   SLOT_LABELS,
@@ -2875,6 +2877,79 @@ async function injectedSkillsOf(
      * argv 直传不进 shell（路径里带空格与 `&` 是常态）。实现在 `reveal.ts`，
      * 那里也写着三个平台各自的坑（Windows 的 `explorer.exe` 成功也回 1）。
      */
+    /*
+     * ── 按 scope 打开目录 / 读文件 / 写文件（2026-11，D245）──
+     *
+     * 把 `GET /api/runs|conversations/:id/files` 那条链泛化：调用方只说"哪一类东西"，
+     * 目录由 `fs-scope.ts` 算。读与写都是**通用限制**：路径不出 scope 目录、
+     * 只收 UTF-8 文本、256 KB 上限、`.json`/`.jsonl` 必须能 parse、原子写。
+     */
+    // scope 里可能带 `/`（`wf-agent:<wid>/<aid>`），所以用贪婪前缀、只把最后一段当动作
+    const fsMatch = /^\/api\/fs\/(.+)\/(files|file)$/.exec(path)
+    if (fsMatch) {
+      const scope = parseScope(decodeURIComponent(fsMatch[1]!))
+      if (scope === null) {
+        sendJson(res, 400, { error: 'scope 认不出来', code: 'bad_scope' })
+        return
+      }
+      const dir = await dirOfScope(scope, {
+        dataDir: options.dataDir,
+        skillsRoot,
+        // ⚠️ 目录名 = 名字的 slug（D231）。唯一性后缀（`-2`）只在同 slug 撞车时出现，
+        //    这里不查盘、不猜；撞车那种情况下面读到"目录不存在"会如实 404。
+        agentDirNameOf: async (id) => {
+          const a = await store.getAgentById(id as never)
+          return a === null ? null : slugForAgentName(String(a.name))
+        },
+        workflowAgent: async (wid, aid) => {
+          const wf = workflowById(wid)
+          const hit = (wf?.inlineAgents ?? []).find((a) => a.id === aid)
+          return hit ? { dirName: slugForAgentName(hit.name) } : null
+        },
+      })
+      if (dir === null) {
+        sendJson(res, 404, { error: '这个 scope 指向的东西不存在', code: 'scope_not_found' })
+        return
+      }
+      const url = new URL(req.url ?? '', 'http://127.0.0.1')
+      if (fsMatch[2] === 'files' && req.method === 'GET') {
+        try {
+          sendJson(res, 200, await listScope(dir, url.searchParams.get('dir') ?? ''))
+        } catch (err) {
+          sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) })
+        }
+        return
+      }
+      if (fsMatch[2] === 'file' && req.method === 'GET') {
+        try {
+          const buf = await readScopeFile(dir, url.searchParams.get('path') ?? '')
+          sendJson(res, 200, { text: buf.toString('utf8'), bytes: buf.byteLength })
+        } catch (err) {
+          sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) })
+        }
+        return
+      }
+      if (fsMatch[2] === 'file' && req.method === 'PUT') {
+        const body = (await readJsonBody(req)) as { path?: unknown; text?: unknown }
+        const rel = typeof body.path === 'string' ? body.path : ''
+        const text = typeof body.text === 'string' ? body.text : null
+        if (rel.trim() === '' || text === null) {
+          sendJson(res, 400, { error: '需要 path 与 text', code: 'bad_input' })
+          return
+        }
+        try {
+          await writeScopeFile(dir, rel, text)
+          sendJson(res, 200, { ok: true })
+        } catch (err) {
+          // 校验不过 ⇒ 不落盘；原话给界面（JSON 坏在第几行这种）
+          sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) })
+        }
+        return
+      }
+      sendJson(res, 405, { error: '不支持的方法' })
+      return
+    }
+
     if (req.method === 'POST' && path === '/api/fs/reveal') {
       const raw = (await readJsonBody(req)) as { path?: unknown }
       const asked = typeof raw?.path === 'string' ? raw.path : ''
