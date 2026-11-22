@@ -4288,6 +4288,44 @@ a > button { width: 100%; }
             </tbody>
           </table>
         </section>
+
+        <!-- ★ D244：**每一页的归宿**一张表，供使用者逐条审视 -->
+        <section>
+          <h3 class="demo-section-title">每一页的归宿（照这张表审视）</h3>
+          <p class="demo-rule-note">
+            五类骨架只有一处定义（本节上面的 ①–⑤）。这张表把**每一个页面 / 入口**都归到其中一类；
+            「现状」一列写它今天在代码里是什么形态——**归错了、或者归对了但没迁完**，一眼看得出来。
+          </p>
+          <div class="table-wrap">
+            <table class="table demo-types">
+              <thead>
+                <tr><th>页面 / 入口</th><th>视图（路由）</th><th>归宿</th><th>主操作在哪</th><th>现状</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>聊天</td><td><code>#/chat</code></td><td>① 列表页</td><td>栏头</td><td>✅ 一致</td></tr>
+                <tr><td>创建对话</td><td><code>#/chat</code>（草稿态）</td><td>④ 新建视图</td><td>栏头 <code>[data-chat-create]</code></td><td>✅ 一致</td></tr>
+                <tr><td>任务</td><td><code>#/tasks</code></td><td>① 列表页</td><td>栏头（选中态）</td><td>✅ 一致</td></tr>
+                <tr><td>新建任务</td><td><code>#/tasks/new</code></td><td>④ 新建视图</td><td>栏头 <code>[data-task-submit]</code></td><td>✅ 一致（D243 取消吸底）</td></tr>
+                <tr><td>智能体</td><td><code>#/agents</code></td><td>① 列表页</td><td>栏头（选中态）</td><td>✅ 一致</td></tr>
+                <tr><td>新建智能体</td><td><code>#/agents</code>（新建态）</td><td>④ 新建视图</td><td>栏头 <code>[data-agent-create]</code></td><td>✅ 一致（D243 从 ⑤ 挪回）</td></tr>
+                <tr><td>技能（列表）</td><td><code>#/skills</code></td><td>② 表格页</td><td>栏头</td><td>✅ 一致</td></tr>
+                <tr><td><b>安装技能</b></td><td><code>#/skills</code>（面板态）</td><td><b>④ 新建视图</b></td><td>应 → 栏头</td><td>⏳ <b>待迁移</b>：今天仍是 ⑤ 设置面板形态（<code>.main-panel</code> + 底栏主操作）</td></tr>
+                <tr><td>沉淀</td><td><code>#/crystallize</code></td><td>① 列表页 + 流程页</td><td>流程页栏头</td><td>✅ 一致</td></tr>
+                <tr><td>定时任务</td><td><code>#/schedules</code></td><td>① 列表页</td><td>栏头（新建态）</td><td>✅ 一致</td></tr>
+                <tr><td>编排</td><td><code>#/workflows</code></td><td>① 列表页</td><td>栏头（选中 / 新建态）</td><td>✅ 一致</td></tr>
+                <tr><td>编排运行画面</td><td><code>#/workflows/run/&lt;id&gt;</code></td><td>④ 新建视图（整页一屏）</td><td>栏头</td><td>✅ 一致</td></tr>
+                <tr><td>编排内建智能体 · 新建</td><td><code>#/workflows/agents/&lt;wid&gt;/new</code></td><td>④ 新建视图</td><td>栏头</td><td>✅ 一致（D243）</td></tr>
+                <tr><td>编排内建智能体 · 编辑</td><td><code>#/workflows/agents/&lt;wid&gt;/&lt;aid&gt;</code></td><td>① 列表页的详情列</td><td>栏头</td><td>✅ 一致（复用智能体编辑页）</td></tr>
+                <tr><td>设置</td><td><code>#/settings</code></td><td>③ 卡片页</td><td>卡片内 / 栏头</td><td>✅ 一致</td></tr>
+                <tr><td>关于</td><td><code>#/about</code></td><td>③ 卡片页</td><td>—</td><td>✅ 一致</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="demo-rule-note">
+            <b>两条待办</b>（这张表就是它们的清单）：① <b>安装技能</b>要从 ⑤ 迁到 ④（面板头 → 栏头、
+            主操作从左下角挪到右上角）；迁完把 ④ 那一格示范补上它。
+          </p>
+        </section>
       </div>
 
       <div id="demo-rules-selfcheck" class="notice" role="status" aria-live="polite">正在自检排版七条…</div>
