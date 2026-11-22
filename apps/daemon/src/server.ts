@@ -112,7 +112,7 @@ import { readCandidate, readCandidates } from './workflow-candidate.ts'
 import { readAgentCandidate, readAgentCandidates } from './agent-candidate.ts'
 import { adoptAgentCandidate } from './agent-adopt.ts'
 import { adoptCandidate } from './workflow-adopt.ts'
-import { bundledMaterialVersion } from './material-seed.ts'
+import { bundledMaterialVersion, seedDrafterMaterial } from './material-seed.ts'
 import { slugForAgentName } from '@agentdeck/store-file'
 import { builtinAccountingRows, reconcileStartup } from './startup-reconcile.ts'
 import {
@@ -6889,7 +6889,19 @@ async function injectedSkillsOf(
         return
       }
 
-      // ── 起起草 run（复用执行管道：第一句话投递、日志、收口全现成）──
+      /*
+       * ★ D257：**技能写法资料**（`material/skill/`：格式 + 入库体检项）并排落进素材目录。
+       *
+       * 与编排/智能体同一张图纸（D255/D256）：写法不进提示词、而是每次覆盖写进工作目录。
+       * 放这里而不是 onboarding：起草 run 是**一次性**的，资料跟着它走最新版即可。
+       * 失败只告警——素材才是这一轮的依据（资料缺了最多写得糙一点，不挡起草）。
+       */
+      {
+        const ok = await seedDrafterMaterial({ workDir: draftDir }).catch(() => false)
+        if (!ok) warn('技能写法资料没有落盘（material/skill）——这一轮照技能自身写')
+      }
+
+      // ── 起起草 run（复用执行管道：第一句话投递、日志、收口现成）──
       // ★ 起草者 = **平台内置的那条**（2026-10 定稿 §9），不再借来源 run 的执行者：
       //   从前借它的后果是"起草质量取决于你从哪条 run 发起沉淀"——同一个人同一件事，
       //   从聊天发起与从任务发起，写出来的 skill 结构可能不一样。

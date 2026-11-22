@@ -6223,6 +6223,15 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.draftingMaterialPack',
+    label:
+      '★ D257：起草 run 的工作目录里有**技能写法资料**（material/skill：format.md + checklist.md）——'
+      + '与编排/智能体同一张图纸（写法以资料形式动态输入，不进提示词）',
+    ok: (v) => !!v && v['在'] === true && ['format.md', 'checklist.md'].every((f) => (v['文件'] ?? []).includes(f)),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.draftingLogLive',
     label:
       '★★★ 产出里那行日志是**真的流下来的**（假 CLI 吐的一行，经 daemon 解析再经 SSE 落到页面）——这一条量的是"跑着的时候人看得到东西"',

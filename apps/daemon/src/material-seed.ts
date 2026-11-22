@@ -135,3 +135,15 @@ export async function bundledMaterialVersion(pack: MaterialPack): Promise<string
     return undefined
   }
 }
+
+/**
+ * ★ D257：**沉淀起草 run 的资料**——`material/skill/`（`format.md` 与 `checklist.md`）。
+ *
+ * 为什么单独一个入口：起草 run 的素材是 `crystallize-material.ts` 写进同一个
+ * `material/` 的（`00-README.md` + 轮次记录 + 来源文件），资料包要**并排**落在
+ * 它旁边（`material/skill/`），而不是占掉那份素材目录。所以调用点在"素材写完、
+ * 起 run 之前"，失败只告警（素材才是这一轮的依据，资料缺了最多写得糙一点）。
+ */
+export async function seedDrafterMaterial(opts: { workDir: string; now?: number }): Promise<boolean> {
+  return seedMaterial({ workDir: opts.workDir, pack: 'skill', ...(opts.now === undefined ? {} : { now: opts.now }) })
+}

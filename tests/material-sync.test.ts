@@ -81,6 +81,9 @@ describe('生成资料（docs/material ⇄ catalog/material）', () => {
     // agent 的例子：一份合格的指令 + 一份合格的配套技能（照着改的那两份）
     const agentExamples = src.filter((f) => f.startsWith('agent/examples/'))
     assert.ok(agentExamples.length >= 2, `agent/examples 至少 2 份，现在 ${agentExamples.length}`)
+    // skill 的例子：一份合格的 SKILL.md（照着改的那一份）
+    const skillExamples = src.filter((f) => f.startsWith('skill/examples/'))
+    assert.ok(skillExamples.length >= 1, `skill/examples 至少 1 份，现在 ${skillExamples.length}`)
     // api-version.json 要能被解析、有 version（daemon 落盘时把它写成 material 的版本标记）
     const version = JSON.parse(
       await readFile(join(REPO_ROOT, SOURCE, 'orchestration/api-version.json'), 'utf8'),

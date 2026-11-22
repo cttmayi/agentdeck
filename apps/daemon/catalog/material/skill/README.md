@@ -6,6 +6,7 @@
 |---|---|
 | `format.md` | 动笔前：`SKILL.md` 的 frontmatter 与正文结构、支持文件怎么放 |
 | `checklist.md` | 写完自查：入库前平台会逐条体检的那几件事 |
+| `examples/meeting-notes-format/SKILL.md` | 想不出该长什么样时照它改（一份合格的技能：frontmatter + 步骤 + 常见坑） |
 
 版本：见 `api-version.json`。**这一份是平台每次对话前覆盖写入工作目录的**
 （起草 run 的 `material/` 里是与那次素材并排的一份），改的是仓库里的 `docs/material/skill/`。

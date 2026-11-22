@@ -9043,6 +9043,23 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
                 ![...d().querySelectorAll('[data-foot-files] button')].some(
                   (b) => text(b) === '选文件' || text(b) === '选目录',
                 )
+              /*
+               * ★ D257：**技能写法资料**（`material/skill/`）要在起草 run 的工作目录里——
+               * 与编排/智能体同一张图纸（写法以资料形式动态输入，不进提示词）。
+               * 直接从接口问"那个目录里有什么"，比在界面上数行数更准。
+               */
+              {
+                const pack = await f.contentWindow
+                  .fetch(
+                    `/api/crystallize/drafts/${encodeURIComponent(cyDrafting)}/files?dir=material/skill`,
+                  )
+                  .then((r) => r.json())
+                  .catch(() => null)
+                facts['crystal.draftingMaterialPack'] = {
+                  在: pack !== null && pack.exists !== false,
+                  文件: (pack?.entries ?? []).map((e) => e.name ?? e.path),
+                }
+              }
               const cyDTabs = () => [...d().querySelectorAll('.review-tabs > button')]
               facts['crystal.draftingTabTexts'] = cyDTabs().map((b) => text(b))
               facts['crystal.draftingTabDefault'] =

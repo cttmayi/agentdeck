@@ -48,6 +48,26 @@ describe('资料落盘（material）', () => {
     await cleanup(root)
   })
 
+  test('★ 沉淀起草 run 的资料：material/skill 落盘（含 format/checklist/例子）', async () => {
+    const root = await makeTempDir('material-drafter')
+    const workDir = join(root, 'skill-draft-x')
+    await mkdir(join(workDir, 'material'), { recursive: true })
+    const { seedDrafterMaterial } = await import('./material-seed.ts')
+    assert.equal(await seedDrafterMaterial({ workDir }), true)
+    const base = join(workDir, MATERIAL_DIR, 'skill')
+    assert.ok(existsSync(join(base, 'format.md')), 'format.md 要在')
+    assert.ok(existsSync(join(base, 'checklist.md')), 'checklist.md 要在')
+    assert.ok(
+      existsSync(join(base, 'examples', 'meeting-notes-format', 'SKILL.md')),
+      '例子要在（照着改的那一份）',
+    )
+    // 素材目录里的其它文件不受影响（`00-README.md` 是沉淀素材的索引）
+    await writeFile(join(workDir, 'material', '00-README.md'), '素材索引', 'utf8')
+    await seedDrafterMaterial({ workDir })
+    assert.equal(await readFile(join(workDir, 'material', '00-README.md'), 'utf8'), '素材索引')
+    await cleanup(root)
+  })
+
   test('★ 哪一类生成者读哪一包；普通对话不落', () => {
     assert.equal(materialPackForSlot('workflow-maker'), 'orchestration')
     assert.equal(materialPackForSlot('agent-maker'), 'agent')

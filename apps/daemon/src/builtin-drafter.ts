@@ -227,8 +227,19 @@ export const DRAFTER_NAME_SUFFIXED = '沉淀起草者（内置）'
  */
 export const DRAFTER_INSTRUCTIONS_BODY =
   '你是平台内置的沉淀起草者：**照着你被注入的那份技能**把素材写成一条可复用的 skill。' +
-  '素材不足以支撑时如实说，不要硬凑。'
+  '素材不足以支撑时如实说，不要硬凑。' +
+  '\n\n**动笔之前**先读工作目录里的 `material/skill/README.md`：`format.md` 是这条 skill 的' +
+  '形状（frontmatter 的 `name` 必须是 kebab-case、`description` 必填、支持文件怎么放），' +
+  '`checklist.md` 是入库前平台会逐条体检的项——照着写，别等入库被拒再改。'
 export const DRAFTER_INSTRUCTIONS = withConduct(DRAFTER_INSTRUCTIONS_BODY)
+/**
+ * ★ D257：加"先读 `material/skill/`"之前的默认（分批第 191 批那份）。
+ * 逐字留着——老工作区的起草者要靠它被认成"还是默认"，否则永不升级。
+ */
+const OLD_V8_INSTRUCTIONS = withConduct(
+  '你是平台内置的沉淀起草者：**照着你被注入的那份技能**把素材写成一条可复用的 skill。' +
+    '素材不足以支撑时如实说，不要硬凑。',
+)
 
 /** 内置「记忆整理者」的默认名字（与起草者同一套：名字可改，认的是 `builtin` + `role`）。 */
 export const MEMORY_TIDY_NAME = '记忆整理者'
@@ -1276,6 +1287,8 @@ const DRAFTER_INSTRUCTIONS_HISTORY: readonly string[] = [
   OLD_V6_INSTRUCTIONS,
   // 分批第 191 批：第一句去掉"也可能是一条智能体的指令"之后，把 190 那一份也认出来
   OLD_V7_INSTRUCTIONS,
+  // D257：加"先读 material/skill/"之前的那一份
+  OLD_V8_INSTRUCTIONS,
 ]
 
 /**
