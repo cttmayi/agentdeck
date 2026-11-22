@@ -4823,6 +4823,27 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
              *   的格子宽度加起来 == 卡片内容宽度"（±2px），与 `agents.cardNoHoles`
              *   同一件事。
              */
+            /*
+             * ★ D242 的两条回归判据（使用者报的两个 BUG）：
+             *   ① CLI 下拉**必须有「跟随全局默认」那一项**（原来没有，新建时一律烙 claude）；
+             *   ② 技能框与左边的指令框**底边对齐**（原来 154 vs 406，差 252px）。
+             */
+            CLI选项: [...(pane.querySelector('.agent-card select')?.options ?? [])].map((o) => o.value),
+            CLI值: pane.querySelector('.agent-card select')?.value ?? null,
+            技能格底边对齐: (() => {
+              const card = pane.querySelector('.agent-card')
+              if (!card) return null
+              const ins = [...card.children].find((c) => c.querySelector('textarea'))
+              const sk = [...card.children].find(
+                (c) => c.querySelector('.skill-box') && !c.querySelector('textarea'),
+              )
+              if (!ins || !sk) return null
+              return Math.abs(ins.getBoundingClientRect().bottom - sk.getBoundingClientRect().bottom) <= 1
+            })(),
+            技能框高: (() => {
+              const box = pane.querySelector('.agent-card .skill-box')
+              return box ? Math.round(box.getBoundingClientRect().height) : null
+            })(),
             每行占满: (() => {
               const card = pane.querySelector('.agent-card')
               if (!card) return null

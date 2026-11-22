@@ -146,7 +146,14 @@
    * 才行）。初始化取第一个可用项，而不是硬编码 'claude'。
    */
   $: runtimeOptions = $identity?.runtimes.map((r) => r.key) ?? []
-  let runtimeKey = prefill?.runtimeKey ?? 'claude'
+  /*
+   * ★ D242：缺省 `'default'`（= 跟随全局默认），并把它作为下拉**第一项**。
+   *   改之前这里写死 `'claude'`、下拉里也没有 `default` 这一项——于是"新建的智能体
+   *   一律被烙上 claude"，与服务端 `resolveRuntimeKey` 的决定（2026-10：
+   *   "新 agent 一律跟随全局默认，而不是把当时的默认值烙进记录里"）**相反**。
+   *   `AgentDetail` 那边一直有这一项，两份表单从这里开始对齐。
+   */
+  let runtimeKey = prefill?.runtimeKey ?? 'default'
   let busy = false
   let error = ''
 
@@ -269,19 +276,23 @@
       <label class="cell">
         {$t('agents.runtimeFieldLabel')}
         <select bind:value={runtimeKey}>
+          <!-- ★ D242：与 `AgentDetail` 同一个第一项（"跟随全局默认"是一种状态，不是一个 runtime） -->
+          <option value="default" title={$t('agents.runtimeFollowDefaultHint')}
+            >{$t('agents.runtimeFollowDefault')}</option
+          >
           {#each runtimeOptions as key (key)}
             {@const r = $identity?.runtimes.find((x) => x.key === key)}
             <option value={key}>
               {key}{r && r.evidence !== 'verified' ? $t('agents.runtimeUnverified') : ''}
             </option>
           {/each}
-          {#if !runtimeOptions.includes(runtimeKey)}
+          {#if runtimeKey !== 'default' && !runtimeOptions.includes(runtimeKey)}
             <option value={runtimeKey}>{$t('agents.runtimeCurrent', { key: runtimeKey })}</option>
           {/if}
         </select>
       </label>
 
-      <label class="cell">
+      <label class="cell instructions-cell">
         <!-- ★ 分批第 53 批：点明「指令」= 第一句话的 ② 身份。
              ⚠️ 只放**一行标签**，不放大段说明：新建表单每加两行文字，「创建」按钮就会被挤出
              视口（探针 `template.footVisible` 当场量到过）；完整说明在智能体详情的编辑态里。 -->
@@ -305,22 +316,30 @@
 
       </label>
 
-      <div class="cell">
+      <!--
+        ★ D242：技能那一格与**智能体编辑页**同一个 `.skill-box`（带边框、`flex:1`
+        撑满行高、上限 22rem 与指令框同高）。改之前这里是"picker 自己带边框 +
+        底下一行 hint"⇒ 右边那一格只有 154 高、左边的指令框 406 高，两个框的底边
+        差 252px（使用者："挂载的技能下面的框没有对齐，编辑智能体就是有对齐的"）。
+      -->
+      <div class="cell skills-cell">
         <span class="cell-label">{$t('agents.attachedSkillsLabel')}</span>
-        {#if $skills.length === 0}
-          <p class="hint">{$t('agents.noSkillsOption')}</p>
-        {:else}
-          <div class="skill-picker">
-            {#each $skills as s (s.id)}
-              <label class="skill-option">
-                <input type="checkbox" value={s.id} bind:group={selectedSkills} />
-                <!-- ★ D236：一个技能只有一个名字（规范里的 `name`，也是目录名） -->
-                <span>{s.name}</span>
-              </label>
-            {/each}
-          </div>
-        {/if}
-        <span class="hint">{$t('agents.executorSkillsHint')}</span>
+        <div class="skill-box">
+          {#if $skills.length === 0}
+            <p class="hint">{$t('agents.noSkillsOption')}</p>
+          {:else}
+            <div class="skill-picker">
+              {#each $skills as s (s.id)}
+                <label class="skill-option">
+                  <input type="checkbox" value={s.id} bind:group={selectedSkills} />
+                  <!-- ★ D236：一个技能只有一个名字（规范里的 `name`，也是目录名） -->
+                  <span>{s.name}</span>
+                </label>
+              {/each}
+            </div>
+          {/if}
+          <span class="hint">{$t('agents.executorSkillsHint')}</span>
+        </div>
       </div>
 
       <!--
@@ -509,17 +528,46 @@
    *   `.skill-picker` 同款）。原来用 `repeat(auto-fill, minmax(13rem, 1fr))`，
    *   半格抽屉里会自动缩成一列，使用者要求的就是"两列"，钉死列数。
    */
-  .skill-picker {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--sp-1) var(--sp-2);
-    margin-top: var(--sp-2);
-    max-height: 12rem;
-    overflow-y: auto;
+  /*
+   * ★ D242：技能那一格与**智能体编辑页同款**——外面一个 `.skill-box`（带边框、
+   *   `flex: 1` 撑满行高、上限 22rem 与指令框同高），里面的 picker 吃掉剩余高度、
+   *   装不下才滚。"两个框底边对齐"是这一族布局的判据（编辑页早就有，新建页漏了）。
+   */
+  .cell.instructions-cell,
+  .cell.skills-cell {
+    align-self: stretch;
+    min-height: 0;
+  }
+
+  .skill-box {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    flex: 1 1 auto;
+    max-height: 22rem;
+    min-height: 0;
     border: 1px solid var(--line);
     border-radius: var(--radius);
     padding: var(--sp-2);
     background: var(--bg);
+  }
+
+  .skills-cell .hint {
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+  }
+
+  .skill-picker {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--sp-1) var(--sp-2);
+    flex: 1 1 auto;
+    max-height: 22rem;
+    min-height: 0;
+    overflow-y: auto;
+    align-content: start;
+    align-items: start;
+    /* 边框/内距/底色由外面的 `.skill-box` 提供（这里再给一层就是双层内距） */
     text-align: left;
   }
 
