@@ -1098,19 +1098,12 @@
       ⚠️ 改之前窄屏只能靠动作里那颗「取消」出去，而「取消」的语义是"放弃改动"，
         读起来不像"回到列表"（探针曾把这件事记成一条事实：侧边栏那一项在选中态下是空操作）。
     -->
-    {#if isWf}
-      <!--
-        ★ D238：编排内建智能体这一页是**把编排详情整块换掉**的（不是主从布局），
-        所以返回按钮必须**常驻**——不能用 `.back-to-list`（它在宽屏是 display:none，
-        因为主从布局里列表就在左边）。与运行画面的返回按钮同一个做法。
-      -->
-      <button
-        type="button"
-        class="btn btn--ghost btn--sm"
-        data-wf-agent-back
-        onclick={onclose}
-      >{$t('workflows.agentsBack')}</button>
-    {:else}
+    <!--
+      ★ 2026-11（D156/D247）：`.back-to-list`（窄屏那颗）必须留在 `.detail-head` 这一层——
+      断点里那条 `grid-column: 1 / -1` 只在它是**网格子项**时生效（窄屏要它独占第一行）。
+      常驻那颗（编排内建智能体）相反：它进 `.head-nav` 与标题同一行，见下面那段注释。
+    -->
+    {#if !isWf}
       <button type="button" class="btn btn--ghost btn--sm back-to-list" data-agent-back onclick={onclose}>
         {$t('agents.backToList')}
       </button>
@@ -1125,6 +1118,25 @@
       脏态都在组件内部），所以漏了这一步。
     -->
     <div class="detail-head-main">
+    <!--
+      ★ 2026-11（D247）：**常驻返回与标题同一行**（按钮在左、标题块在右）。
+      使用者报："『返回编排』的下面是智能体名字，应该是（名字）在右边"。
+      根因：常驻返回原来是 `.detail-head` 这个两列网格的**直接子项**，抢到第 1 行第 1 列，
+      而 `.detail-head-main` 又被钉在 `grid-column: 1` ⇒ 标题只能排到第 2 行（按钮下面）。
+      现在按钮与标题块一起进 `.head-nav`（左列里的一行），与 `WorkflowRunView` 栏头
+      （那颗返回也在标题同一行）一致。**不要**再把它放回网格直接子项。
+      ⚠️ `.back-to-list`（窄屏那颗）反而必须留作直接子项——见上面那段。
+    -->
+    <div class="head-nav">
+      {#if isWf}
+        <button
+          type="button"
+          class="btn btn--ghost btn--sm"
+          data-wf-agent-back
+          onclick={onclose}
+        >{$t('workflows.agentsBack')}</button>
+      {/if}
+      <div class="head-text">
     {#if renaming}
       <input
         class="agent-rename-input"
@@ -1200,6 +1212,8 @@
         })}
       {/if}
     </p>
+      </div>
+    </div>
     </div>
     <!--
       ★ 2026-11（D162）：这一排按 **主操作 → 普通动作 → 次操作 → 危险** 排（§2.6），

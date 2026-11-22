@@ -1661,6 +1661,38 @@ hr {
   min-width: 0;
 }
 
+/**
+ * ★ D247：**栏头里那颗"常驻返回"与标题同一行**（按钮在左、标题块在右）。
+ *
+ * 使用者报：「『返回编排』的下面是智能体名字，应该是在右边是智能体名字」。
+ * 根因是网格排布：常驻返回原来是 `.detail-head`（两列网格）的**直接子项**，自动排布把
+ * 它放进第 1 行第 1 列，而 `.detail-head-main` 被钉在 `grid-column: 1` ⇒ 标题只能落到
+ * **第 2 行**（按钮下面）。两者包进同一个左列格子里（`.head-nav` = 一行，
+ * `.head-text` = 标题 + 副题的竖排），标题就回到按钮右边。
+ *
+ * ⚠️ 与 `.back-to-list`（窄屏那颗）不是一回事：那颗在宽屏 `display:none`，窄屏靠
+ *    `grid-column: 1 / -1` 独占第一行，所以它**必须**继续做网格直接子项。
+ *    这里说的"常驻返回"是列表被整块换掉时的那颗（编排内建智能体、安装技能）。
+ * ⚠️ 效果与 `WorkflowRunView` 的栏头一致——那颗返回本来就在标题同一行。
+ */
+.detail-head .head-nav {
+  display: flex;
+  /* ★ 基线对齐，不是居中：标题块是"标题 + 副题"两行，居中会让按钮落到**两行中间**
+     （实测名字中线与按钮中线差 8.5px，探针当场红）——读起来像按钮挂在标题与副题之间的缝上。
+     基线对齐后按钮里的字与标题那行字坐在同一条线上。 */
+  align-items: baseline;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.detail-head .head-nav > .head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 /* 副题：一行、超了省略——它是最先该让位的东西（动作与标题都比它重要） */
 .detail-head .detail-sub {
   min-width: 0;

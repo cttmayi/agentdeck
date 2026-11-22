@@ -108,6 +108,27 @@
        *   **底栏**（`.main-panel-foot`），栏头**只许** ghost（返回 + 工具性动作）。
        *   这个测量给三处面板共用，所以只在这里写一次。
        */
+      /**
+       * ★ D247：**栏头里那颗"常驻返回"与标题同一行**（按钮在左、标题在右）。
+       *
+       * 使用者报：「『返回编排』的下面是智能体名字，应该是在右边是智能体名字」。
+       * 判据只有两个数：横向先后（标题左边缘 ≥ 按钮右边缘 − 2）与纵向居中
+       * （两个矩形中线差 ≤ 6）。只看 DOM 里谁先谁后是不够的——那正是"错"的那一版
+       * （DOM 顺序没错，是网格把它们排到了两行）。
+       */
+      function backBesideTitle(root, backSel, titleSel) {
+        const back = root?.querySelector(backSel)?.getBoundingClientRect()
+        const title = root?.querySelector(titleSel)?.getBoundingClientRect()
+        if (!back || !title) return null
+        // "同一行" = 标题**落在按钮的纵向范围里**（不是中心相等：两行文字块与一颗按钮
+        // 中心对不上是常态，基线对齐才是对的长相）
+        const cy = title.top + title.height / 2
+        return {
+          在右边: title.left >= back.right - 2,
+          同一行: cy >= back.top - 2 && cy <= back.bottom + 2,
+        }
+      }
+
       function panelActionPlace(panel) {
         if (!panel) return null
         // ★ D244：技能安装改成 ④ 新建视图 ⇒ 它的「栏头」是 `.detail-head`
@@ -3353,7 +3374,10 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
            *   ⚠️ 底栏那颗按钮没写变体（`<button type="submit">`）——按界面看到的重量算，
            *      它**就是** primary（`app.css` 基类给 accent 底色）；按写法算会漏掉它。
            */
-          facts['skills.panelActions'] = panelActionPlace(panel)
+          facts['skills.panelActions'] = {
+            ...panelActionPlace(panel),
+            返回在标题左边: backBesideTitle(panel, '.detail-head .panel-back', '.detail-head h2'),
+          }
           facts['skills.tabCount'] = panel.querySelectorAll('.tab').length
           // 页签条里那个和面板头重复的「关闭」应当已经删掉
           facts['skills.duplicateCloseInTabs'] = !!panel.querySelector('.tabs .close')
@@ -4746,6 +4770,15 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             })(),
             // CLI 那一格回来了（D241：它是真字段，落在 agent.json）
             有CLI那一格: !!pane?.querySelector('#agent-runtime'),
+            /*
+             * ★ D247：「← 返回编排」与名字**同一行、名字在它右边**。原来那颗返回是网格的
+             *   直接子项，抢掉第 1 行第 1 列，名字只能落到第 2 行（按钮下面）。
+             */
+            返回在名字左边: backBesideTitle(
+              pane,
+              '[data-wf-agent-back]',
+              '.agent-head h2 .agent-head-name',
+            ),
             设为默认禁用: (() => {
               const b = pane?.querySelector('[data-agent-set-default]')
               return b === null || b === undefined ? null : b.disabled

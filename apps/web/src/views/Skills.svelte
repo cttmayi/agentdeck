@@ -576,12 +576,21 @@
   <section class="pane detail-pane" aria-label={$t('skills.install')} data-skills-install>
     <header class="detail-head">
       <div class="detail-head-main">
-        <p class="detail-sub" style="margin:0 0 var(--sp-1)">
+        <!--
+          ★ 2026-11（D247）：返回按钮与标题**同一行**（按钮在左、标题在右）。
+          原来是"返回一行、标题一行"（返回塞进 `.detail-sub` 里、用内联 margin 撑开）——
+          使用者指着编排那一页说了同一个毛病：「『返回编排』的下面是智能体名字，
+          应该是在右边」。那一页的修法是 `.head-nav` + `.head-text`（在 `app.css`），
+          这一页照同一份用，不再各写各的。
+        -->
+        <div class="head-nav">
           <button type="button" class="btn btn--ghost btn--sm panel-back" onclick={closePanel}
             >{$t('skills.backToList')}</button
           >
-        </p>
-        <h2>{$t('skills.install')}</h2>
+          <div class="head-text">
+            <h2>{$t('skills.install')}</h2>
+          </div>
+        </div>
       </div>
       <div class="detail-actions">
         <!--
