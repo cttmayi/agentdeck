@@ -51,90 +51,54 @@
         </tbody>
       </table></div>
 
-      <h2>2. 屏 ①：内建智能体的目录（正文可写）</h2>
-      <div class="mock-frame">
-        <div class="split-layout with-detail">
-          <section class="pane list-pane">
-            <div class="pane-head list-toolbar"><span class="faint fs-xs">编排内建智能体 · 审稿员</span></div>
-            <div class="pane-body"><ul class="list-stack">
-              <li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">skills/</span><span class="faint fs-xs">2 个技能</span></button></li>
-              <li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">  weekly-shape/SKILL.md</span><span class="faint fs-xs">可写</span></button></li>
-              <li class="list-row active"><button class="list-row-main" type="button"><span class="mono fs-sm">  weekly-shape/SKILL.md</span><span class="faint fs-xs">可写</span></button></li>
-              <li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">  tone-check/SKILL.md</span></button></li>
-              <li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">agent.json</span><span class="badge">校验后写</span></button></li>
-              <li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">instructions.md</span><span class="faint fs-xs">可写</span></button></li>
-            </ul></div>
-          </section>
-          <section class="pane detail-pane">
-            <header class="detail-head">
-              <div class="detail-head-main">
-                <p class="detail-sub" style="margin:0 0 var(--sp-1)"><button type="button" class="btn btn--ghost btn--sm">← 返回编排</button></p>
-                <h2>weekly-shape/SKILL.md</h2>
-                <p class="detail-sub"><span class="badge">可写 · 256 KB 上限</span></p>
-              </div>
-              <div class="detail-actions"><button type="button" class="btn btn--secondary">编辑</button></div>
-            </header>
-            <div class="pane-body detail-scroll">
-              <pre class="code-mock">---
+      <h2>2. 形态：沿用已有的「浮层」，不是固定栏</h2>
+      <p class="lead">
+        ⚠️ 更正一版草稿：我先前画成"左树 + 右固定的编辑栏"，那是**新造一种形态**。
+        实际已有的做法是——点文件 ⇒ <code>FileViewer</code> **弹出来**（它内部就是
+        <code>Modal size="wide"</code>）。所以这里不改形态，只扩内容：
+        <b>目录树照旧在页面上（或一个浮层里），点一个文件 ⇒ 还是那个 FileViewer 浮层</b>，
+        只是它多一个「编辑 / 保存」态。
+      </p>
+      <div class="mock-frame" style="height:16rem;position:relative">
+        <section class="pane detail-pane" style="height:100%">
+          <div class="pane-body" style="opacity:.35">
+            <div class="field"><label>目录（浮层背后的那一页）</label><input value="workflows/…/agents/审稿员/" readonly /></div>
+            <ul class="list-stack">
+              <li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">skills/</span></button></li>
+              <li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">instructions.md</span></button></li>
+            </ul>
+          </div>
+        </section>
+        <!-- 浮层：与 FileViewer 同一个 Modal（wide）+ 同一根工具条 -->
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+          <div style="width:78%;background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--radius);box-shadow:var(--shadow-2)">
+            <div style="display:flex;align-items:center;gap:var(--sp-2);padding:var(--pad-frame-head);border-bottom:1px solid var(--line)">
+              <span class="mono faint fs-xs">skills/weekly-shape/SKILL.md</span>
+              <span class="badge">可写</span>
+              <span style="flex:1"></span>
+              <button type="button" class="btn btn--secondary btn--sm">编辑</button>
+              <button type="button" class="btn btn--ghost btn--sm">关闭</button>
+            </div>
+            <pre class="code-mock" style="margin:0;border:0;border-radius:0;max-height:9rem">---
 name: weekly-shape
 description: 周报的三段结构：结论 / 证据 / 下一步
 ---
 
-# 怎么排周报
-
-## When to Use
-每周写周报时。
-
 ## Procedure
 1. 先写结论一行。
-2. 每条结论下面挂一条证据。
-3. 结尾写下一步与需要谁拍板。</pre>
-            </div>
-          </section>
+2. 每条结论下面挂一条证据。</pre>
+          </div>
         </div>
       </div>
 
-      <h2>3. 屏 ②：结构化文件——能改，但保存前过同一关</h2>
-      <div class="mock-frame">
-        <div class="split-layout with-detail">
-          <section class="pane list-pane">
-            <div class="pane-head list-toolbar"><span class="faint fs-xs">编排内建智能体 · 审稿员</span></div>
-            <div class="pane-body"><ul class="list-stack">
-              <li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">skills/</span></button></li>
-              <li class="list-row active"><button class="list-row-main" type="button"><span class="mono fs-sm">agent.json</span><span class="badge">校验后写</span></button></li>
-              <li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">instructions.md</span><span class="faint fs-xs">可写</span></button></li>
-            </ul></div>
-          </section>
-          <section class="pane detail-pane">
-            <header class="detail-head">
-              <div class="detail-head-main">
-                <p class="detail-sub" style="margin:0 0 var(--sp-1)"><button type="button" class="btn btn--ghost btn--sm">← 返回编排</button></p>
-                <h2>agent.json</h2>
-                <p class="detail-sub"><span class="badge">保存前校验</span></p>
-              </div>
-              <div class="detail-actions"><button type="button" class="btn btn--secondary">编辑</button></div>
-            </header>
-            <div class="pane-body detail-scroll">
-              <p class="faint fs-xs">改坏了不会落盘——规则与正规入口同一套（schema + 名字禁改）。</p>
-              <pre class="code-mock">{
-  "id": "01M80XY3HC43DNBDNF8SMN5RQ6",
-  "name": "审稿员",          ← 灰色不可改（改名要搬目录，走正规入口）
-  "skillIds": [],
-  "runtimeKey": "default"
-}</pre>
-            </div>
-          </section>
-        </div>
-      </div>
-
-      <h2>4. 屏 ③：写失败——原话留在编辑器上，不跳走</h2>
-      <div class="mock-frame" style="height:18rem">
+      <h2>3. 屏 ①：同一根工具条上多两样东西（编辑态 / 保存失败）</h2>
+      <div class="mock-frame" style="height:20rem">
         <section class="pane detail-pane" style="height:100%">
           <header class="detail-head">
-            <div class="detail-head-main"><h2>agent.json</h2><p class="detail-sub"><span class="badge">保存失败 · 未写入</span></p></div>
+            <div class="detail-head-main"><h2>weekly-shape/SKILL.md</h2><p class="detail-sub"><span class="badge">可写 · 256 KB 上限</span></p></div>
             <div class="detail-actions">
               <button type="button" class="btn btn--ghost">还原</button>
-              <button type="button" class="btn btn--secondary">保存</button>
+              <button type="button" class="btn btn--primary">保存</button>
             </div>
           </header>
           <div class="pane-body detail-scroll">
@@ -147,6 +111,11 @@ description: 周报的三段结构：结论 / 证据 / 下一步
           </div>
         </section>
       </div>
+      <p class="lead">
+        工具条（<code>.fv-bar</code>）里多加一颗「编辑」；进编辑态之后变成「还原 / 保存」。
+        <b>渲染面（Markdown / 高亮 / HTML 预览 / 十六进制）一个都不动</b>——编辑态只是"文本面"，
+        保存失败的原话就留在浮层里（不关窗、不跳走）。
+      </p>
 
       <h2>5. 哪些能改（这张表就是实现范围）</h2>
       <div class="table-wrap"><table class="table">
