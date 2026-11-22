@@ -6,27 +6,31 @@
    *   1. 编排生成者把候选**写成存储的形状**（工作目录 `workflow-draft/<名字>/`），
    *      每轮结束 daemon 预检一次；
    *   2. 聊天里出现这张卡片：**能不能收**、几个人、哪一条不对；
-   *   3. 点「收进编排库」⇒ **直接保存**（无中间确认面板）⇒ 跳到编排编辑页；
+   *   3. 顶栏那颗「收进编排库」⇒ **直接保存**（无中间确认面板）⇒ 跳到编排编辑页；
    *      同名 ⇒ 先问「覆盖那条吗」（并写明覆盖会替换什么）。
+   *
+   * ★ 2026-11（D260，使用者："「收进编排库」要放在顶栏，默认置灰，有检查到生成才可以用"）：
+   *   **动作搬到顶栏**（`Chat.svelte` 的 `page-actions`），卡片只留"它写成了什么"——
+   *   名字 / 几个人 / 代码行数 / 哪一条不对 / 打开目录。
+   *   为什么：卡片是**消息流里的一段**，会被后一轮对话挤上去；而"入库"是这一页的
+   *   一次完整动作（还牵着一页级的跳转），放在整页那一排才是它该在的层级
+   *   （与"整理成记忆"从顶栏挪到对话头同一类判断，方向相反、理由相同）。
+   *   没有候选时那颗按钮**置灰不拿掉**（D214 同一条规矩：位置不动、语义明确）。
    *
    * 为什么卡片而不是面板：产物是**工作目录里的真文件**，人要看的是"它写成了什么"；
    * 面板里再摆一份可改的文本，两份就会分叉（D245 把编辑器做成"直接改文件"是同一条理由）。
    * 要改 ⇒ 打开目录改，或让模型接着聊。
    */
-  import { askConfirm } from '../lib/confirm.ts'
   import { t } from '../lib/i18n.ts'
-  import { ApiError, api, type Workflow, type WorkflowCandidate } from '../lib/api.ts'
+  import { api, type WorkflowCandidate } from '../lib/api.ts'
   import { showToast } from '../lib/view.ts'
-  import { loadWorkflows } from '../lib/stores.ts'
 
-  export let conversationId = ''
   export let candidates: WorkflowCandidate[] = []
-  /** 收进库之后（页面负责跳转到编排编辑页并选中它）。 */
-  export let onadopted: (workflow: Workflow) => void = () => {}
-
-  /** 每条候选各自的进行态（键 = `dir`）。 */
-  let busyDir = ''
-  let errorByDir: Record<string, string> = {}
+  /**
+   * 入库失败时那一行错（键 = `dir`）——**由页面给**（动作在顶栏，错误仍显示在卡片上，
+   * 人一眼看得出是哪条候选、卡在哪）。
+   */
+  export let errorByDir: Record<string, string> = {}
 
   const errorsOf = (c: WorkflowCandidate) => c.problems.filter((p) => p.level === 'error')
   const warnsOf = (c: WorkflowCandidate) => c.problems.filter((p) => p.level === 'warn')
@@ -40,59 +44,6 @@
     }
   }
 
-  async function adopt(c: WorkflowCandidate, overwrite?: { existingId: string }): Promise<void> {
-    if (busyDir !== '') return
-    busyDir = c.dir
-    errorByDir = { ...errorByDir, [c.dir]: '' }
-    try {
-      const out = await api<{ workflow: Workflow }>(
-        `/api/conversations/${encodeURIComponent(conversationId)}/workflow-adopt`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            dir: c.dir,
-            ...(overwrite === undefined ? {} : { overwrite: true, existingId: overwrite.existingId }),
-          }),
-        },
-      )
-      // 写动作成功后界面跟着数据走：先重拉列表，再交给页面跳转
-      await loadWorkflows()
-      showToast($t('chat.wfAdopted', { name: out.workflow.name }))
-      onadopted(out.workflow)
-    } catch (err) {
-      /*
-       * 同名：**先问人**（用户拍板"如果有同名，要提示是否覆盖"）。
-       * 服务端只回 `409 + { code, existing }`，不知道怎么问；这里读**结构化的错误体**
-       * （`ApiError.body`）而不是去 parse 错误文案——文案是给人看的，会改。
-       * 确认框里写明"覆盖会换掉什么"：代码与内建智能体整份替换，旧的会删掉。
-       */
-      const body =
-        err instanceof ApiError && err.status === 409
-          ? (err.body as { code?: unknown; existing?: { id?: unknown; name?: unknown } } | null)
-          : null
-      if (body?.code === 'workflow_name_taken' && typeof body.existing?.id === 'string') {
-        const existingId = body.existing.id
-        const ok = await askConfirm({
-          title: $t('chat.wfOverwriteTitle', { name: c.name }),
-          message: $t('chat.wfOverwriteBody', { name: c.name, n: String(c.agents.length) }),
-          confirmLabel: $t('chat.wfOverwriteConfirm'),
-          danger: true,
-        })
-        if (ok) {
-          busyDir = ''
-          await adopt(c, { existingId })
-          return
-        }
-        return
-      }
-      errorByDir = {
-        ...errorByDir,
-        [c.dir]: err instanceof Error ? err.message : String(err),
-      }
-    } finally {
-      busyDir = ''
-    }
-  }
 </script>
 
 {#if candidates.length > 0}
@@ -116,14 +67,6 @@
             data-wf-open-dir
             onclick={() => void reveal(c.absDir)}
           >{$t('chat.wfOpenDir')}</button>
-          <button
-            type="button"
-            class="btn btn--primary btn--sm"
-            data-wf-adopt={c.dir}
-            disabled={blocked || busyDir !== ''}
-            title={blocked ? errors[0]?.message ?? '' : ''}
-            onclick={() => void adopt(c)}
-          >{busyDir === c.dir ? $t('common.saving') : $t('chat.wfAdopt')}</button>
         </header>
         <p class="wf-card-meta" data-wf-candidate-meta>
           {$t('chat.wfMeta', {

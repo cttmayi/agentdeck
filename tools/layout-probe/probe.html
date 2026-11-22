@@ -12170,6 +12170,16 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             有打开目录: !!card?.querySelector('[data-agent-open-dir]'),
             工作目录顶层: (files?.entries ?? []).map((e) => e.name ?? e.path),
             /*
+             * ★ D260（使用者："「收进编排库」要放在顶栏，**默认置灰**，有检查到生成才可以用"）：
+             * 这个对话里只有候选**智能体**（没有候选编排）⇒ 顶栏那颗必须在、且禁用。
+             */
+            收进置灰: (() => {
+              const b = [...d().querySelectorAll('.page-actions button')].find(
+                (x) => text(x) === '收进编排库',
+              )
+              return b !== undefined && b.disabled === true
+            })(),
+            /*
              * ★ D259：资料按**它写什么**发。智能体生成者也写配套技能 ⇒
              * `material/` 下要有 agent + skill 两包（原先只有 agent）。
              */
@@ -12246,8 +12256,17 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
          * 再发一句带记号的 prompt ⇒ 假 CLI 把候选目录写进 `$PWD`（= 对话的工作目录）。
          */
         const wfCard = () => d().querySelector('[data-wf-candidates]')
-        const wfAdoptBtn = () =>
-          d().querySelector('[data-wf-adopt="探针两段流水线"]') ?? null
+        /*
+         * ★ D260：动作在**顶栏**（`page-actions`），卡片上不再有「收进编排库」。
+         * 用函数声明（不是 `const` 箭头）：第一个使用点在它定义之前，`const` 会撞 TDZ。
+         */
+        function wfAdoptBtn() {
+          return (
+            [...d().querySelectorAll('.page-actions button')].find(
+              (b) => text(b) === '收进编排库',
+            ) ?? null
+          )
+        }
 
         facts['chat.wfCandidateCard'] = await (async () => {
           const agents = (await f.contentWindow.fetch('/api/agents').then((r) => r.json())).agents ?? []
@@ -13893,8 +13912,17 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
          * 再发一句带记号的 prompt ⇒ 假 CLI 把候选目录写进 `$PWD`（= 对话的工作目录）。
          */
         const wfCard = () => d().querySelector('[data-wf-candidates]')
-        const wfAdoptBtn = () =>
-          d().querySelector('[data-wf-adopt="探针两段流水线"]') ?? null
+        /*
+         * ★ D260：动作在**顶栏**（`page-actions`），卡片上不再有「收进编排库」。
+         * 用函数声明（不是 `const` 箭头）：第一个使用点在它定义之前，`const` 会撞 TDZ。
+         */
+        function wfAdoptBtn() {
+          return (
+            [...d().querySelectorAll('.page-actions button')].find(
+              (b) => text(b) === '收进编排库',
+            ) ?? null
+          )
+        }
 
         facts['chat.wfCandidateCard'] = await (async () => {
           const agents = (await f.contentWindow.fetch('/api/agents').then((r) => r.json())).agents ?? []

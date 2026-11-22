@@ -1527,6 +1527,8 @@ const CHECKS = [
       v['有打开目录'] === true &&
       (v['工作目录顶层'] ?? []).includes('material') &&
       (v['工作目录顶层'] ?? []).includes('agent-draft') &&
+      // ★ D260：这一页只有候选智能体 ⇒ 顶栏「收进编排库」在、但置灰
+      v['收进置灰'] === true &&
       // ★ D259：它也写配套技能 ⇒ material/ 下 agent + skill 两包都要在
       (v['资料包'] ?? []).includes('agent') &&
       (v['资料包'] ?? []).includes('skill'),
@@ -1552,7 +1554,8 @@ const CHECKS = [
     key: 'chat.wfCandidateCard',
     label:
       '★★★ 编排生成者把候选**写成存储的形状**（workflow-draft/<名字>/）之后，聊天里出现候选卡片：'
-      + '名字/摘要/内建智能体与代码行数、没有错、可收；工作目录里同时有平台写的 material/（写法资料）',
+      + '名字/摘要/内建智能体与代码行数、没有错；**顶栏**那颗「收进编排库」这时才可点（默认置灰）；'
+      + '工作目录里同时有平台写的 material/（写法资料）',
     ok: (v) =>
       !!v &&
       v['卡片在'] === true &&

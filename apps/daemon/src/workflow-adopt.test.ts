@@ -90,6 +90,16 @@ describe('入库：候选 → workflows/<id>/', () => {
       existsSync(join(agentBase, 'skills', '文风', 'SKILL.md')),
       '自生成的技能跟着搬过去',
     )
+    /**
+     * ★ 2026-11（D260，使用者报："点击入库后，发现 agent 没有 copy 过去"）：
+     * 文件确实搬了，但返回的那条编排 `inlineAgents` 是**空数组**——界面拿到它去画编辑页
+     * 就是"一个人也没有"，而运行时按它解析名字也解析不到。所以返回的清单必须**回读过**。
+     */
+    assert.equal(out.workflow.inlineAgents.length, 1, '★ 返回的编排里要带着内建人（不是空清单）')
+    const inline = out.workflow.inlineAgents[0]!
+    assert.equal(inline.name, '写作员')
+    assert.ok(inline.instructions.includes('周报'), '指令正文也带回来（运行时按它组装第一句话）')
+    assert.equal(inline.id, agentJson['id'], '清单里的 id 就是磁盘 agent.json 里那个（身份同一处）')
     await cleanup(root)
   })
 

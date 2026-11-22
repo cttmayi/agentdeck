@@ -30,7 +30,7 @@ import { ulid } from '@agentdeck/protocol'
 import { readCandidate, type WorkflowCandidate } from './workflow-candidate.ts'
 import { WORKFLOW_DRAFT_DIR } from './workflow-maker.ts'
 import type { Workflow, WorkflowInlineAgent } from './workflows.ts'
-import { removeWorkflowDir, workflowsRoot } from './workflows-dirs.ts'
+import { listWorkflowAgents, removeWorkflowDir, workflowsRoot } from './workflows-dirs.ts'
 
 export interface AdoptOptions {
   dataDir: string
@@ -180,6 +180,20 @@ export async function adoptCandidate(opts: AdoptOptions): Promise<AdoptResult> {
   await rm(target, { recursive: true, force: true })
   await mkdir(workflowsRoot(opts.dataDir), { recursive: true })
   await rename(tmp, target)
+
+  /**
+   * ★ 2026-11（D260）：**内建智能体清单回读一次**（目录是真相，D234）。
+   *
+   * 踩到的坑（使用者："点击入库后，发现 agent 没有 copy 过去"）：文件**确实**搬过去了
+   * （`workflows/<id>/agents/<名字>/…`），但返回给界面、并且被塞进内存那份编排的
+   * `inlineAgents` 是**上面那个空数组**。后果是两处一起坏：
+   *   · 编排编辑页的「内建智能体」一栏是空的（看起来像"没搬"）；
+   *   · 紧接着**点运行**也解析不到人（运行时按 `wf.inlineAgents` 查名字）——
+   *     要么报"编排里没有这个人"，要么误命中全局池里的同名账号智能体。
+   *
+   * 所以这里按同一套读取（`listWorkflowAgents`，与列表/详情接口一个出处）回填。
+   */
+  workflow.inlineAgents = await listWorkflowAgents(opts.dataDir, id)
 
   return { ok: true, workflow }
 }

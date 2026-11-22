@@ -17,7 +17,15 @@
   import ChatSettings from '../components/ChatSettings.svelte'
   import ChatAgentCandidates from '../components/ChatAgentCandidates.svelte'
   import ChatWorkflowCandidates from '../components/ChatWorkflowCandidates.svelte'
-  import { api, type Agent, type ChatTurnView, type Conversation } from '../lib/api.ts'
+  import {
+    ApiError,
+    api,
+    type Agent,
+    type ChatTurnView,
+    type Conversation,
+    type Workflow,
+    type WorkflowCandidate,
+  } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
   import { markdownHtmlMode } from '../lib/markdown-html.ts'
@@ -56,6 +64,7 @@
     identity,
     loadConversations,
     loadError,
+    loadWorkflows,
     loading,
     openConversation,
     renameConversation,
@@ -302,6 +311,74 @@
   }
 
   /**
+   * **收进编排库**（2026-11 D255 的动作；D260 从卡片搬到顶栏，逻辑原样搬过来）。
+   *
+   * 三条行为不变：
+   *   · 成功 ⇒ 直接入库、重拉列表、跳编排编辑页并选中那一条（一次性意图 `wfAgentReturn`）；
+   *   · 同名 ⇒ 先把服务端的 `409 + { code, existing }` 翻译成**确认框**（写明覆盖会换掉什么）；
+   *   · 失败 ⇒ 错误显示在**那张卡片**上（动作在顶栏，人还得能看见是哪条候选、卡在哪）。
+   */
+  async function adoptWorkflow(
+    candidate: WorkflowCandidate,
+    overwrite?: { existingId: string },
+  ): Promise<void> {
+    if (wfAdopting !== '') return
+    wfAdopting = candidate.dir
+    wfAdoptErrors = { ...wfAdoptErrors, [candidate.dir]: '' }
+    try {
+      const out = await api<{ workflow: Workflow }>(
+        `/api/conversations/${encodeURIComponent($activeConversationId ?? '')}/workflow-adopt`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            dir: candidate.dir,
+            ...(overwrite === undefined ? {} : { overwrite: true, existingId: overwrite.existingId }),
+          }),
+        },
+      )
+      // 写动作成功后界面跟着数据走：先重拉列表，再交给页面跳转
+      await loadWorkflows()
+      showToast($t('chat.wfAdopted', { name: out.workflow.name }))
+      wfAgentReturn.set(out.workflow.id)
+      location.hash = '#/workflows'
+    } catch (err) {
+      /*
+       * 同名：**先问人**（用户拍板"如果有同名，要提示是否覆盖"）。
+       * 服务端只回 `409 + { code, existing }`；这里读**结构化的错误体**
+       * （`ApiError.body`），不 parse 错误文案——文案是给人看的，会改。
+       */
+      const body =
+        err instanceof ApiError && err.status === 409
+          ? (err.body as { code?: unknown; existing?: { id?: unknown; name?: unknown } } | null)
+          : null
+      if (body?.code === 'workflow_name_taken' && typeof body.existing?.id === 'string') {
+        const existingId = body.existing.id
+        const ok = await askConfirm({
+          title: $t('chat.wfOverwriteTitle', { name: candidate.name }),
+          message: $t('chat.wfOverwriteBody', {
+            name: candidate.name,
+            n: String(candidate.agents.length),
+          }),
+          confirmLabel: $t('chat.wfOverwriteConfirm'),
+          danger: true,
+        })
+        if (ok) {
+          wfAdopting = ''
+          await adoptWorkflow(candidate, { existingId })
+          return
+        }
+        return
+      }
+      wfAdoptErrors = {
+        ...wfAdoptErrors,
+        [candidate.dir]: err instanceof Error ? err.message : String(err),
+      }
+    } finally {
+      wfAdopting = ''
+    }
+  }
+
+  /**
    * 打开「整理成记忆」。
    *
    * ★ 分批第 243 批：这一页**不再自己拼候选**。整理的内容由一条分析 run 产出
@@ -330,6 +407,25 @@
   )
 
   $: detail = $chatDetail
+  /**
+   * ★ 2026-11（D260）：**「收进编排库」在顶栏**（使用者："要放在顶栏，默认置灰，
+   *   有检查到生成才可以用"）。
+   *
+   * 这页的动作是登记制（`setPageActions`），所以候选一变，这条登记会跟着重算：
+   *   · 没有候选 ⇒ 那颗按钮**在、但置灰**（不拿掉——位置不动、语义明确，D214）；
+   *   · 有候选但体检不过（`error` 级问题）⇒ 同样置灰（收了也会被服务端拒，卡片上写着原因）；
+   *   · 可以收 ⇒ 点它 = 收**最新那条**（候选按新到旧排，卡片第一张就是它）。
+   */
+  $: wfCandidates = detail?.workflowCandidates ?? []
+  $: wfAdoptTarget = (() => {
+    const newest = wfCandidates[0]
+    if (newest === undefined) return null
+    return newest.problems.some((p) => p.level === 'error') ? null : newest
+  })()
+  /** 正在收的那条候选（`dir`；空串 = 没有在收）。 */
+  let wfAdopting = ''
+  /** 收失败时那一行错（键 = `dir`，卡片上原样显示）。 */
+  let wfAdoptErrors: Record<string, string> = {}
   $: activeTurns = detail?.turns ?? []
   $: activeConversation = detail?.conversation ?? null
   $: liveTurn = activeTurns.find((turn) => turn.runId === $chatLiveRunId) ?? null
@@ -550,6 +646,25 @@
       icon: 'plus' as const,
       disabled: drafting,
       onActivate: startDrafting,
+    },
+    /**
+     * ★ 2026-11（D260）：**「收进编排库」**。
+     *
+     * 它原来长在候选卡片上（消息流里的一段）——但入库是**这一页的一次完整动作**
+     * （牵着重拉 + 整页跳转），而且卡片会随后续对话被挤上去。顶栏那一排才是它的层级。
+     *
+     * 默认置灰、有候选且体检通过才可点；正文与同名确认都在这条登记的闭包里。
+     */
+    {
+      id: 'adopt-workflow',
+      label: $t('chat.wfAdopt'),
+      // ⚠️ **secondary**：ui-style §2.1.1「一屏里只该有一处实心色块」——这一页的主线动作
+      //   是「新对话」，再给第二颗 primary 就把那条规矩破了。
+      kind: 'secondary' as const,
+      disabled: wfAdoptTarget === null || wfAdopting !== '',
+      onActivate: () => {
+        if (wfAdoptTarget !== null) void adoptWorkflow(wfAdoptTarget)
+      },
     },
     /**
      * ★ 分批第 262 批（使用者："把『整理成记忆』的按钮移动到『沉淀技能』的左侧"）：
@@ -1463,16 +1578,9 @@
           />
         {/if}
 
-        {#if detail?.workflowCandidates && detail.workflowCandidates.length > 0}
-          <ChatWorkflowCandidates
-            conversationId={$activeConversationId ?? ''}
-            candidates={detail.workflowCandidates}
-            onadopted={(w) => {
-              // 一次性意图：编排页挂载时拿它选中刚收进来的那条（与"从编辑页返回"同一个机制）
-              wfAgentReturn.set(w.id)
-              location.hash = '#/workflows'
-            }}
-          />
+        <!-- ★ D260：卡片只管"它写成了什么"；动作在顶栏（`page-actions` 的 adopt-workflow） -->
+        {#if wfCandidates.length > 0}
+          <ChatWorkflowCandidates candidates={wfCandidates} errorByDir={wfAdoptErrors} />
         {/if}
         {/if}
       {/snippet}
