@@ -26,7 +26,7 @@
   import { showToast } from '../lib/view.ts'
   import { workflows } from '../lib/stores.ts'
   import PromptField from './PromptField.svelte'
-  import AgentDirSection from './AgentDirSection.svelte'
+  import DirSection from './DirSection.svelte'
   import ChatMemoryTidy from './ChatMemoryTidy.svelte'
   import {
     USER_ENTRY_CHOICES,
@@ -1988,15 +1988,15 @@
         <!--
           ★ D252（使用者："那个『目录』独独的在框外面，总觉得不好看，是否可以放框里面，
           框的最下面，用一个横线隔开上面的内容。另外，也注意字体"）：**「目录」是卡片里的
-          最后一格**——整行宽 + `border-top` 横线（`.cell.dir-cell` 在 `AgentDirSection`
+          最后一格**——整行宽 + `border-top` 横线（`.cell.dir-cell` 在 `DirSection`
           里定义，与「记忆」那一格同一套长相），不再是卡片外面的 `.fold-section`。
           新建态同样在卡片里，只是置灰（"创建后才能编辑这里面的文件"）。
           独有技能就是 `<智能体目录>/skills/<名字>/SKILL.md`，所以这里也是"独有技能写入口"的落点。
         -->
         {#if isNew}
-          <AgentDirSection base={null} disabled />
+          <DirSection base={null} disabled />
         {:else if dirBase}
-          <AgentDirSection base={dirBase} />
+          <DirSection base={dirBase} />
         {/if}
 
         <!--

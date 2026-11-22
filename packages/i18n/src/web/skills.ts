@@ -34,6 +34,10 @@ export const skillsText = {
    * 现在页面**直接从面板头开始**（「已安装的技能 · N 个」，D219 加的那行头），
    *   那行头已经说清"这块是什么"。词条没人用就一起删，不留死接口。 */
   'skills.install': { zh: '安装技能', en: 'Install skill' },
+  'skills.dirHint': {
+    zh: '这个技能的文件（SKILL.md 与附带的材料）——点文件名就能改，保存写回磁盘',
+    en: 'This skill’s files (SKILL.md and its support files); open one to edit and save',
+  },
   /*
    * ★ 2026-10：安装面板从右侧抽屉改成主区的就地面板，于是需要一句"怎么回去"。
    *   它**必须一直可见**（面板把列表换掉了）——与任务页/智能体页的「← …列表」

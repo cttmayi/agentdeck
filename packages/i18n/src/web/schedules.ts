@@ -89,6 +89,10 @@ export const schedulesText = {
   'schedules.summaryExecutor': { zh: '执行者 {executor}', en: 'Runs {executor}' },
   'schedules.save': { zh: '保存', en: 'Save' },
   'schedules.saveNothing': { zh: '没有改动', en: 'Nothing to save' },
+  'schedules.dirHint': {
+    zh: '这条定时任务的文件（schedule.json / task.md / 触发记录）——点文件名就能改，保存写回磁盘',
+    en: 'This schedule’s files (schedule.json, task.md, run records); open one to edit and save',
+  },
   // 2026-11（使用者要求）：编辑后立刻测试任务执行
   'schedules.saveAndTrigger': { zh: '保存并立即触发', en: 'Save & run now' },
   'schedules.savedAndTriggeredToast': { zh: '已保存，并立即触发了一次', en: 'Saved, and triggered a run now' },

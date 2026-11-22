@@ -1378,8 +1378,8 @@
                */
               // ★ D248：名字回到卡片第一格 ⇒ 它也是"两边都该有"的骨架之一
               nameCell: d().querySelector('.card.agent-card [data-agent-name]') !== null,
-              // ★ D248：「目录」一节也在两边（同一个 `AgentDirSection`）
-              dirSection: d().querySelector('[data-agent-dir]') !== null,
+              // ★ D248：「目录」一节也在两边（同一个 `DirSection`）
+              dirSection: d().querySelector('[data-dir]') !== null,
               entriesCell: entriesBox !== null,
               cli: d().querySelector('#agent-runtime') !== null,
               instructions: d().querySelector('#agent-instructions') !== null,
@@ -3333,6 +3333,25 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             facts['skills.historyAbsentOnInstalled'] = ![
               ...(installCell?.querySelectorAll('button, summary') ?? []),
             ].some((b) => (text(b) ?? '').includes('历史（git）'))
+            /*
+             * ★ D253（使用者："把其他几个入口都加上"）：**技能也有自己的目录**——
+             * 展开某一行之后，正文底部有「目录」一节（`DirSection`，默认收起、可展开）。
+             * 与智能体 / 编排 / 定时任务同一个组件，所以判据只看"在不在、可不可展开"。
+             */
+            const skillDirBtn = installCell?.querySelector('[data-dir] .dir-head') ?? null
+            let skillDirRows = 0
+            if (skillDirBtn && skillDirBtn.disabled === false) {
+              click(skillDirBtn)
+              // 展开后要**真的取到文件**——不然"点得开、列表空/404"也能算绿
+              await until(() => (installCell?.querySelectorAll('[data-dir] .wd li').length ?? 0) > 0, 60)
+              skillDirRows = installCell?.querySelectorAll('[data-dir] .wd li').length ?? 0
+            }
+            facts['skills.dirSection'] = {
+              有目录一节: skillDirBtn !== null,
+              可展开: skillDirBtn?.disabled === false,
+              在展开的正文里: skillDirBtn !== null,
+              展开后有文件: skillDirRows > 0,
+            }
           }
         }
 
@@ -4243,9 +4262,23 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             await wait(250)
             const acts = () => [...d().querySelectorAll('.detail-pane .detail-actions button')]
             const byText = (t2) => acts().find((b) => text(b) === t2)
+            const dirBtn = d().querySelector('.detail-pane [data-dir] .dir-head')
+            // 点开目录，等真的列出文件（`schedule:<id>` scope 的后端解析要被量到）
+            let schedDirFiles = 0
+            if (dirBtn && dirBtn.disabled === false) {
+              click(dirBtn)
+              await until(
+                () => (d().querySelectorAll('.detail-pane [data-dir] .wd li').length ?? 0) > 0,
+                60,
+              )
+              schedDirFiles = d().querySelectorAll('.detail-pane [data-dir] .wd li').length
+            }
             const out = {
               有取消: !!byText('取消'),
               有删除: !!byText('删除'),
+              编辑态有目录: dirBtn !== null,
+              编辑态目录可展开: dirBtn?.disabled === false,
+              编辑态目录有文件: schedDirFiles > 0,
               保存初始置灰: byText('保存')?.disabled === true,
               改了之后可用: null,
               新建态没有删除: null,
@@ -4274,6 +4307,9 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               out.新建态没有删除 = ![...d().querySelectorAll('.detail-pane .detail-actions button')].some(
                 (b) => text(b) === '删除',
               )
+              // ★ D253：新建态的目录一节**在、但置灰**（与智能体新建页同一条规矩）
+              const newDirBtn = d().querySelector('.detail-pane [data-dir] .dir-head')
+              out.新建态目录置灰 = newDirBtn !== null && newDirBtn.disabled === true
               const c2 = [...d().querySelectorAll('.detail-pane button')].find((b) => text(b) === '取消')
               if (c2) click(c2)
               await until(() => !d().querySelector('.detail-pane .freq-picker'))
@@ -4701,6 +4737,8 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           )
           const shell = d().querySelector('.split-layout')
           const tplBtns = d().querySelectorAll('.detail-pane .wf-tpl-row button').length
+          // ★ D253：新建态的「目录」一节**在、但置灰**（编排还没建出来，没有目录可看）
+          const dirBtnNew = d().querySelector('.detail-pane [data-dir] .dir-head')
           // 收尾：返回列表（否则后面的行结构会量在"新建"那屏上）
           const back = d().querySelector('.detail-pane .back-to-list')
           if (back && getComputedStyle(back).display !== 'none') click(back)
@@ -4714,6 +4752,9 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             codeInput: !!d().querySelector('.detail-pane textarea#wf-code'),
             withDetail: !!shell && shell.className.includes('with-detail'),
             templates: tplBtns,
+            // ★ D253：新建态的「目录」一节**在、但置灰**（编排还没建出来，没有目录可看）
+            有目录一节: dirBtnNew !== null,
+            目录置灰: dirBtnNew?.disabled === true,
           }
         })()
 
@@ -4819,6 +4860,15 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           const saveBtn = [...d().querySelectorAll('.detail-pane .detail-actions button')].find(
             (b) => (text(b) ?? '').trim() === '保存',
           )
+          // ★ D253：每类实体都能打开自己的目录（编排 / 定时任务 / 技能共用 DirSection）
+          const dirBtn = d().querySelector('.detail-pane [data-dir] .dir-head')
+          // 点开它，等真的列出文件（`workflow:<id>` scope 的后端解析要被量到，不能只看按钮在）
+          let dirFiles = 0
+          if (dirBtn && dirBtn.disabled === false) {
+            click(dirBtn)
+            await until(() => (d().querySelectorAll('.detail-pane [data-dir] .wd li').length ?? 0) > 0, 60)
+            dirFiles = d().querySelectorAll('.detail-pane [data-dir] .wd li').length
+          }
           return {
             withDetail: !!shell && shell.className.includes('with-detail'),
             有代码: (area?.value ?? '').length > 0,
@@ -4826,6 +4876,9 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             名字格有值: (nameInput?.value ?? '') !== '',
             有取消: labels.includes('取消'),
             保存初始置灰: saveBtn?.disabled === true,
+            有目录一节: dirBtn !== null,
+            目录可展开: dirBtn?.disabled === false,
+            目录展开了文件: dirFiles,
             动作: labels,
           }
         })()
@@ -4928,11 +4981,11 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             没有改名入口: pane?.querySelector('[data-agent-rename]') === null,
             /*
              * ★ D248：「目录」一节两页都在（编辑页可用、新建页置灰），
-             *   由共用的 `AgentDirSection` 渲染 ⇒ 两页 `[data-agent-dir]` 各一份。
+             *   由共用的 `DirSection` 渲染 ⇒ 两页 `[data-dir]` 各一份。
              */
-            有目录一节: !!pane?.querySelector('[data-agent-dir]'),
+            有目录一节: !!pane?.querySelector('[data-dir]'),
             目录可用: (() => {
-              const b = pane?.querySelector('[data-agent-dir] button')
+              const b = pane?.querySelector('[data-dir] button')
               return b === null || b === undefined ? null : b.disabled !== true
             })(),
             /*
@@ -4940,10 +4993,10 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
              *   不是卡片外面的折叠段。使用者原话："那个『目录』独独的在框外面，
              *   总觉得不好看，是否可以放框里面，框的最下面，用一个横线隔开上面的内容"。
              */
-            目录在卡片里: !!pane?.querySelector('.card.agent-card [data-agent-dir]'),
+            目录在卡片里: !!pane?.querySelector('.card.agent-card [data-dir]'),
             目录是整行宽: (() => {
               const card = pane?.querySelector('.card.agent-card')
-              const dir = card?.querySelector('[data-agent-dir]')
+              const dir = card?.querySelector('[data-dir]')
               if (!card || !dir) return null
               const c = card.getBoundingClientRect()
               const d2 = dir.getBoundingClientRect()
@@ -4954,13 +5007,13 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               return d2.width >= inner - 2 && !!c
             })(),
             目录上面有横线: (() => {
-              const dir = pane?.querySelector('.card.agent-card [data-agent-dir]')
+              const dir = pane?.querySelector('.card.agent-card [data-dir]')
               if (!dir) return null
               const cs = getComputedStyle(dir)
               return cs.borderTopWidth !== '0px' && cs.borderTopStyle !== 'none'
             })(),
             目录标签字号: (() => {
-              const el = pane?.querySelector('.card.agent-card [data-agent-dir] .cell-label')
+              const el = pane?.querySelector('.card.agent-card [data-dir] .cell-label')
               return el ? getComputedStyle(el).fontSize : null
             })(),
             /*
@@ -5104,9 +5157,9 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             独有技能在: !!pane.querySelector('.agent-card [data-exclusive-skills]'),
             独有技能锁定: !!pane.querySelector('.agent-card [data-exclusive-locked]'),
             // 目录一节：整节置灰（标题在、点不开）
-            有目录一节: !!pane.querySelector('[data-agent-dir]'),
+            有目录一节: !!pane.querySelector('[data-dir]'),
             目录一节禁用: (() => {
-              const b = pane.querySelector('[data-agent-dir] button')
+              const b = pane.querySelector('[data-dir] button')
               return b === null ? null : b.disabled === true
             })(),
           }

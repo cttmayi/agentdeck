@@ -20,6 +20,7 @@
   import { t, tx } from '../lib/i18n.ts'
   import { Table, SourceRef, ExpandToggle } from '@agentdeck/ui/components'
   import SkillHistory from '../components/SkillHistory.svelte'
+  import DirSection from '../components/DirSection.svelte'
   import {
     InstallError,
     describeInstallMessages,
@@ -1270,6 +1271,15 @@
                 {#if s.source === 'mine'}
                   <SkillHistory skill={{ id: s.id, name: s.name, source: s.source }} />
                 {/if}
+                <!--
+                  ★ D253（使用者："把其他几个入口都加上"）：**「目录」一节**——技能也住在一个
+                  目录里（提炼的在 `skills-mine/<名字>/`、安装的在 `skills/<名字>/`，含
+                  `SKILL.md` 与附带的材料）。与智能体编辑页同一个组件 `DirSection`：
+                  默认收起、点文件名进 `FileViewer` 的原文面改、保存写回磁盘。
+                  ⚠️ 目录由**后端按这条技能的 `source` 解析**（`skill:<名字>` scope）——
+                    两个根都可能有同名技能，前端不猜、也不传路径。
+                -->
+                <DirSection base={`/api/fs/skill:${s.name}`} hint={$t('skills.dirHint')} />
                 {#if fileCount > 0}
                   <details class="support">
                     <summary>{$t('skills.supportFiles', { count: fileCount })}</summary>

@@ -22,6 +22,7 @@ import type { WebTextId } from '@agentdeck/i18n'
   import { relativeTime } from '../lib/time.ts'
   import { paneResize } from '../lib/pane-resize.ts'
   import DirPicker from '../components/DirPicker.svelte'
+  import DirSection from '../components/DirSection.svelte'
   import {
     defaultScheduleForm,
     isWorkdays,
@@ -1022,6 +1023,21 @@ import type { WebTextId } from '@agentdeck/i18n'
           {/if}
         </div>
     {/if}
+
+      <!--
+        ★ D253（使用者："把其他几个入口都加上"）：**「目录」一节**——定时任务也住在一个
+        目录里（`schedules/<id>/`：`schedule.json` + `task.md` + `records.jsonl`），
+        与智能体编辑页同一个组件 `DirSection`（默认收起、点文件名进 `FileViewer` 的原文面，
+        保存写回磁盘）。位置照 D252：主内容之后；表单态（新建/编辑）也带上——
+        新建态置灰（"创建后才能编辑这里面的文件"）。
+      -->
+      {#if $schedForm !== null && $schedForm.mode === 'create'}
+        <DirSection base={null} disabled hint={$t('schedules.dirHint')} />
+      {:else if editRow !== null}
+        <DirSection base={`/api/fs/schedule:${editRow.id}`} hint={$t('schedules.dirHint')} />
+      {:else if selected !== null}
+        <DirSection base={`/api/fs/schedule:${selected.id}`} hint={$t('schedules.dirHint')} />
+      {/if}
     {/snippet}
   </MainArea>
 

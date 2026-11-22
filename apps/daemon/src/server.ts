@@ -2906,6 +2906,17 @@ async function injectedSkillsOf(
           const hit = (wf?.inlineAgents ?? []).find((a) => a.id === aid)
           return hit ? { dirName: slugForAgentName(hit.name) } : null
         },
+        /*
+         * ★ D253：技能的目录按**这条技能自己的 source** 解析——提炼的在 `skills-mine/`、
+         *   安装的在 `skills/`。两个根都可能出现同名技能，所以不能"哪个存在用哪个"
+         *   （那会把使用者带到另一条技能的目录去改）。名字找不到就是 null（如实 404）。
+         */
+        skillDirOf: async (name) => {
+          const all = await store.listSkills(workspaceId)
+          const hit = all.find((x) => String(x.name) === name)
+          if (!hit) return null
+          return hit.source === 'mine' ? join(skillsMineRoot, name) : join(skillsRoot, name)
+        },
       })
       if (dir === null) {
         sendJson(res, 404, { error: '这个 scope 指向的东西不存在', code: 'scope_not_found' })

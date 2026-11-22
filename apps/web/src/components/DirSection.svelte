@@ -1,6 +1,8 @@
 <script lang="ts">
   /**
-   * **「目录」一节**（2026-11，D248）——智能体新建页与编辑页共用的一份。
+   * **「目录」一节**（2026-11，D248 起；D253 扩到编排 / 定时任务 / 技能）——每个
+   * "住在一个目录里"的实体共用的一份：智能体（`agent:<id>` / `wf-agent:<wid>/<aid>`）、
+   * 编排（`workflow:<id>`）、定时任务（`schedule:<id>`）、技能（`skill:<名字>`）。
    *
    * 来历：D245 先给编排内建智能体的编辑页做了"默认收起的一节目录树"
    * （使用者："可以作为某种高级默认隐藏目录显示，而不是有一个打开目录的按钮"）。
@@ -40,7 +42,7 @@
   $: shownHint = disabled ? $t('agents.dirAfterCreate') : hint === '' ? $t('agents.dirHint') : hint
 </script>
 
-<div class="cell dir-cell" data-agent-dir data-dir-disabled={disabled}>
+<div class="cell dir-cell" data-dir data-dir-disabled={disabled}>
   <button
     type="button"
     class="dir-head"

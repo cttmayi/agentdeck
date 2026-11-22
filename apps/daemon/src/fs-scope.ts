@@ -12,13 +12,25 @@ import { workflowsRoot } from './workflows-dirs.ts'
  *   agent:<id>          → agents/<目录名>/
  *   workflow:<id>       → workflows/<id>/
  *   wf-agent:<wid>/<aid>→ workflows/<wid>/agents/<名字>/
- *   skill:<名字>        → <skillsRoot>/<名字>/
+ *   schedule:<id>       → schedules/<id>/          （D253）
+ *   skill:<名字>        → <该技能自己的目录>       （D253：提炼的在 `skills-mine/`、安装的在 `skills/`，
+ *                                                    由调用方按技能的 `source` 解析，不在这里猜）
  *   run:<id> / conversation:<id> 由各自路由保持原样（工作目录，别的东西算不出来）
  */
-export type FsScope = { kind: 'agent'; agentId: string } | { kind: 'workflow'; workflowId: string } | { kind: 'wf-agent'; workflowId: string; agentId: string } | { kind: 'skill'; name: string }
+export type FsScope =
+  | { kind: 'agent'; agentId: string }
+  | { kind: 'workflow'; workflowId: string }
+  | { kind: 'wf-agent'; workflowId: string; agentId: string }
+  | { kind: 'schedule'; scheduleId: string }
+  | { kind: 'skill'; name: string }
+
+/** id 形态检查（通用）：只允许字母数字与 `-`/`_`，长度 1–64——目录名拼进去之前先挡一道。 */
+function isPlainId(s: string): boolean {
+  return /^[0-9A-Za-z_-]{1,64}$/.test(s)
+}
 
 export function parseScope(raw: string): FsScope | null {
-  const m = /^(agent|workflow|wf-agent|skill):(.+)$/.exec(raw)
+  const m = /^(agent|workflow|wf-agent|schedule|skill):(.+)$/.exec(raw)
   if (!m) return null
   const kind = m[1]!
   const rest = m[2]!
@@ -26,6 +38,7 @@ export function parseScope(raw: string): FsScope | null {
     if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(rest)) return null
     return { kind: 'skill', name: rest }
   }
+  if (kind === 'schedule') return isPlainId(rest) ? { kind: 'schedule', scheduleId: rest } : null
   const parts = rest.split('/')
   if (kind === 'agent') return parts.length === 1 ? { kind: 'agent', agentId: parts[0]! } : null
   if (kind === 'workflow') return parts.length === 1 ? { kind: 'workflow', workflowId: parts[0]! } : null
@@ -39,9 +52,20 @@ export async function dirOfScope(
     skillsRoot: string
     agentDirNameOf: (id: string) => Promise<string | null>
     workflowAgent: (wid: string, aid: string) => Promise<{ dirName: string } | null>
+    /**
+     * ★ D253：技能目录**按技能自己的 source 解析**（提炼的在 `skills-mine/`、安装的在
+     *   `skills/`）。没给这一项时退回 `skillsRoot/<名字>`（老调用点 / 测试）。
+     *   ⚠️ 不要在这里"猜两个根、哪个存在用哪个"：两个根都可能有同名技能（提炼一份、
+     *      又装一份），猜会把使用者带到**另一条**技能的目录去改。
+     */
+    skillDirOf?: (name: string) => Promise<string | null>
   },
 ): Promise<string | null> {
-  if (scope.kind === 'skill') return join(deps.skillsRoot, scope.name)
+  if (scope.kind === 'skill') {
+    if (deps.skillDirOf) return deps.skillDirOf(scope.name)
+    return join(deps.skillsRoot, scope.name)
+  }
+  if (scope.kind === 'schedule') return join(deps.dataDir, 'schedules', scope.scheduleId)
   if (scope.kind === 'workflow') return join(workflowsRoot(deps.dataDir), scope.workflowId)
   if (scope.kind === 'agent') {
     const dirName = await deps.agentDirNameOf(scope.agentId)

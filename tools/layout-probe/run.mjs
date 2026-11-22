@@ -1976,6 +1976,24 @@ const CHECKS = [
   },
   {
     view: '技能',
+    key: 'skills.dirSection',
+    /**
+     * ★ D253：技能也有自己的「目录」一节（提炼的在 `skills-mine/<名字>/`、安装的在
+     *   `skills/<名字>/`；目录由后端按 `source` 解析，前端不猜路径）。
+     *   判据只看"在展开的正文里、可展开"——三类实体共用同一个组件。
+     */
+    label: '★★ 展开一条技能 ⇒ 正文底部有「目录」一节且可展开（提炼的 / 安装的各在自己目录，D253）',
+    ok: (v) =>
+      !!v &&
+      v['有目录一节'] === true &&
+      v['可展开'] === true &&
+      v['在展开的正文里'] === true &&
+      // 点开**真的取到文件**：证 `skill:<名字>` 这个 scope 能把提炼的 / 安装的目录都解析对
+      v['展开后有文件'] === true,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '技能',
     key: 'skills.backReturnsToList',
     label: '★ 点返回就回到列表（表格回来、面板没了）',
     ok: (v) => v === true,
@@ -2256,7 +2274,13 @@ const CHECKS = [
           v['有删除'] === true &&
           v['保存初始置灰'] === true &&
           v['改了之后可用'] === true &&
-          v['新建态没有删除'] === true)),
+          v['新建态没有删除'] === true &&
+          // ★ D253：编辑态的「目录」可用、新建态的在但置灰（不可用置灰不删）
+          v['编辑态有目录'] === true &&
+          v['编辑态目录可展开'] === true &&
+          // 点开能列出文件（`schedule:<id>` 这条 scope 的后端解析真的通）
+          v['编辑态目录有文件'] === true &&
+          v['新建态目录置灰'] === true)),
     show: (v) => JSON.stringify(v),
   },
   { view: '定时任务（D115）', key: 'schedules.promptEditor',
@@ -2419,8 +2443,17 @@ const CHECKS = [
   {
     view: '编排',
     key: 'workflows.createOpened',
-    label: '★★ 点顶栏「新建」⇒ 右栏塌出表单（名字框 + 代码框 + 从模板那排），`.with-detail` 跟着加上',
-    ok: (v) => !!v && v.nameInput === true && v.codeInput === true && v.withDetail === true && v.templates >= 1,
+    label:
+      '★★ 点顶栏「新建」⇒ 右栏塌出表单（名字框 + 代码框 + 从模板那排），`.with-detail` 跟着加上；'
+      + '「目录」一节在但**置灰**（还没有目录可看，D253）',
+    ok: (v) =>
+      !!v &&
+      v.nameInput === true &&
+      v.codeInput === true &&
+      v.withDetail === true &&
+      v.templates >= 1 &&
+      v['有目录一节'] === true &&
+      v['目录置灰'] === true,
     show: (v) => JSON.stringify(v),
   },
   {
@@ -2469,6 +2502,10 @@ const CHECKS = [
       // ★ D251：与智能体编辑页同一排布与判据——次操作「取消」在、没改动时「保存」置灰
       v['有取消'] === true &&
       v['保存初始置灰'] === true &&
+      // ★ D253：编排也有自己的「目录」一节，而且点开**真的列出文件**（不是空目录/404）
+      v['有目录一节'] === true &&
+      v['目录可展开'] === true &&
+      v['目录展开了文件'] > 0 &&
       ['运行', '删除', '保存'].every((l) => v['动作'].includes(l)),
     show: (v) => JSON.stringify(v),
   },

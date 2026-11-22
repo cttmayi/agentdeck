@@ -57,6 +57,7 @@
   import DirPicker from '../components/DirPicker.svelte'
   import WorkflowRunView from '../components/WorkflowRunView.svelte'
   import WorkflowAgents from '../components/WorkflowAgents.svelte'
+  import DirSection from '../components/DirSection.svelte'
   import WorkflowAgentEditor from '../components/WorkflowAgentEditor.svelte'
   import { relativeTime } from '../lib/time.ts'
 
@@ -526,6 +527,19 @@
               globalNames={new Set($agents.map((a) => a.name))}
               onedit={(agentId) => editAgent(selected.id, agentId)}
             />
+          {/if}
+
+          <!--
+            ★ D253（使用者："把其他几个入口都加上"）：**「目录」一节**——编排本身也是一个
+            目录（`workflows/<id>/`：`workflow.json` + `agents/`），与智能体编辑页同一个
+            组件 `DirSection`（默认收起、点文件名进 `FileViewer` 的原文面改、保存写回）。
+            位置照 D252：**主内容之后**（代码编辑器与内建智能体列表之后）。
+            新建态同样在、置灰（编排还没建出来，没有目录可看）。
+          -->
+          {#if creating}
+            <DirSection base={null} disabled hint={$t('workflows.dirHint')} />
+          {:else if selected}
+            <DirSection base={`/api/fs/workflow:${selected.id}`} hint={$t('workflows.dirHint')} />
           {/if}
 
           <!--

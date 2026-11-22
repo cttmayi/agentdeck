@@ -79,6 +79,10 @@ export const workflowsText = {
   },
   'workflows.nameLabel': { zh: '名字', en: 'Name' },
   'workflows.saveNothing': { zh: '没有改动', en: 'Nothing to save' },
+  'workflows.dirHint': {
+    zh: '这个编排的文件（workflow.json 与它的内建智能体目录）——点文件名就能改，保存写回磁盘',
+    en: 'This workflow’s files (workflow.json and its inline agents); open one to edit and save',
+  },
   'workflows.nameRequired': { zh: '先给编排起个名字', en: 'Give the workflow a name first' },
   'workflows.codeRequired': { zh: '编排代码不能为空', en: 'Workflow code cannot be empty' },
   'workflows.namePlaceholder': { zh: '如：日报流水线', en: 'e.g. Daily pipeline' },
