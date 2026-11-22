@@ -1,14 +1,17 @@
 # 智能体写法（material/agent）
 
-> 给「智能体生成者」。**这一包本轮只落骨架**——内容在接智能体生成者那一版时补齐（见
-> `docs/design/workflow-auto-gen.md` §6、§9）。现在它只做两件事：让工作目录里的
-> `material/` 结构完整（人类/agent 都不会以为"漏了"），以及钉住"资料在这里维护"这条规矩。
+给「智能体生成者」。**先读本页，再读 `shape.md` 与 `norms.md`。**
 
-| 文件 | 状态 | 讲什么 |
-|---|---|---|
-| `shape.md` | 待补 | `agents/<名字>/` 的存储形状：`agent.json` 字段、`instructions.md`、`skills/` |
-| `norms.md` | 待补 | 岗位卡写法：目标 / **边界段（必填）** / 交付物 / 判定口径 |
+| 文件 | 什么时候读 |
+|---|---|
+| `shape.md` | 动笔前：产物要写成**存储的形状**（`agent-draft/<岗位名>/` 与 `agents/<名字>/` 同构） |
+| `norms.md` | 写岗位卡时：五字段、边界清单（必含）、配套技能判定、指令一段组装 |
+| `examples/会议纪要助理/instructions.md` | 想不出该长什么样时照它改（一份合格的指令） |
+| `examples/会议纪要助理/skills/纪要格式/SKILL.md` | 一份合格的配套技能 |
 
-现有的规则来源（接的时候从这里搬，不另写）：
-`catalog/platform-skills/agent-design-norms/SKILL.md`、`catalog/platform-skills/boundary-checklist/SKILL.md`、
-`docs/design/storage-layout.md`（§3 智能体目录形状）。
+版本：见 `api-version.json`（= 智能体与技能的形状版本）。**这一份是平台每次对话前覆盖写入
+工作目录的**，改的是仓库里的 `docs/material/agent/`——你手上这份永远是当前版本。
+
+⚠️ 两条最容易犯的错（都是"看起来合理、落库才发现不行"）：
+1. **指令只有一段**：智能体只有一个 `instructions.md`，没有第二处注入位（D29）。不要写"另见 xxx.md"。
+2. **配套技能是可选的**：这个岗位没有值得抽的做法就是 **0 条**，不要为了凑数写一份空壳技能。

@@ -1507,23 +1507,41 @@ const CHECKS = [
   },
   {
     view: '聊天',
-    key: 'chat.agentMakerButtonHidden',
-    label: '★ 2026-11（D109）：没有 agent-draft.md 的对话，「确认生成智能体」按钮不出现（条件出现，不置灰）',
+    key: 'chat.agentCandidateAbsent',
+    label: '★ D256：没有候选目录的对话**不出现**候选智能体卡片（条件出现，不置灰）',
     ok: (v) => v === true,
   },
   {
     view: '聊天',
-    key: 'chat.agentMakerButtonShows',
-    label: '★ 2026-11（D109）：agent-draft/ 目录有 agent-draft.md 的对话，栏头出现「确认生成智能体」按钮',
-    ok: (v) => v === true,
-  },
-  {
-    view: '聊天',
-    key: 'chat.agentMakerPanelTwoParts',
+    key: 'chat.agentCandidateCard',
     label:
-      '★ 2026-11（D109）：审阅面板两段渲染（岗位卡：岗位名 + 指令，**没有**角色下拉——' +
-      'S4/D127 角色退场；+ 配套技能 meeting-notes-format + 「未经验证」提示）',
-    ok: (v) => v === true,
+      '★★★ 智能体生成者把候选**写成存储的形状**（agent-draft/<岗位名>/）之后，聊天里出现候选卡片：'
+      + '岗位名（中文）/ 配套技能与指令字数、没有错、可生成；工作目录里同时有平台写的 material/（写法资料）',
+    ok: (v) =>
+      !!v &&
+      v['卡片在'] === true &&
+      String(v['标题']).includes('会议纪要助理') &&
+      String(v['元信息']).includes('meeting-notes-format') &&
+      v['没有报错'] === true &&
+      v['生成可点'] === true &&
+      v['有打开目录'] === true &&
+      (v['工作目录顶层'] ?? []).includes('material') &&
+      (v['工作目录顶层'] ?? []).includes('agent-draft'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '聊天',
+    key: 'chat.agentAdopt',
+    label:
+      '★★★ 点「生成智能体」⇒ 直接落库（智能体 + 配套技能落成它的独有技能）并跳到智能体编辑页（选中它）',
+    ok: (v) =>
+      !!v &&
+      v['跳到智能体页'] === true &&
+      String(v['编辑页标题']).includes('会议纪要助理') &&
+      v['落库'] === true &&
+      (v['独有技能'] ?? []).includes('meeting-notes-format') &&
+      v['指令带边界'] === true,
+    show: (v) => JSON.stringify(v),
   },
   // ── 编排生成者（D255）：卡片 + 收进编排库（产物是"存储的形状"，仍要人按那一下）──
   {
@@ -6865,18 +6883,22 @@ function writeFakeGenericCli() {
       //   （1800s）——不然跑到沉淀那一节时它已经自己退出了，量到的就是"起草 run 跑完了"，
       //   而那正是这一批要量的那一屏的**反例**。
       `  *${PROBE_DRAFT_MARKER}*) printf '{"type":"text","text":"${PROBE_STUB_DRAFT_LINE}"}\n'; sleep 1800 ;;`,
-      // ★ 2026-11（D109 智能体生成者）：带生成者记号 ⇒ 把岗位卡与配套技能草稿写进
-      //   `$PWD`（chat 对话的 cwd = 工作目录），再正常收尾。写文件用 heredoc：
-      //   引号带 `EOF`，`$` 不会展开（正文里有 `$` 会炸——内容里没有）。
+      // ★ D256 智能体生成者：带生成者记号 ⇒ 把**候选智能体写成存储的形状**
+      //   （`$PWD/agent-draft/<岗位名>/`：agent.json + instructions.md + skills/…），
+      //   与真机生成者做的事同构（heredoc 引号带 EOF ⇒ `$` 不展开）。
+      //   ⚠️ 岗位名用中文、配套技能名用 kebab-case——这两条正是校验要钉的。
       `  *${PROBE_MAKER_MARKER}*)`,
-      `    mkdir -p "$PWD/agent-draft/skill/meeting-notes-format"`,
-      `    cat > "$PWD/agent-draft/agent-draft.md" <<'PROBE_MAKER_EOF'`,
-      PROBE_MAKER_DRAFT_MD,
+      `    mkdir -p "$PWD/agent-draft/会议纪要助理/skills/meeting-notes-format"`,
+      `    cat > "$PWD/agent-draft/会议纪要助理/agent.json" <<'PROBE_MAKER_EOF'`,
+      PROBE_AGENT_JSON,
       'PROBE_MAKER_EOF',
-      `    cat > "$PWD/agent-draft/skill/meeting-notes-format/SKILL.md" <<'PROBE_MAKER_EOF'`,
-      PROBE_MAKER_SKILL_MD,
+      `    cat > "$PWD/agent-draft/会议纪要助理/instructions.md" <<'PROBE_MAKER_EOF'`,
+      PROBE_AGENT_INSTRUCTIONS,
       'PROBE_MAKER_EOF',
-      `    printf '{"type":"text","text":"岗位卡已写入 agent-draft.md。"}\\n'`,
+      `    cat > "$PWD/agent-draft/会议纪要助理/skills/meeting-notes-format/SKILL.md" <<'PROBE_MAKER_EOF'`,
+      PROBE_AGENT_SKILL_MD,
+      'PROBE_MAKER_EOF',
+      `    printf '{"type":"text","text":"候选智能体写好了：agent-draft/会议纪要助理/。"}\\n'`,
       '    exit 0 ;;',
       // ★ D255 编排生成者：带编排记号 ⇒ 把**候选编排写成存储的形状**
       //   （`$PWD/workflow-draft/<编排名>/`：workflow.json + main.js + agents/…），
@@ -6925,38 +6947,36 @@ const PROBE_DRAFT_MARKER = 'PROBE-STUB-DRAFT-ONLY'
  * 探针据此量「确认生成智能体」按钮与审阅面板两段渲染。
  */
 const PROBE_MAKER_MARKER = 'PROBE-MAKER-DRAFT'
-const PROBE_MAKER_DRAFT_MD = [
-  '---',
-  'name: 会议纪要助理',
-  '---',
+const PROBE_AGENT_JSON = '{"name":"会议纪要助理","runtimeKey":"default"}'
+const PROBE_AGENT_INSTRUCTIONS = [
   '你是会议纪要助理。',
   '',
   '## 目标',
-  '把转写变成一页纪要。',
+  '把会议原始记录整理成一份人能直接用的纪要。',
   '',
   '## 职责',
-  '转写、提炼、分节。',
+  '- 归纳结论（三句以内）。',
+  '- 抽出待办：谁、做什么、什么时候。',
   '',
   '## 边界（不能碰）',
-  '不替参会人做决定；只在工作目录写。',
+  '- 不替任何人对时间节点做承诺，拿不准写"待确认"。',
+  '- 只在工作目录里读写文件。',
   '',
   '## 输出格式',
-  'decisions / owners / deadlines 三段。',
+  '结论 / 待办 / 未决 三段。',
   '',
+  '## 验收标准',
+  '- 每条待办都有负责人与期限。',
 ].join('\n')
-const PROBE_MAKER_SKILL_MD = [
+const PROBE_AGENT_SKILL_MD = [
   '---',
-  'name: 会议纪要格式',
-  'description: decisions/owners/deadlines 三段的会议纪要格式',
+  'name: meeting-notes-format',
+  'description: 会议纪要的固定形状：结论三句以内、待办带人+期限、未决问题单列（探针夹具）',
   '---',
-  '## When to Use',
-  '把转写变成纪要时。',
   '',
-  '## Procedure',
-  '1. decisions 每行一条',
-  '2. owners 每行一条',
-  '3. deadlines 每行一条',
+  '# 纪要格式',
   '',
+  '按 结论 → 待办 → 未决 三段写；待办写成 `- [ ] 谁：做什么（期限）`。',
 ].join('\n')
 
 /**

@@ -11,7 +11,7 @@
  *   |---|---|---|
  *   | `skill-draft`     | 沉淀起草者   | 沉淀页「开始起草」           |
  *   | `memory-tidy`     | 记忆整理者   | 聊天页「整理记忆」           |
- *   | `agent-commit`    | 智能体生成者 | 聊天页「确认生成智能体」     |
+ *   | `agent-commit`    | 智能体生成者 | 聊天页「生成智能体」         |
  *   | `workflow-commit` | 编排生成者   | 聊天页「收进编排库」         |
  *
  * 写下来之前，这些事实**散在四个 handler 里**：谁读哪个目录、把产出写在哪、
@@ -41,7 +41,7 @@
  */
 
 import type { BuiltinKind } from './builtin-drafter.ts'
-import { AGENT_DRAFT_DIR, AGENT_DRAFT_FILE } from './agent-maker.ts'
+import { AGENT_DRAFT_DIR } from './agent-maker.ts'
 import { WORKFLOW_DRAFT_DIR } from './workflow-maker.ts'
 
 /* ══════════════════════════════════════════════════════════════════
@@ -171,16 +171,18 @@ export const PLATFORM_ACTIONS: readonly PlatformAction[] = [
   {
     id: 'agent-commit',
     member: 'agent-maker',
-    startFrom: { page: 'chat', where: '「确认生成智能体」' },
-    material: [],
-    produce: { dir: AGENT_DRAFT_DIR, file: AGENT_DRAFT_FILE },
+    startFrom: { page: 'chat', where: '「生成智能体」' },
+    // ★ D256：素材 = 平台每次对话前覆盖写的「写法资料包」（`material/agent/`）
+    material: ['material/agent'],
+    // 产出 = 一个候选智能体**目录**（`agent-draft/<岗位名>/`：agent.json + instructions.md + skills/…）
+    produce: { dir: AGENT_DRAFT_DIR },
     adopt: {
-      route: '/api/conversations/:id/agent-commit',
+      route: '/api/conversations/:id/agent-adopt',
       steps: [
-        '只有生成者的对话能采纳（别的 agent 摆一份草稿不算"生成"）',
-        '解析岗位卡 frontmatter',
-        '技能校验（与安装同一关）',
-        '建智能体（`owner: user`，入口三项全开）',
+        '只有生成者的对话能入库（别的 agent 摆一份目录不算"生成"）',
+        '候选目录校验（正文非空 / 名字合法 / 配套技能 frontmatter 齐全）',
+        '配套技能与安装同一关（`resolvePayloadEntry`）',
+        '同名智能体不覆盖：409 让人改名或先删旧的',
       ],
     },
   },

@@ -227,6 +227,32 @@ export interface WorkflowCandidateAgent {
   skills: string[]
 }
 
+/** **候选智能体**（D256）：聊天工作目录 `agent-draft/<岗位名>/` 里的那一份 + 预检结果。 */
+export interface AgentCandidateProblem {
+  level: 'error' | 'warn'
+  message: string
+}
+
+export interface AgentCandidateSkillView {
+  name: string
+  description: string
+  body: string
+}
+
+export interface AgentCandidate {
+  /** 子目录名（入库时原样传回）。 */
+  dir: string
+  name: string
+  /** 指令前两行。 */
+  instructionsPreview: string
+  instructionsChars: number
+  runtimeKey: string
+  skills: AgentCandidateSkillView[]
+  problems: AgentCandidateProblem[]
+  /** 绝对路径（"打开目录"用）。 */
+  absDir: string
+}
+
 export interface WorkflowCandidate {
   /** 子目录名（入库时原样传回）。 */
   dir: string

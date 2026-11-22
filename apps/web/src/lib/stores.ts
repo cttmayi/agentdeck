@@ -11,6 +11,7 @@ import {
   type Identity,
   type InboxItem,
   type WorkflowCandidate,
+  type AgentCandidate,
   type Issue,
   type LocalSkillDirsState,
   type RunSummary,
@@ -80,17 +81,16 @@ export interface ChatDetail {
   turns: ChatTurnView[]
   workDir: string | null
   /**
-   * ★ 2026-11 设计定稿（§3.6）：工作目录的 `agent-draft/` 目录里有 `agent-draft.md`
-   * （智能体生成者已
-   *    产出岗位卡）⇒ 聊天页出现「确认生成智能体」按钮。按钮按条件出现，不搞置灰。
-   */
-  hasAgentDraft: boolean
-  /**
    * ★ 2026-11（D255）：聊天工作目录里的**候选编排**（`workflow-draft/<名字>/`）＋ 预检结果。
    * 界面据此画聊天里那张卡（能不能收 / 几个人 / 哪一条不对），点「收进编排库」才入库。
    * 旧的 `hasWorkflowDraft`（草稿 md 在不在）已随之删掉。
    */
   workflowCandidates?: WorkflowCandidate[]
+  /**
+   * ★ 2026-11（D256）：聊天工作目录里的**候选智能体**（`agent-draft/<岗位名>/`）＋ 预检结果。
+   * 与候选编排同一张图纸；点「生成智能体」才入库（建智能体 + 配套技能）。
+   */
+  agentCandidates?: AgentCandidate[]
 }
 
 /** 全部对话，最近说过话的在前（顺序由服务端定，界面不重排）。 */

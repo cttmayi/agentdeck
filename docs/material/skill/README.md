@@ -1,12 +1,14 @@
 # 技能写法（material/skill）
 
-> 给「技能起草者」（沉淀）。**这一包本轮只落骨架**——内容在接沉淀那一版时补齐
-> （见 `docs/design/workflow-auto-gen.md` §6、§9）。
+给「技能起草者」（沉淀）。**先读本页，再读 `format.md` 与 `checklist.md`。**
 
-| 文件 | 状态 | 讲什么 |
-|---|---|---|
-| `format.md` | 待补 | `SKILL.md` 的 frontmatter（`name` / `description`）+ 正文结构 + 支持文件 |
-| `checklist.md` | 待补 | 入库前的机械体检项（与 `validateArtifactFiles` 同一套判据） |
+| 文件 | 什么时候读 |
+|---|---|
+| `format.md` | 动笔前：`SKILL.md` 的 frontmatter 与正文结构、支持文件怎么放 |
+| `checklist.md` | 写完自查：入库前平台会逐条体检的那几件事 |
 
-现有的规则来源（接的时候从这里搬，不另写）：
-`apps/daemon/src/crystallize-artifacts.ts` 的 `validateArtifactFiles`、`docs/reference/skills.md`。
+版本：见 `api-version.json`。**这一份是平台每次对话前覆盖写入工作目录的**
+（起草 run 的 `material/` 里是与那次素材并排的一份），改的是仓库里的 `docs/material/skill/`。
+
+⚠️ 一句话记住它是什么：**一份"怎么做某件事"的可复用做法**——不是这次任务的说明书。
+判据：换一个任务、换一个人来看，它还成立吗？不成立就不是技能，是任务笔记。

@@ -68,7 +68,7 @@ import {
 } from '@agentdeck/protocol'
 import { FileStore } from '@agentdeck/store-file'
 import { resolveReviewStandard } from './review-standard.ts'
-import { readAgentDraftArtifacts, parseAgentDraft } from './agent-maker.ts'
+
 
 import {
   describeCron,
@@ -109,6 +109,8 @@ import { MEMORY_EXISTING_MEMORY_FILE, MEMORY_TRANSCRIPT_FILE } from './platform-
 import { resolveWorkflowAgent } from './workflow-agents.ts'
 import { dirOfScope, listScope, parseScope, readScopeFile, writeScopeFile } from './fs-scope.ts'
 import { readCandidate, readCandidates } from './workflow-candidate.ts'
+import { readAgentCandidate, readAgentCandidates } from './agent-candidate.ts'
+import { adoptAgentCandidate } from './agent-adopt.ts'
 import { adoptCandidate } from './workflow-adopt.ts'
 import { bundledMaterialVersion } from './material-seed.ts'
 import { slugForAgentName } from '@agentdeck/store-file'
@@ -8325,19 +8327,10 @@ async function injectedSkillsOf(
         const last = await store.lastChatTurnWithRun(id)
         const lastRun = last?.runId ? await store.getRun(last.runId) : null
         /**
-         * ★ 2026-11 设计定稿（§3.6）：**这个对话能不能「确认生成智能体」**。
-         *
-         * 判据 = 工作目录的 `agent-draft/` 目录里有 `agent-draft.md`（智能体生成者
-         * 已产出岗位卡；2026-11 使用者拍板：生成产物收进 `agent-draft/` 目录，
-         * **只认新位置**——顶层老文件不再认）。目录用 `resolveWorkDir` 算，与
-         * files 路由同一个函数同一套参数（见那边那段注释）。界面拿它决定按钮
-         * 出不出——按钮按条件出现，不搞置灰（设计稿 §9.7）。
+         * ★ D256：**候选智能体**（工作目录 `agent-draft/<岗位名>/` 里那些，带校验结果）。
+         * 界面拿它画聊天里那张卡片（名字 / 配套技能几条 / 能不能收 / 哪一条不对）。
          */
-        let hasAgentDraft = false
-        /**
-         * ★ 2026-11（D135）：**这个对话能不能「确认采纳编排」**——判据同构：
-         *   工作目录的 `workflow-draft/` 里有 `workflow-draft.md`（编排生成者写好了草稿）。
-         */
+        let agentCandidates: Awaited<ReturnType<typeof readAgentCandidates>> = []
         /**
          * ★★ D255：**候选编排**（工作目录 `workflow-draft/<名字>/` 里那些，带校验结果）。
          *
@@ -8353,18 +8346,14 @@ async function injectedSkillsOf(
             fallbackId: conversation.id,
             workRoot,
           }).path
-          try {
-            hasAgentDraft = (await readdir(join(dir, 'agent-draft'))).includes('agent-draft.md')
-          } catch {
-            hasAgentDraft = false
-          }
+          agentCandidates = await readAgentCandidates(dir).catch(() => [])
           workflowCandidates = await readCandidates(dir).catch(() => [])
         }
         sendJson(res, 200, {
           conversation,
           turns: view,
           workDir: conversation.workDir ?? lastRun?.workDir ?? null,
-          hasAgentDraft,
+          agentCandidates,
           workflowCandidates,
         })
         return
@@ -8436,18 +8425,26 @@ async function injectedSkillsOf(
       return
     }
 
-    // ════════════════════════════════════════════════════════════════════
-    // ★ 2026-11 设计定稿（§3.4–§3.6）：智能体生成者的岗位卡与确认生成
-    // ════════════════════════════════════════════════════════════════════
-    //
-    // 岗位卡（agent-draft.md）是**智能体生成者在聊天里写的产物**，这两条路由只负责
-    // "读出来给人审"与"确认生成"。配套技能草稿（skill/<name>/SKILL.md）在确认时
-    // 与智能体一起落库（先技能后智能体，skillIds 指向已存在的技能）。
-    const agentDraftMatch = /^\/api\/conversations\/([^/]+)\/agent-draft$/.exec(path)
-
-    // ── 读生成产物（岗位卡 + 配套技能草稿），供聊天页内联审阅 ──
-    if (req.method === 'GET' && agentDraftMatch) {
-      const id = agentDraftMatch[1] as ConversationId
+    /*
+     * ══════════════════════════════════════════════════════════════════
+     * 智能体生成者（D256）：候选 → 生成智能体
+     * ══════════════════════════════════════════════════════════════════
+     *
+     * 与「编排生成者」（D255）同一张图纸：生成者把候选写成**存储的形状**
+     * （`agent-draft/<岗位名>/`：`agent.json` + `instructions.md` + `skills/…`），
+     * 平台预检、人点一下才入库。
+     *
+     *   GET  …/agent-candidates   预检（界面刷新用；对话详情里也带一份）
+     *   POST …/agent-adopt        { dir } —— 校验 + 建智能体 + 把配套技能落成它的独有技能
+     *
+     * 旧的 `agent-draft.md`（岗位卡 md）/ `agent-commit`（解析 md 后落库）**已删除**：
+     * 产物是目录，解析那一步不再需要（磁盘上老的 `agent-draft.md` 不动、也不再被读）。
+     *
+     * ⚠️ 只有「智能体生成者」的对话能入库（判据是**槽位表**，D154）。
+     */
+    const agentCandidatesMatch = /^\/api\/conversations\/([^/]+)\/agent-candidates$/.exec(path)
+    if (req.method === 'GET' && agentCandidatesMatch) {
+      const id = agentCandidatesMatch[1] as ConversationId
       const conversation = await store.getConversation(id)
       if (!conversation || conversation.workspaceId !== workspaceId) {
         sendJson(res, 404, { error: '对话不存在' })
@@ -8459,8 +8456,87 @@ async function injectedSkillsOf(
         fallbackId: conversation.id,
         workRoot,
       }).path
-      const artifacts = await readAgentDraftArtifacts(dir)
-      sendJson(res, 200, artifacts)
+      sendJson(res, 200, { candidates: await readAgentCandidates(dir) })
+      return
+    }
+
+    const agentAdoptMatch = /^\/api\/conversations\/([^/]+)\/agent-adopt$/.exec(path)
+    if (req.method === 'POST' && agentAdoptMatch) {
+      const id = agentAdoptMatch[1] as ConversationId
+      const conversation = await store.getConversation(id)
+      if (!conversation || conversation.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: '对话不存在' })
+        return
+      }
+      const makerSlots = await loadSlotTable(store, workspaceId)
+      const makerAgentId = makerSlots['agent-maker'] ?? null
+      if (makerAgentId === null || (conversation.agentId as string) !== makerAgentId) {
+        sendJson(res, 400, {
+          error: '只有「智能体生成者」的对话能生成智能体（这条对话的执行者不是它）',
+          code: 'agent_adopt_not_maker',
+        })
+        return
+      }
+      const body = (await readJsonBody(req)) as { dir?: unknown }
+      const dirName = typeof body?.dir === 'string' ? body.dir : ''
+      if (dirName.trim() === '') {
+        sendJson(res, 400, { error: '需要 dir（候选目录名）', code: 'agent_candidate_required' })
+        return
+      }
+      const workDir = resolveWorkDir({
+        requested: conversation.workDir,
+        subject: { type: 'conversation', id: conversation.id },
+        fallbackId: conversation.id,
+        workRoot,
+      }).path
+      const candidate = await readAgentCandidate(workDir, dirName)
+      /*
+       * 同名不覆盖：覆盖一条已有的智能体会连带它的记忆/技能一起换掉（风险不对等），
+       * 所以这里只如实 409 并**说清怎么办**（改名，或先删旧的）。
+       */
+      const taken = await duplicateNameOf(store, workspaceId, candidate.name, null)
+      if (taken !== null) {
+        sendJson(res, 409, {
+          error:
+            `已经有同名的智能体「${candidate.name}」（${taken}）。名字要唯一——` +
+            '给这个岗位改个名，或者先删掉旧的那条。',
+          code: 'agent_name_taken',
+        })
+        return
+      }
+      // 运行时：候选里写的值过与 `POST /api/agents` **同一关**（未知 runtime 当场 400）
+      const runtime = await resolveRuntimeKey(candidate.runtimeKey)
+      if (!runtime.ok) {
+        sendJson(res, 400, { error: runtime.error, code: 'runtime_unknown' })
+        return
+      }
+      const adopted = await adoptAgentCandidate({
+        store,
+        workDir,
+        dir: dirName,
+        workspaceId,
+        runtimeKey: runtime.runtimeKey,
+      })
+      if (!adopted.ok) {
+        if (adopted.reason === 'invalid') {
+          sendJson(res, 400, {
+            error: '这条候选还收不了',
+            code: 'agent_candidate_invalid',
+            problems: adopted.candidate.problems,
+            candidate: adopted.candidate,
+          })
+        } else {
+          sendJson(res, 500, { error: adopted.message, code: 'agent_adopt_failed' })
+        }
+        return
+      }
+      info(
+        `生成智能体「${adopted.agent.name}」（独有技能 ${adopted.exclusiveNames.length} 条）` +
+          `——来源：对话 ${conversation.id.slice(-8)}`,
+      )
+      // 界面跟着数据走：会话详情里的候选清单要在下一次打开时消失（目录已被收走？不——目录留着，
+      // 只是同名会被拒；所以这里不改磁盘，只回结果）
+      sendJson(res, 201, { agent: adopted.agent, exclusiveNames: adopted.exclusiveNames })
       return
     }
 
@@ -8583,129 +8659,6 @@ async function injectedSkillsOf(
       else workflows.push(adopted.workflow)
       await saveWorkflow(options.dataDir, adopted.workflow)
       sendJson(res, 201, { workflow: adopted.workflow })
-      return
-    }
-
-    // ── 确认生成：先沉淀配套技能（mine + git），再创建智能体（skillIds 挂新技能）──
-    const agentCommitMatch = /^\/api\/conversations\/([^/]+)\/agent-commit$/.exec(path)
-    if (req.method === 'POST' && agentCommitMatch) {
-      const id = agentCommitMatch[1] as ConversationId
-      const conversation = await store.getConversation(id)
-      if (!conversation || conversation.workspaceId !== workspaceId) {
-        sendJson(res, 404, { error: '对话不存在' })
-        return
-      }
-      // ★ 岗位卡只能从「智能体生成者」的对话产出：别的 agent 把 agent-draft.md 放进
-      //   工作目录不是"生成智能体"，是别的玩法——这条接口不替它背书。
-      //   ⚠️ 2026-11（S4）：判据从 `role === 'agent-maker'` 换成**内置岗位**。
-      /*
-       * ★ 2026-11（D154）：判据是**槽位表**（理由同上一条）。
-       */
-      const makerSlots = await loadSlotTable(store, workspaceId)
-      const makerAgentId = makerSlots['agent-maker'] ?? null
-      if (makerAgentId === null || (conversation.agentId as string) !== makerAgentId) {
-        sendJson(res, 400, {
-          error: '只有「智能体生成者」的对话能确认生成智能体（这条对话的执行者不是它）',
-          code: 'agent_commit_not_maker',
-        })
-        return
-      }
-      const body = (await readJsonBody(req)) as {
-        agentDraft?: unknown
-        skills?: unknown
-      }
-      // ── 岗位卡：界面可能改过（人确认前要能改）——以请求里的**最终版**为准，
-      //    服务端重新解析校验，不信任客户端说的 name/role/instructions 是分开的字段。
-      const agentDraftText = typeof body?.agentDraft === 'string' ? body.agentDraft : ''
-      if (agentDraftText.trim() === '') {
-        sendJson(res, 400, { error: '需要 agentDraft（岗位卡正文）', code: 'agent_draft_required' })
-        return
-      }
-      const parsed = parseAgentDraft(agentDraftText)
-      if (!parsed.ok) {
-        sendJson(res, 400, { error: `岗位卡解析失败：${parsed.error}`, code: 'agent_draft_invalid' })
-        return
-      }
-      if (parsed.name.length > 100) {
-        sendJson(res, 400, { error: '岗位名太长了（上限 100 字符）', code: 'agent_name_too_long' })
-        return
-      }
-      /*
-       * ⚠️ 2026-11（S4，D127）：这里原来校验岗位卡里的 `role` 只能是 executor / reviewer。
-       *   **角色退场** ⇒ 没有角色可校验（`parseAgentDraft` 也不再问它）。
-       */
-
-      // ── 配套技能：人审过的最终版（name + SKILL.md 正文）。每一条与安装/沉淀
-      //    同一关（`resolvePayloadEntry`）。
-      //
-      // ★ 2026-11（使用者拍板："生成的 SKILL 被放进了共享技能池，应该作为智能体的
-      //    内置技能"）：配套技能是**这个新智能体自己的**——落成它的**独有技能**
-      //    （`agents/<id>/skills/<name>/SKILL.md`），**不进共享技能池**（skills-mine、
-      //    无 git）。配套技能给这个岗位用，就是 D111"智能体自己的东西住进它的目录"
-      //    的同一句语义；共享沉淀（mine）是使用者主动提炼的动作，生成流程不替
-      //    使用者往共享池写。独有技能随智能体删除而删除（文件资产语义）。
-      const rawSkills = Array.isArray(body?.skills) ? body.skills : []
-      const now = Date.now()
-      // 先校验全部配套技能（质量关在写之前），收集落盘清单
-      const exclusiveSkills: Array<{ name: string; body: string }> = []
-      for (const raw of rawSkills) {
-        const item = raw as Record<string, unknown> | null
-        const name = typeof item?.['name'] === 'string' ? item['name'].trim() : ''
-        const skillBody = typeof item?.['body'] === 'string' ? item['body'] : ''
-        if (name === '' || skillBody.trim() === '') {
-          sendJson(res, 400, {
-            error: `配套技能「${name || '(缺 name)'}」缺 name 或 SKILL.md 正文`,
-            code: 'agent_skill_invalid',
-          })
-          return
-        }
-        let validated
-        try {
-          validated = resolvePayloadEntry({
-            name,
-            body: skillBody,
-            sourceRef: `exclusive:${name}`,
-          })
-        } catch (err) {
-          sendJson(res, 400, {
-            error: `配套技能「${name}」不合格：${err instanceof Error ? err.message : String(err)}`,
-            code: 'agent_skill_invalid',
-          })
-          return
-        }
-        exclusiveSkills.push({ name: validated.name, body: validated.body })
-      }
-
-      // ── 创建智能体（与 POST /api/agents 同一批字段；动作权限不落智能体，属组）──
-      //    先建目录、再写独有技能（SKILL.md 落进它自己的目录）。
-      const agent: Agent = {
-        id: ulid() as Agent['id'],
-        workspaceId,
-        name: parsed.name,
-        instructions: parsed.instructions,
-        model: null,
-        runtimeKey: 'default',
-        workDir: null,
-        skillIds: [],
-        env: {},
-        builtin: false,
-        reviewStandard: null,
-        memoryEnabled: false,
-        createdAt: now,
-        updatedAt: now,
-      }
-      await store.insertAgent(agent)
-      for (const s of exclusiveSkills) {
-        await store.writeExclusiveSkill(agentSkillOwner(agent.id), s.name, s.body)
-      }
-      info(
-        `生成智能体「${agent.name}」（内置配套技能 ${exclusiveSkills.length} 条）` +
-          `——来源：对话 ${conversation.id.slice(-8)}`,
-      )
-      sendJson(res, 201, {
-        agent,
-        exclusiveNames: exclusiveSkills.map((s) => s.name),
-      })
       return
     }
 

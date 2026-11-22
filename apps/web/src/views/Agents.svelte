@@ -21,6 +21,7 @@ import ListRow from '../components/ListRow.svelte'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { t } from '../lib/i18n.ts'
   import { paneResize } from '../lib/pane-resize.ts'
+  import { agentReturn } from '../lib/view.ts'
 
   /**
    * 智能体视图 = agent 配置 + runtime 状态。
@@ -58,6 +59,16 @@ import ListRow from '../components/ListRow.svelte'
    */
   /** 当前点开查看的 agent。null = 还没有选（右栏显示占位）。 */
   let selectedId: string | null = null
+  /**
+   * ★ D256：聊天里「生成智能体」落库之后切到这一页 ⇒ 选中刚生成的那条。
+   * 与编排页的 `wfAgentReturn` 同一个规格：读一次就清，不是持久设置。
+   */
+  $: if ($agentReturn !== null) {
+    const want = $agentReturn
+    agentReturn.set(null)
+    const hit = $agents.find((a) => a.id === want) ?? null
+    if (hit) selectedId = hit.id
+  }
   /**
    * ★ D249：新建态交给 `AgentForm` 的那份**空白智能体**（只提供"还没有库里那一份"的
    * 基准，不承载任何请求）。做成常量：每次渲染都 `blankAgent()` 会造新对象，

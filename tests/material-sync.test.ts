@@ -63,14 +63,24 @@ describe('生成资料（docs/material ⇄ catalog/material）', () => {
       'orchestration/api.md',
       'orchestration/changelog.md',
       'orchestration/api-version.json',
+      // ★ D256：智能体 / 技能两包也填成真内容了（不是骨架）
       'agent/README.md',
+      'agent/shape.md',
+      'agent/norms.md',
+      'agent/api-version.json',
       'skill/README.md',
+      'skill/format.md',
+      'skill/checklist.md',
+      'skill/api-version.json',
     ]) {
       assert.ok(src.includes(required), `docs/material 缺 ${required}`)
     }
     // orchestration 的例子至少四份（接力 / 机器把关 / 人把关 / 并行）——写代码前要照抄的那几份
     const examples = src.filter((f) => f.startsWith('orchestration/examples/'))
     assert.ok(examples.length >= 4, `orchestration/examples 至少 4 份，现在 ${examples.length}`)
+    // agent 的例子：一份合格的指令 + 一份合格的配套技能（照着改的那两份）
+    const agentExamples = src.filter((f) => f.startsWith('agent/examples/'))
+    assert.ok(agentExamples.length >= 2, `agent/examples 至少 2 份，现在 ${agentExamples.length}`)
     // api-version.json 要能被解析、有 version（daemon 落盘时把它写成 material 的版本标记）
     const version = JSON.parse(
       await readFile(join(REPO_ROOT, SOURCE, 'orchestration/api-version.json'), 'utf8'),

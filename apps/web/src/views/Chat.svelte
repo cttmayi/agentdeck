@@ -15,7 +15,7 @@
   import DirPicker from '../components/DirPicker.svelte'
   import ChatMemoryTidy from '../components/ChatMemoryTidy.svelte'
   import ChatSettings from '../components/ChatSettings.svelte'
-  import AgentMakerConfirm from '../components/AgentMakerConfirm.svelte'
+  import ChatAgentCandidates from '../components/ChatAgentCandidates.svelte'
   import ChatWorkflowCandidates from '../components/ChatWorkflowCandidates.svelte'
   import { api, type Agent, type ChatTurnView, type Conversation } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
@@ -35,7 +35,13 @@
   } from '../lib/chat.ts'
   import { memberLabel } from '../lib/members.ts'
   import { get } from 'svelte/store'
-  import { goCrystallize, pickChatAgentIntent, showToast, wfAgentReturn } from '../lib/view.ts'
+  import {
+    agentReturn,
+    goCrystallize,
+    pickChatAgentIntent,
+    showToast,
+    wfAgentReturn,
+  } from '../lib/view.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { absoluteTime, relativeTime } from '../lib/time.ts'
   import type { WebTextId } from '@agentdeck/i18n'
@@ -203,7 +209,6 @@
    * ★ 2026-11 设计定稿（§3.6）：「确认生成智能体」面板。
    * 按钮按条件出现（`hasAgentDraft`），不搞置灰——没有岗位卡时置灰按钮是一种半开的门。
    */
-  let agentMakerOpen = false
   /** 编排生成者的采纳面板（D135）。 */
   /**
    * 聊天页自己的「设置」抽屉（分批第 242 批）。
@@ -1248,16 +1253,6 @@
             {$t('crystallize.title')}
           </button>
           <!--
-            ★ 2026-11 设计定稿（§3.6）：「确认生成智能体」——工作目录顶层有
-            `agent-draft.md`（智能体生成者已产出岗位卡）才出现；没有就不出现
-            （与「沉淀技能」同一模式，不搞置灰）。
-          -->
-          {#if detail?.hasAgentDraft}
-            <button class="btn btn--ghost" onclick={() => (agentMakerOpen = true)}>
-              {$t('chat.agentMakerAction')}
-            </button>
-          {/if}
-          <!--
             ★ 2026-11（D135）：编排生成者写完草稿（`workflow-draft/workflow-draft.md`）
             才出现「确认采纳编排」——与上面那颗同一模式：**按条件出现**，不置灰。
           -->
@@ -1451,6 +1446,23 @@
           它替代了原来栏头那颗「确认采纳编排」按钮 + 一份可改草稿的面板：
           产物是文件，人要看着文件决定收不收；点「收进编排库」直接入库并跳到编排编辑页。
         -->
+        <!--
+          ★ D256：**候选智能体卡片**（智能体生成者把存储形状写进工作目录之后出现）。
+          替代原来栏头那颗「确认生成智能体」按钮 + 可改的岗位卡面板：产物是文件，
+          人要看着文件决定收不收；点「生成智能体」直接入库并跳到智能体编辑页。
+        -->
+        {#if detail?.agentCandidates && detail.agentCandidates.length > 0}
+          <ChatAgentCandidates
+            conversationId={$activeConversationId ?? ''}
+            candidates={detail.agentCandidates}
+            onadopted={(a) => {
+              // 一次性意图：智能体页挂载时拿它选中刚生成的那条
+              agentReturn.set(a.id)
+              location.hash = '#/agents'
+            }}
+          />
+        {/if}
+
         {#if detail?.workflowCandidates && detail.workflowCandidates.length > 0}
           <ChatWorkflowCandidates
             conversationId={$activeConversationId ?? ''}
@@ -1665,10 +1677,7 @@
     />
 
     <!-- ★ 2026-11 设计定稿（§3.5）：「确认生成智能体」面板（岗位卡 + 配套技能审阅） -->
-    <AgentMakerConfirm
-      bind:open={agentMakerOpen}
-      conversationId={activeConversation?.id ?? ''}
-    />
+
 </div>
 
 <style>

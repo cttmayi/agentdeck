@@ -12,7 +12,7 @@
 > 拍板：按钮"目录存在就出现"；内建智能体**不挂外围技能、但可以自生成技能**；名字**允许中文**；一条编排**软上限 8 人**；
 > 资料目录 `material/orchestration`（外加 agent / skill 两包）。
 >
-> **状态：已实施（D255，2026-11）**。实现落在：`docs/material/**`（唯一手写源）→ `tools/material/sync.mjs`
+> **状态：已实施（编排 D255、智能体 D256，2026-11）**。实现落在：`docs/material/**`（唯一手写源）→ `tools/material/sync.mjs`
 > → `apps/daemon/catalog/material/**`（随包）→ `material-seed.ts`（每次对话前覆盖写进工作目录）；
 > 预检 `workflow-candidate.ts`、入库 `workflow-adopt.ts`、界面 `ChatWorkflowCandidates.svelte`；
 > 旧面板 `WorkflowMakerConfirm` 与 `workflow-draft` / `workflow-commit` 两条接口已删除，
@@ -208,11 +208,12 @@
 | | 产物（工作目录） | 入库后 | 跳转到 |
 |---|---|---|---|
 | 编排（本轮） | `workflow-draft/<名字>/` | `workflows/<id>/` | 编排编辑页 |
-| 智能体 | `agent-draft/<名字>/`（`agent.json` + `instructions.md` + `skills/`） | `agents/<目录名>/` | 智能体编辑页 |
+| 智能体（本轮 D256 已落地） | `agent-draft/<岗位名>/`（`agent.json` + `instructions.md` + `skills/`） | `agents/<目录名>/` | 智能体编辑页 |
 | 技能 | `skill-draft/<名字>/`（`SKILL.md` + 支持文件） | 技能库（`skills/` 或 `skills-mine/`） | 技能页（展开那一行） |
 
 三者共用：同一种卡片、同一种"点一下入库并跳编辑页"、同一个 `material/` 资料目录、同一套校验入口。
-⚠️ 现有的 `agent-draft/agent-draft.md`（岗位卡）与沉淀的 `skill/` 产物届时按同一规则改——**这一轮不动它们**。
+⚠️ 智能体这一格已在 D256 按同一规则改完（旧 `agent-draft.md` 不再是产物）。
+沉淀（技能起草者）的产物仍走它自己那条链（`skill/` + 沉淀页确认），**接的时候按同一规则改**。
 
 ---
 

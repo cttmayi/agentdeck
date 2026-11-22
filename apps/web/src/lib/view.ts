@@ -163,6 +163,15 @@ export const wfAgentReturn = writable<string | null>(null)
  * ⚠️ 为什么不用地址（`#/chat?agent=…`）：地址是路由的唯一出处，而这个应用刻意不做
  *    query 路由；一个"一次性意图"用 store 表达最省事，也不会作废任何已有链接。
  */
+/**
+ * **一次性意图：切到智能体页并选中这一条**（2026-11，D256）。
+ *
+ * 用法：聊天里「生成智能体」落库成功后写它、再 `location.hash = '#/agents'`；
+ * 智能体页挂载/收到列表时读一次并清掉（与 `wfAgentReturn` 同一个规格：**不是持久设置**）。
+ * 为什么需要它：新生成的那条在列表中间，不选中就"看不出刚才那一下干了什么"。
+ */
+export const agentReturn = writable<string | null>(null)
+
 export const pickChatAgentIntent = writable<'workflow-maker' | null>(null)
 
 /** 读地址 → 写四个 store。地址是唯一出处，store 只是它的投影。 */

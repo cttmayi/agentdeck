@@ -12053,64 +12053,36 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           return !stillOpen && survived && offset <= 60
         })()
 
-        // ══════════════ 智能体生成者（D109）：按钮 + 审阅面板 ══════════════
+        // ══════════════ 智能体生成者（D256）：候选卡片 + 生成智能体 ══════════════
         /**
-         * ★ 2026-11：生成者流程的界面三件事。
-         *   · 没有 agent-draft/agent-draft.md 的对话：按钮**不出现**（判据 = 条件出现，不置灰）；
-         *   · 有 agent-draft/agent-draft.md 的对话：按钮出现（`hasAgentDraft`）；
-         *   · 点了按钮：审阅面板两段渲染（岗位卡部分 + 配套技能部分）。
+         * 使用者定调（与编排同一张图纸）：「在聊天的工作目录生成**存储的形状**，等人点确认后再入库」。
+         *   · 没有候选目录（`agent-draft/<岗位名>/`）的对话：卡片**不出现**（条件出现、不置灰）；
+         *   · 有候选目录的对话：卡片出现，写着岗位名 / 配套技能 / 指令字数 / 能不能收；
+         *   · 点「生成智能体」：**直接落库**（建智能体 + 配套技能落成它的独有技能）
+         *     ⇒ 跳到智能体编辑页并选中它。
          *
-         * 夹具对话（上一段刚量完的那条）没有 agent-draft/ 目录（假 CLI 对普通聊天
-         *  run 一律 `exit 127`，什么都不写）⇒ 先量"不出现"。生成者那条对话由假 CLI
-         *  代办"写岗位卡"（prompt 带 `PROBE-MAKER-DRAFT` ⇒ 假 CLI 写
-         *  `agent-draft/agent-draft.md` + `agent-draft/skill/meeting-notes-format/SKILL.md`，
-         *  见 run.mjs）。
+         * 夹具：普通聊天 run 的假 CLI 一律 `exit 127`（什么都不写）⇒ 夹具对话里没有候选；
+         * 生成者那条对话由假 CLI 代办（prompt 带 `PROBE-MAKER-DRAFT` ⇒ 写
+         * `agent-draft/会议纪要助理/{agent.json,instructions.md,skills/meeting-notes-format/SKILL.md}`）。
          */
-        const makerButtons = () =>
-          [...d().querySelectorAll('.pane-actions button')].filter((b) =>
-            (text(b) ?? '').includes('确认生成智能体'),
-          )
-        const makerPanelParts = () => {
-          const modal = d().querySelector('.modal')
-          if (!modal) return null
-          const hasName = [...modal.querySelectorAll('input')].some(
-            (i) => (i.value ?? '') !== '',
-          )
-          /**
-           * ⚠️ 2026-11（S4，D127）：**岗位卡不再有"角色"这一档**——角色退场之后
-           *   生成的是一条普通智能体，面板上只剩「岗位名 + 指令」两段。
-           *   `hasRole` 这一项留着但**恒为 false**，判据那边按"没有角色下拉"来判
-           *  （见 run.mjs：`chat.agentMakerReviewPanel` 同时钉住"名/指令在"与"角色不在"）。
-           */
-          const hasRole = modal.querySelector('select') !== null
-          const hasInstructions = [...modal.querySelectorAll('textarea')].length >= 1
-          const hasSkillCard = (modal.textContent ?? '').includes('meeting-notes-format')
-          const hasWarn = (modal.textContent ?? '').includes('未经验证')
-          return { hasName, hasRole, hasInstructions, hasSkillCard, hasWarn }
-        }
-
-        facts['chat.agentMakerButtonHidden'] = await (async () => {
+        facts['chat.agentCandidateAbsent'] = await (async () => {
+          // 没有候选目录的对话：卡片**不出现**（条件出现，不置灰）
           if (!(await chatOpenFixtureConversation())) return false
-          return makerButtons().length === 0
+          return d().querySelector('[data-agent-candidates]') === null
         })()
 
-        facts['chat.agentMakerButtonShows'] = await (async () => {
+        facts['chat.agentCandidateCard'] = await (async () => {
           // 走**真实用户路径**造生成者那条对话：新对话 → 选生成者 → 发送。
           // （接口 raw fetch 建出来的对话不会出现在左栏——聊天页那份列表 store
-          //   只在空时拉一次，探针早踩过；而整页 reload 会把探针的虚拟时钟搞死，
-          //   run.mjs 3513 行那段注释就是那次事故的教训。）
+          //   只在空时拉一次，探针早踩过；而整页 reload 会把探针的虚拟时钟搞死。）
           const agents = (await f.contentWindow.fetch('/api/agents').then((r) => r.json())).agents ?? []
-          // ⚠️ 2026-11（S4，D127）：判据从 `role === 'agent-maker'` 换成 `builtinKind`。
           const maker = agents.find((a) => a.slot === 'agent-maker')
           if (!maker) {
             errors.push('找不到内置智能体生成者（agent-maker）')
-            return false
+            return null
           }
-          // ★ 与起草者同一个套路（run.mjs 里 7266 行那一段）：生成者内置的
-          //   runtimeKey 是 `'default'`（跟随全局默认 ⇒ 这台探针 daemon 上是真 claude）。
-          //   生成者那条对话要真跑起来、把岗位卡写进工作目录，得先把它改挂
-          //   `generic`（= 假 `agent-cli`）。探针 daemon 带 `--allow-builtin-edits`，
-          //   所以这一步只在这个一次性脚手架里合法。
+          // 生成者内置的 runtimeKey 是 `'default'`（这台 daemon 上是真 claude）⇒ 改挂
+          // generic（= 假 agent-cli），让这一轮真的把候选目录写进工作目录。
           const patchRes = await f.contentWindow.fetch(`/api/agents/${encodeURIComponent(maker.id)}`, {
             method: 'PATCH',
             headers: { 'content-type': 'application/json' },
@@ -12118,101 +12090,1756 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           })
           if (!patchRes.ok) {
             errors.push(`把生成者改挂 generic 失败（HTTP ${patchRes.status}）——这条会空过`)
-            return false
+            return null
           }
-          // ① 新对话（顶栏那颗主线按钮；文案是 i18n 的「新建对话」）
           const newBtn = [...(d().querySelectorAll('.topbar .page-actions button') ?? [])].find(
             (b) => (text(b) ?? '').includes('新建对话'),
           )
           if (!newBtn) {
             errors.push('聊天页顶栏没有「新对话」——走不了生成者那条真实路径')
-            return false
+            return null
           }
           click(newBtn)
           await wait(300)
-          // ② 选「智能体生成者」
           const sel = chatSelect()
-          if (!sel) {
-            errors.push('点了「新对话」没有出现执行者下拉')
-            return false
-          }
-          const opt = [...(sel.querySelectorAll('option') ?? [])].find(
-            (o) => o.getAttribute('value') === `agent:${maker.id}`,
-          )
-          if (!opt) {
+          const opt = sel === null
+            ? null
+            : [...sel.querySelectorAll('option')].find(
+                (o) => o.getAttribute('value') === `agent:${maker.id}`,
+              )
+          if (!sel || !opt) {
             errors.push('生成者不在新对话下拉里（它应该是唯一能聊天的内置角色）')
-            return false
+            return null
           }
           sel.value = opt.getAttribute('value')
           sel.dispatchEvent(new Event('change', { bubbles: true }))
           await wait(250)
-          // ③ 发送第一句话（假 CLI 会把岗位卡 + 配套技能写进工作目录）
           const input = d().querySelector('.detail-pane [data-composer] .composer-input')
           const send = d().querySelector('.detail-pane [data-composer-send]')
           if (!input || !send) {
             errors.push('选了生成者之后没有输入条（ChatComposer 没渲染）')
-            return false
+            return null
           }
           input.value = '探针：生成者岗位\nPROBE-MAKER-DRAFT 把会议纪要变成一页纪要'
           input.dispatchEvent(new Event('input', { bubbles: true }))
           await wait(60)
           send.click()
-          // ④ 等那一轮跑完：run 终态会触发页面刷新（loadConversations），
-          //    列表里出现生成者那条对话；hasAgentDraft 到位后按钮出现。
-          const deadline = Date.now() + 12000
+          const deadline = Date.now() + 15000
           for (;;) {
-            if (makerButtons().length > 0) break
+            if (d().querySelector('[data-agent-candidates]') !== null) break
             if (Date.now() > deadline) {
-              errors.push('生成者那条对话跑完也没等到「确认生成智能体」按钮（run 没到终态？）')
-              return false
+              errors.push('生成者那条对话跑完也没出现候选智能体卡片')
+              return null
             }
             await wait(100)
           }
-          // 按钮出现的同时，左栏应该已有生成者那条对话（refresh 拉过列表）
-          const row = [...d().querySelectorAll('.list-pane .list-row-main')].find((b) =>
-            (text(b) ?? '').includes('探针：生成者岗位'),
-          )
-          if (!row) {
-            errors.push('左栏没有生成者那条对话（列表没刷新？）')
+          const card = d().querySelector('[data-agent-candidates]')
+          const adoptBtn = d().querySelector('[data-agent-adopt="会议纪要助理"]')
+          const convList = (await f.contentWindow.fetch('/api/conversations').then((r) => r.json()))
+            .items ?? []
+          const conv = convList.find((c) => (c.title ?? '').includes('探针：生成者岗位')) ?? null
+          const files = conv === null
+            ? null
+            : await f.contentWindow
+                .fetch(`/api/conversations/${encodeURIComponent(conv.id)}/files`)
+                .then((r) => r.json())
+                .catch(() => null)
+          return {
+            卡片在: card !== null,
+            标题: (text(card?.querySelector('[data-agent-candidate-name]')) ?? '').trim(),
+            元信息: (text(card?.querySelector('[data-agent-candidate-meta]')) ?? '').trim(),
+            没有报错: (card?.querySelectorAll('.wf-problem.bad').length ?? 0) === 0,
+            生成可点: adoptBtn !== null && adoptBtn.disabled === false,
+            有打开目录: !!card?.querySelector('[data-agent-open-dir]'),
+            工作目录顶层: (files?.entries ?? []).map((e) => e.name ?? e.path),
           }
-          return true
         })()
 
-        facts['chat.agentMakerPanelTwoParts'] = await (async () => {
-          const btn = makerButtons()[0]
-          if (!btn) {
-            errors.push('没有「确认生成智能体」按钮可点')
-            return false
-          }
-          click(btn)
-          await wait(600)
-          const parts = makerPanelParts()
-          if (!parts) {
-            errors.push('点了「确认生成智能体」没有弹出审阅面板')
-            return false
-          }
-          // ⚠️ 2026-11（S4/D127）：角色那一档退场 ⇒ 现在要求 **hasName && hasInstructions
-          //    && !hasRole**（还长出一个角色下拉就说明 S4 没删干净）。
-          if (!parts.hasName || !parts.hasInstructions || parts.hasRole) {
-            errors.push(`审阅面板的岗位卡部分不对（${JSON.stringify(parts)}）`)
-          }
-          if (!parts.hasSkillCard) {
-            errors.push('审阅面板缺配套技能部分（meeting-notes-format 不在）')
-          }
-          if (!parts.hasWarn) {
-            errors.push('配套技能部分缺"未经验证"提示（设计 §9.1，提示不是校验）')
-          }
-          const pass =
-            parts.hasName && parts.hasInstructions && !parts.hasRole && parts.hasSkillCard && parts.hasWarn
-          // 关掉面板收场（别让下一条量到开着面板的聊天页）
-          const close = [...(d().querySelectorAll('.modal button') ?? [])].find(
-            (b) => (text(b) ?? '').includes('关闭'),
+        facts['chat.agentAdopt'] = await (async () => {
+          const adoptBtn = d().querySelector('[data-agent-adopt="会议纪要助理"]')
+          if (!adoptBtn) return null
+          click(adoptBtn)
+          const jumped = await until(
+            () => f.contentWindow.location.hash.includes('/agents'),
+            80,
           )
-          if (close) click(close)
+          const headName = (
+            text(d().querySelector('.detail-pane .detail-head [data-agent-head-name]')) ?? ''
+          ).trim()
+          const list = (await f.contentWindow.fetch('/api/agents').then((r) => r.json())).agents ?? []
+          const created = list.find((a) => a.name === '会议纪要助理') ?? null
+          let exclusive = []
+          if (created) {
+            const res = await f.contentWindow
+              .fetch(`/api/agents/${encodeURIComponent(created.id)}/skills`)
+              .then((r) => r.json())
+              .catch(() => null)
+            exclusive = (res?.skills ?? []).map((s) => s.name)
+          }
+          // 收尾：删掉探针造出来的这条智能体（别把夹具留在列表里）
+          if (created) {
+            await f.contentWindow.fetch(`/api/agents/${encodeURIComponent(created.id)}`, {
+              method: 'DELETE',
+            })
+          }
+          /*
+           * 收尾：回到聊天页——后面「编排生成者」那一节要在聊天页顶栏找「新对话」。
+           * （本 fact 已经把页面带到 `#/agents` 了；不回来，下一节会直接空过。）
+           */
+          f.contentWindow.location.hash = '#/chat'
+          await until(() => !!d().querySelector('.list-pane'), 60)
           await wait(300)
-          return pass
+          return {
+            跳到智能体页: jumped,
+            编辑页标题: headName,
+            落库: created !== null,
+            独有技能: exclusive,
+            指令带边界: created !== null && String(created.instructions ?? '').includes('边界'),
+          }
         })()
 
+        // ══════════════ 编排生成者（D255）：候选卡片 + 收进编排库 ══════════════
+        /**
+         * 使用者定的新流程（D255）：
+         *   ① 生成者在聊天工作目录里把候选**写成存储的形状**（`workflow-draft/<名字>/`）；
+         *   ② 聊天里出现一张卡片：几个人 / 能不能收 / 哪一条不对；
+         *   ③ 点「收进编排库」⇒ **直接保存**⇒ 跳到编排编辑页（同名先问覆盖）。
+         *
+         * 夹具走**真路径**：把内置编排生成者改挂 generic（= 探针的假 agent-cli），
+         * 再发一句带记号的 prompt ⇒ 假 CLI 把候选目录写进 `$PWD`（= 对话的工作目录）。
+         */
+        const wfCard = () => d().querySelector('[data-wf-candidates]')
+        const wfAdoptBtn = () =>
+          d().querySelector('[data-wf-adopt="探针两段流水线"]') ?? null
+
+        facts['chat.wfCandidateCard'] = await (async () => {
+          const agents = (await f.contentWindow.fetch('/api/agents').then((r) => r.json())).agents ?? []
+          const maker = agents.find((a) => a.slot === 'workflow-maker')
+          if (!maker) {
+            errors.push('找不到内置编排生成者（workflow-maker）')
+            return null
+          }
+          // 内置的 runtimeKey 是 'default'（这台 daemon 上是真 claude）⇒ 先改挂 generic
+          const patched = await f.contentWindow.fetch(
+            `/api/agents/${encodeURIComponent(maker.id)}`,
+            {
+              method: 'PATCH',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ runtimeKey: 'generic' }),
+            },
+          )
+          if (!patched.ok) {
+            errors.push(`把编排生成者改挂 generic 失败（HTTP ${patched.status}）`)
+            return null
+          }
+          const newBtn = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
+            (text(b) ?? '').includes('新建对话'),
+          )
+          if (!newBtn) {
+            errors.push('聊天页顶栏没有「新对话」——走不了编排生成者那条真实路径')
+            return null
+          }
+          click(newBtn)
+          await wait(300)
+          const sel = d().querySelector('#chat-agent')
+          const opt = sel === null
+            ? null
+            : [...sel.querySelectorAll('option')].find(
+                (o) => o.getAttribute('value') === `agent:${maker.id}`,
+              )
+          if (!sel || !opt) {
+            errors.push('新对话的下拉里没有编排生成者')
+            return null
+          }
+          sel.value = opt.getAttribute('value')
+          sel.dispatchEvent(new Event('change', { bubbles: true }))
+          await wait(250)
+          const input = d().querySelector('.detail-pane [data-composer] .composer-input')
+          const send = d().querySelector('.detail-pane [data-composer-send]')
+          if (!input || !send) {
+            errors.push('选了编排生成者之后没有输入条（ChatComposer 没渲染）')
+            return null
+          }
+          input.value = '探针：编排生成\nPROBE-WORKFLOW-DRAFT 帮我写个流水线'
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+          await wait(60)
+          send.click()
+          const deadline = Date.now() + 15000
+          for (;;) {
+            if (wfCard() !== null) break
+            if (Date.now() > deadline) {
+              errors.push('编排生成者跑完之后聊天里没出现候选卡片')
+              return null
+            }
+            await wait(100)
+          }
+          const card = wfCard()
+          const adoptBtn = wfAdoptBtn()
+          /*
+           * 资料有没有跟着落进工作目录（D255：写法以"资料"的形式动态输入）。
+           * 取对话 id 的方式：列表里**选中态**那一行对应的对话——直接从接口列表里按标题找。
+           */
+          const convList = (await f.contentWindow.fetch('/api/conversations').then((r) => r.json()))
+            .items ?? []
+          const conv = convList.find((c) => (c.title ?? '').includes('探针：编排生成')) ?? null
+          const files = conv === null
+            ? null
+            : await f.contentWindow
+                .fetch(`/api/conversations/${encodeURIComponent(conv.id)}/files`)
+                .then((r) => r.json())
+                .catch(() => null)
+          return {
+            卡片在: card !== null,
+            标题: (text(card?.querySelector('[data-wf-candidate-name]')) ?? '').trim(),
+            摘要: (text(card?.querySelector('.wf-card-summary')) ?? '').trim(),
+            元信息: (text(card?.querySelector('[data-wf-candidate-meta]')) ?? '').trim(),
+            没有报错: card?.querySelectorAll('.wf-problem.bad').length === 0,
+            收进可点: adoptBtn !== null && adoptBtn.disabled === false,
+            有打开目录: !!card?.querySelector('[data-wf-open-dir]'),
+            工作目录顶层: (files?.entries ?? []).map((e) => e.name ?? e.path),
+          }
+        })()
+
+        facts['chat.wfAdopt'] = await (async () => {
+          const adoptBtn = wfAdoptBtn()
+          if (!adoptBtn) return null
+          click(adoptBtn)
+          const jumped = await until(
+            () => f.contentWindow.location.hash.includes('/workflows'),
+            80,
+          )
+          const title = (text(d().querySelector('.detail-pane .detail-head h2')) ?? '').trim()
+          const code = d().querySelector('.detail-pane textarea#wf-code')?.value ?? ''
+          const list = (await f.contentWindow.fetch('/api/workflows').then((r) => r.json())).items ?? []
+          const created = list.find((w) => w.name === '探针两段流水线') ?? null
+          // 同名再收一次 ⇒ 先问人（用户的卡片要求"如果有同名，要提示是否覆盖"）
+          let sameNameAsked = null
+          let sameNameDiag = null
+          let extraAfterCancel = null
+          if (created) {
+            f.contentWindow.location.hash = '#/chat'
+            await until(() => !!d().querySelector('.list-pane'), 60)
+            /*
+             * 回到聊天页之后**等列表与详情都到位**再找那一行：刚切页时 `.list-pane`
+             * 可能已经在了、但行还没渲染完（第一版就这么空过了一次，
+             * 表现是"同名要确认 false"，而其实一次都没点）。
+             */
+            let row = null
+            for (let i = 0; i < 20 && row === null; i += 1) {
+              row =
+                [...d().querySelectorAll('.list-pane .list-row-main')].find((b) =>
+                  (text(b) ?? '').includes('探针：编排生成'),
+                ) ?? null
+              if (row === null) await wait(150)
+            }
+            if (row === null) {
+              sameNameDiag = { 原因: '回聊天页之后找不到那条对话的行' }
+            }
+            if (row) {
+              click(row)
+              await until(() => wfAdoptBtn() !== null, 80)
+              const again = wfAdoptBtn()
+              if (again === null) sameNameDiag = { 原因: '回到对话后卡片上的「收进编排库」没出来' }
+              if (again) {
+                click(again)
+                sameNameAsked = await until(() => !!d().querySelector('.modal'), 60)
+                // 诊断：没弹确认框时，把界面上的说法也记下来（免得只看到一个 false）
+                sameNameDiag = {
+                  按钮禁用: again.disabled,
+                  行内报错: (text(d().querySelector('[data-wf-adopt-error]')) ?? '').trim(),
+                  卡片在: wfCard() !== null,
+                }
+                const cancel = [...d().querySelectorAll('.modal button')].find((b) =>
+                  /取消|关闭/.test(text(b) ?? ''),
+                )
+                if (cancel) click(cancel)
+                await wait(300)
+                const after = (await f.contentWindow.fetch('/api/workflows').then((r) => r.json())).items ?? []
+                extraAfterCancel = after.filter((w) => w.name === '探针两段流水线').length
+              }
+            }
+          }
+          // 收尾：删掉探针造出来的这条编排（别把夹具留在列表里）
+          if (created) {
+            await f.contentWindow.fetch(`/api/workflows/${encodeURIComponent(created.id)}`, {
+              method: 'DELETE',
+            })
+          }
+          return {
+            跳到编排页: jumped,
+            编排页标题: title,
+            代码带内建人: code.includes("agent('探针用的执行者')"),
+            落库: created !== null,
+            来源ai: created?.source === 'ai',
+            版本记下: typeof created?.apiVersion === 'string',
+            同名要确认: sameNameAsked === true,
+            同名诊断: sameNameDiag,
+            取消后没多一条: extraAfterCancel === 1,
+          }
+        })()
+
+        // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
+        publish(false)
+        // ══════════════ 建任务那一栏：至少不崩 ══════════════
+        // ⚠️ 2026-10（D58 第二步）：`#/new` 现在落到「任务」页并**在右栏里**开表单，
+        //    所以判据从"主区有内容"改成"右栏里那张表单真的画出来了 + 左边清单还在"
+        //    ——"有内容"太松了：整页画着列表也能过长，而那时建任务这条路是断的。
+        f.contentWindow.location.hash = '#/new'
+        await wait(900)
+        facts['new.hasContent'] = need('建任务那一栏真的画出来了', () => {
+          const body = d().querySelector('.detail-pane .create-body')
+          const form = d().querySelector('.detail-pane .create-body .newtask-form')
+          const rows = d().querySelectorAll('.list-pane .task-row').length
+          return !!body && !!form && rows > 0
+        })
+
+        // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
+        publish(false)
+        // ══════════════ 跨页"长得是不是同一套"（303 批）══════════════
+        //
+        // 语境：界面风格统一（298–302 批）把按钮/输入/徽标/字段收进了 `app.css` 的族里。
+        // 但那只是"**代码里**只有一份定义"——同一个变体在**各页渲染出来**到底一不一样，
+        // 类型检查看不见，静态护栏也看不见（护栏只读源码，量不出"聊天页主按钮 30px、
+        // 任务页 31px"这种）。所以这里把三件最该一样的东西量出来，跨页比一遍：
+        //   ① 同一种按钮变体（`btn--primary` 等）的高度与字号
+        //   ② 徽标（`.badge`）的形状（圆角/字号/内距）
+        //   ③ 列表行标题的字号
+        // 顶栏那一排单独记一份：它是**按位置定尺寸**的上下文按钮（`--ctl-h-sm`），
+        // 本来就比页面里的按钮矮，不参与"跨页比高度"，但要自己内部一致。
+        {
+          const stylePages = [
+            { key: 'chat', hash: '#/chat' },
+            { key: 'tasks', hash: '#/tasks' },
+            { key: 'agents', hash: '#/agents' },
+            { key: 'skills', hash: '#/skills' },
+            // ⚠️ 2026-11：`#/tools`（工具页）与 `#/groups`（智能体组页）都随功能退场删了
+            //    ⇒ 跨页风格样本换成**定时任务**与**关于**（同为"有列表/有按钮"的页）。
+            { key: 'schedules', hash: '#/schedules' },
+            { key: 'about', hash: '#/about' },
+          ]
+          const VARIANTS = ['btn--primary', 'btn--secondary', 'btn--ghost', 'btn--danger', 'btn--link']
+          // 尺寸修饰也算进"哪一类按钮"里：`btn--ghost` 与 `btn--ghost btn--sm` 是
+          // 两个不同的大小档，混在一个键里比字号只会得到"14 与 12 不一致"这种假红。
+          const SIZES = { 'btn--sm': 'sm', 'btn--mini': 'mini', 'btn--tight': 'tight', 'btn--icon': 'icon' }
+          const samples = {}
+          for (const pg of stylePages) {
+            f.contentWindow.location.hash = pg.hash
+            await wait(900)
+            samples[pg.key] = need(`风格样本（${pg.key}）`, () => {
+              const btns = {}
+              for (const b of d().querySelectorAll('button.btn, a.btn')) {
+                const variant =
+                  VARIANTS.find((c) => b.classList.contains(c)) ?? '(无变体)'
+                const inTopbar = !!b.closest('.topbar')
+                /**
+                 * ★ D180：**栏脚那一行的按钮单独一档**（`@foot`）。
+                 * `.foot-files` 自己把字号定在 `--fs-sm`（栏脚是紧凑带），按钮 `font: inherit`
+                 * 就跟着是 13px；而页面里的同变体按钮是 14px —— 这是**语境**的差，
+                 * 不是"同一类按钮被画成两种"。`@topbar` 早就用了同一种分档法。
+                 */
+                const inFoot = !!b.closest('.foot-files, .pane-foot')
+                const size = Object.keys(SIZES).find((c) => b.classList.contains(c)) ?? ''
+                const c = getComputedStyle(b)
+                const key =
+                  variant + (size === '' ? '' : '/' + SIZES[size]) + (inTopbar ? '@topbar' : '') + (inFoot && !inTopbar ? '@foot' : '')
+                // 高度**按内容变**是正常的（只有图标的、带两行的），所以只比字号；
+                // 高度照样记下来，报错时能一眼看出是哪一颗。
+                const sample = `${Math.round(parseFloat(c.fontSize) * 10) / 10}（高 ${Math.round(b.getBoundingClientRect().height)}）`
+                ;(btns[key] ??= []).push(sample)
+              }
+              /*
+               * ⚠️ 2026-11（D142）：采样时**排除 `.stage-tag`**——它是 `.badge` 的一个
+               *   变体（同一套配方，只把竖内距改成 0，免得把任务行撑高 2-3px，D61 定的）。
+               *   它现在同时带 `.badge` 类，不排除的话这一条会拿"变体"去跟"基准"比内距。
+               */
+              const badge = d().querySelector('.badge:not(.stage-tag)')
+              const bc = badge ? getComputedStyle(badge) : null
+              const rowTitle = d().querySelector(
+                '.list-pane .row-title, .list-pane .task-title, .list-pane .conv-title, .list-pane .agent-line strong',
+              )
+              return {
+                btns,
+                badge: bc
+                  ? {
+                      r: bc.borderRadius,
+                      fs: bc.fontSize,
+                      p: `${bc.paddingTop}/${bc.paddingRight}/${bc.paddingBottom}/${bc.paddingLeft}`,
+                    }
+                  : null,
+                rowTitleFs: rowTitle ? getComputedStyle(rowTitle).fontSize : null,
+              }
+            })
+          }
+          // ⚠️ 一次性赋值（不是先 `facts[...] = {}` 再往里填）：`publish()` 是增量的，
+          //    先放一个空对象会让**第一版快照**里这个键存在但没内容，判据当场红。
+          facts['style.pageStyles'] = samples
+        }
+
+        // ══════════════ 列表栏骨架（D61，D62 补智能体栏头带）══════════════
+        //
+        // 聊天 / 任务 / 智能体三页的列表栏共用同一套骨架：
+        //   · 栏头带：三页都有一条 51px 的栏头带。只有"栏标题 ≠ 页名"才放**标题**
+        //     （聊天「对话」——它的计数也跟在标题旁边）；任务与智能体放
+        //     **计数 + 搜索**（不放标题——与页名重复）。D62 给智能体补了带子
+        //     （D61 使用者反馈"变化不大，只有任务有点变化"）；D63 给聊天补了
+        //     计数 + 搜索（使用者："聊天页也改和任务类似呀"）。
+        //   · 搜索框永远进栏头右侧，不独行（任务列表模式从"独行怼在列表上方"改来）。
+        //   · 行高同一档（`--list-row-min-h`），每页内部恒定，三页互相相差 ≤1px。
+        //   · 删除/操作按钮同一位置（右缘内缩 `--sp-1`、垂直居中）。
+        //
+        // ⚠️ 必须放在**这一段**（最后）：聊天那组刻意"不造对话"量的是空态，只有
+        //    聊天段自己的夹具对话（`chatEnsureFixtureConversation`）造出来之后，
+        //    左栏才有行可量。放在它前面，聊天三条会全部"没量到"（实测踩过）。
+        {
+          const sk = {
+            headH: {}, searchInHead: {}, rowH: {}, delInset: {}, titleInHead: {},
+            title: {}, chip: {}, rowBox: {}, hover: {}, listBox: {}, rowMetrics: {}, sub: {}, subBaseline: {},
+          }
+          /**
+           * ★ 2026-11（D136）：采样页从 **3 页扩到 5 页**——加了定时任务与编排。
+           *
+           * ⚠️ 这是「编排列表风格不对」那次的根因：这一节的采样表是 D61–D66
+           *   统一时存在的那三页，之后**新增的列表页从来没进过这张表**，于是
+           *   "新页面是否与邻居一致"根本没有判据——新页面只有我为它**同时写的**
+           *   自有判据（例如 `workflows.row` 量"两行结构/标题单行/行高≥64"，
+           *   三条全过，而整行缩进 40px 它看不见）。自己写判据验证自己写的页面
+           *   等于自证。往后**任何新增的列表页都必须先进这张表**。
+           */
+          const skPages = [
+            { key: 'chat', hash: '#/chat', rows: '.conv-row', titleSel: '.conv-title', chipSel: null, subSel: '.conv-sub' },
+            { key: 'tasks', hash: '#/tasks', rows: '.task-row', titleSel: '.task-title', chipSel: '.stage-tag', subSel: '.task-meta' },
+            { key: 'agents', hash: '#/agents', rows: '.agent-row', titleSel: '.agent-line strong', chipSel: '.badge', subSel: '.agent-notes' },
+            { key: 'schedules', hash: '#/schedules', rows: '.sched-row', titleSel: '.sched-title', chipSel: null, subSel: '.sched-sub' },
+            { key: 'workflows', hash: '#/workflows', rows: '.wf-row', titleSel: '.wf-title', chipSel: '.badge', subSel: '.wf-sub' },
+            // ★ 2026-11（D138）：「沉淀」也是列表页（ListPane + ListRow），原来**不在采样表里**
+            //   ——它的行内容与另外五页不一致（标题字重 400、辅助信息大一号且字色更深）就是
+            //   这么漏掉的。凡是"左列表右详情"的页面都必须在这张表里，否则它只有自证。
+            { key: 'crystallize', hash: '#/crystallize', rows: '.crystal-row', titleSel: '.crystal-title', chipSel: '.badge', subSel: '.crystal-meta' },
+          ]
+          /*
+           * ⚠️ 骨架/行内细节对比要求**每页都有行**。定时任务那一段的夹具是"量完就删"的，
+           *   到这里列表已经空了——第一版没补，于是 `schedules` 的 rowH / listBox /
+           *   title / rowBox 全是"没量到"，而"没量到"在判据里等于**假绿**（曾经就这么
+           *   绿过：`workflows` 那一页缩进 40px、行距 0，五页对比里它根本不参与）。
+           *   所以这里造一条，量完删掉。
+           */
+          const skSchedIds = []
+          {
+            const execId = new URLSearchParams(location.search).get('chainExecutor') ?? ''
+            if (!execId) {
+              errors.push('骨架对比：拿不到夹具执行者 id（schedules 那几页会没量到）')
+            } else {
+              // 两条：一条量行距（行距要两条紧邻的兄弟行才量得到），另一条当备份
+              for (const name of ['探针骨架夹具一', '探针骨架夹具二']) {
+                const res = await f.contentWindow.fetch('/api/schedules', {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({
+                    name,
+                    cron: '0 9 * * *',
+                    executorType: 'agent',
+                    executorId: execId,
+                    taskText: 'x',
+                  }),
+                })
+                if (res.status === 201) skSchedIds.push((await res.json()).id)
+                else errors.push(`骨架对比：造定时任务夹具失败（HTTP ${res.status}）`)
+              }
+            }
+          }
+
+          for (const pg of skPages) {
+            f.contentWindow.location.hash = pg.hash
+            await until(() => f.contentWindow.location.hash === pg.hash, 40)
+            const haveRows = await until(() => {
+              if (d().querySelectorAll('.list-pane ' + pg.rows).length > 0) return true
+              if (d().querySelector('.board')) {
+                const listBtn = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
+                  b.textContent.trim().startsWith('列表'),
+                )
+                if (listBtn) { click(listBtn); return false }
+              }
+              return false
+            }, 50)
+            await wait(300)
+            const lp = d().querySelector('.list-pane')
+            const head = lp.querySelector(':scope > .pane-head')
+            // 栏头与搜索**不依赖行**：就算这一页没有行（理论上不该有），也要量
+            sk.headH[pg.key] = need(`列表栏头高度（${pg.key}）`, () =>
+              head ? Math.round(head.getBoundingClientRect().height) : null)
+            sk.searchInHead[pg.key] = need(`搜索框位置（${pg.key}）`, () => {
+              const inHead = !!head?.querySelector('input')
+              const inBody = !!lp.querySelector('.pane-body input')
+              return { inHead, inBody }
+            })
+            // D64：三页栏头带里**都不许有标题**（聊天原来的「对话」按要求去掉）——
+            // 栏头规则从"标题 ≠ 页名才放标题"实际落到"三页都不放"。
+            sk.titleInHead[pg.key] = need(`栏头带无标题（${pg.key}）`, () =>
+              !head?.querySelector('h2'))
+            if (pg.key === 'tasks') {
+              // D64 顺手修 D61 的漏：全局 `.list-head`（51px）曾漏到任务列表里的
+              // 分组标题「需你处理 / 其余任务」上，把它们**固定**撑成 51px
+              // （实测 sep0/sep1 都是 51px）。修掉之后是内容高度：单行那条
+              // （其余任务）38px、双行那条（需要注意+长提示折行）59px。
+              // D67：「需要注意」后面的解释句（"执行失败/被取消…"）按要求删了，
+              // 两条都回到单行 ~38px。漏的特征是"全部 == 51"——用 **min** 抓它。
+              // ★ 2026-11（使用者："平铺改一下，去掉之前的分类"）：「需要注意/
+              //   其余任务」分段连同 `.list-head` 一起删了；分组标题现在是
+              //   分组视图的 `.group-head`（组头）。同一意图换载体继续钉：
+              //   组头也是内容高度（不许被全局固定高度带成一条死带）。
+              sk.separatorHeights = need('任务分组标题是内容高度', () => {
+                const seps = [...lp.querySelectorAll('.pane-body .list-group-head')]
+                if (seps.length === 0) return { min: 0, max: 0 }
+                const hs = seps.map((x) => Math.round(x.getBoundingClientRect().height))
+                return { min: Math.min(...hs), max: Math.max(...hs) }
+              })
+              // D67：删掉的解释句要**钉住"没有"**（谁把它加回来就红）——
+              // 判据：组头（分组标题）的文本里不许再出现它。
+              sk.separatorNoHint = need('分组标题不带解释', () => {
+                const seps = [...lp.querySelectorAll('.pane-body .list-group-head')]
+                const t = seps.length > 0 ? text(seps[0]) ?? '' : ''
+                return !t.includes('执行失败') && !t.includes('——')
+              })
+            }
+            if (!haveRows) {
+              sk.rowH[pg.key] = null
+              continue
+            }
+            const first = d().querySelector('.list-pane ' + pg.rows)
+            sk.rowH[pg.key] = need(`列表行高（${pg.key}）`, () =>
+              first ? Math.round(first.getBoundingClientRect().height) : null)
+            /*
+             * ★ 2026-11（D136）：行高的**令牌**（`min-height`）与"页内是否恒定"。
+             *
+             * 为什么不能只比行高：`--list-row-min-h` 的注释写着"内容更高时跟随内容——
+             * 统一的是这条底线，不是把内容压扁"。编排行的辅助信息里带一枚徽标，
+             * 实际高度 67px（聊天 64 / 智能体 65），那是**内容差异**不是缺陷；
+             * 而"令牌不一致"（比如某页把底线改成 56px）才是缺陷。所以拆成两条量：
+             *   · 底线：每页 `min-height` 必须 = 64px（令牌一致）；
+             *   · 恒定：同一页内任意两行高度差 ≤1px（列表是用来扫的，节奏不能抖）。
+             */
+            sk.rowMetrics[pg.key] = need(`行高令牌（${pg.key}）`, () => {
+              const rows = [...d().querySelectorAll('.list-pane ' + pg.rows)]
+              if (rows.length === 0) return null
+              const hs = rows.map((r) => Math.round(r.getBoundingClientRect().height))
+              return {
+                minH: getComputedStyle(rows[0]).minHeight,
+                spread: Math.max(...hs) - Math.min(...hs),
+                /*
+                 * ★ D231（诊断用，长期留着）：**每一行的高度与首行文字**。
+                 *   只报 `spread` 的时候，"某一页差 32px"只能靠猜是哪一行——
+                 *   这次就是靠它才看到"某条夹具的副行换行了"。多 60 字节，值。
+                 */
+                rows: rows.map((r, i) => ({
+                  h: hs[i],
+                  text: String(r.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 60),
+                })),
+                n: hs.length,
+              }
+            })
+            // ── 行内细节（D65）：标题 / 徽标 / 行容器 / hover 三页统一 ──
+            sk.title[pg.key] = need(`行内标题（${pg.key}）`, () => {
+              const t = first?.querySelector(pg.titleSel)
+              if (!t) return null
+              const c = getComputedStyle(t)
+              return { fs: Math.round(parseFloat(c.fontSize) * 10) / 10, w: Number(c.fontWeight) }
+            })
+            if (pg.chipSel) {
+              sk.chip[pg.key] = need(`徽标形状（${pg.key}）`, () => {
+                const b = first?.querySelector(pg.chipSel)
+                return b ? getComputedStyle(b).borderRadius : null
+              })
+            }
+            /*
+             * ★ 2026-11（D138）：**辅助信息那一行的字号与字色**。
+             *   沉淀页原来这里比别的页大一号（`--fs-sm`）且没写字色（继承 `--text`）——
+             *   而"标题字号/字重"那条量不到它。只在**容器自己声明**了这两项的三页量
+             *   （定时任务 / 编排 / 沉淀）；另外三页把 `faint fs-xs` 写在元素或子元素上，
+             *   容器级读数是继承值，不比。
+             */
+            if (pg.subSel) {
+              sk.sub[pg.key] = need(`辅助行（${pg.key}）`, () => {
+                const el = first?.querySelector(pg.subSel)
+                if (!el) return null
+                const c = getComputedStyle(el)
+                return { fs: Math.round(parseFloat(c.fontSize) * 10) / 10, color: c.color }
+              })
+            }
+            /*
+             * ★ 2026-11（D142）：副行里**文字是否在同一基线上**。
+             *
+             * 这一行里常把文字与徽标混着放，徽标的盒子比文字高 —— `align-items: center`
+             * 对齐的是**盒子**，于是"最近 15 小时前"比前面几段低 3px（实测）。
+             * 现在统一 `.list-row-sub` 用 `align-items: baseline`。判据：副行内各段文字的
+             * 顶边极差 ≤1px。
+             */
+            if (pg.subSel) {
+              sk.subBaseline[pg.key] = need(`副行基线（${pg.key}）`, () => {
+                const sub = first?.querySelector(pg.subSel)
+                if (!sub) return null
+                /*
+                 * ⚠️ 只比**同字号**的几段：字号不同时，即使基线对齐，**顶边**也不一样
+                 *    （11px 的阶段标签与 12px 的元信息天然差 ~1.9px）。第一版没滤字号，
+                 *    任务页就一直红——那不是缺陷，是量法错了。
+                 */
+                const baseFs = getComputedStyle(sub).fontSize
+                const tops = []
+                const visit = (el) => {
+                  for (const child of el.children) {
+                    const own = [...child.childNodes]
+                      .filter((n) => n.nodeType === 3 && (n.textContent ?? '').trim() !== '')
+                      .map((n) => {
+                        const r = document.createRange()
+                        r.selectNodeContents(n)
+                        return { top: r.getBoundingClientRect().top, fs: getComputedStyle(child).fontSize }
+                      })
+                    if (own.length > 0) tops.push(...own)
+                    else visit(child)
+                  }
+                }
+                visit(sub)
+                const sameSize = tops.filter((x) => x.fs === baseFs)
+                return {
+                  alignItems: getComputedStyle(sub).alignItems,
+                  n: sameSize.length,
+                  // 同字号段不足两段 ⇒ 量不出极差（不是缺陷）
+                  spread:
+                    sameSize.length < 2
+                      ? null
+                      : Math.round(
+                          (Math.max(...sameSize.map((x) => x.top)) -
+                            Math.min(...sameSize.map((x) => x.top))) *
+                            10,
+                        ) / 10,
+                }
+              })
+            }
+            sk.rowBox[pg.key] = need(`行容器（${pg.key}）`, () => {
+              const c = first ? getComputedStyle(first) : null
+              return c ? { align: c.alignItems, gap: c.gap } : null
+            })
+            /*
+             * ★★ 2026-11（D136）：**行容器 `ul` 自身**的三件事——这一条是"编排列表风格
+             *   不对"那次的判据。以前量的是行（`.list-row`）里的东西，而行**被 ul 的
+             *   默认内距整体推开**这件事不在任何判据里：
+             *     · 缩进：`<ul>` 没重置 ⇒ 浏览器默认 `padding-left: 40px`，
+             *       整列右移 40px、行宽少 40px（定时任务与编排各犯过一次）；
+             *     · 行距：三个老页面是 `gap: var(--sp-1)`（4px），漏了就是 0；
+             *     · 行左沿：以 `.pane-body` 的**内容左缘**为基准，行应当从 0 开始
+             *       （pane 自己的内距不算——各页内距不同是合理的，缩进不是）。
+             */
+            sk.listBox[pg.key] = need(`行容器 ul（${pg.key}）`, () => {
+              const ul = first?.closest('ul')
+              if (!ul) return null
+              const c = getComputedStyle(ul)
+              const bodyEl = ul.closest('.pane-body') ?? ul.parentElement
+              const bc = bodyEl ? getComputedStyle(bodyEl) : null
+              const bodyContentLeft =
+                bodyEl.getBoundingClientRect().left + parseFloat(bc?.paddingLeft ?? '0')
+              const rows = [...ul.querySelectorAll(pg.rows)]
+              // 行距只在"两条行是紧邻兄弟"时量（分组视图里中间会夹着组头，那样量不到）
+              const gap =
+                rows.length >= 2 && rows[0].nextElementSibling === rows[1]
+                  ? Math.round(rows[1].getBoundingClientRect().top - rows[0].getBoundingClientRect().bottom)
+                  : null
+              /*
+               * ★ 2026-11（D141）：分段方式从"4px 空隙"改成"**行间一条 1px 的 `--line` 上边线**"
+               *   ——空隙在静止状态（不 hover、不选中）什么也读不出来。这里量：
+               *   `gap === 0`、第一行**没有**上边线、第二行有一条 `--line` 色的上边线。
+               */
+              const borderOf = (el) => {
+                if (!el) return null
+                const bc = getComputedStyle(el)
+                return { w: bc.borderTopWidth, color: bc.borderTopColor }
+              }
+              const all = [...ul.querySelectorAll(pg.rows)]
+              return {
+                padLeft: c.paddingLeft,
+                listStyle: c.listStyleType,
+                gap,
+                inset: Math.round(first.getBoundingClientRect().left - bodyContentLeft),
+                firstRowTop: borderOf(all[0]),
+                secondRowTop: borderOf(all[1]),
+              }
+            })
+            sk.hover[pg.key] = need(`行 hover 底色（${pg.key}）`, () => {
+              // D66：三页行 hover 统一在标准控件 ListRow 的 `.list-row:hover` 里
+              // （scoped 选择器形如 `.list-row.svelte-xxx:hover`，`:hover` 在 hash 后面）。
+              for (const sheet of [...d().styleSheets]) {
+                try {
+                  for (const rule of [...sheet.cssRules]) {
+                    const st = rule.selectorText ?? ''
+                    if (/\.list-row(?:\.|:)/.test(st) && st.includes(':hover')) {
+                      const bg = rule.style.background || rule.style.backgroundColor
+                      if (bg) return bg
+                    }
+                  }
+                } catch {}
+              }
+              return null
+            })
+            if (pg.key === 'chat' || pg.key === 'tasks') {
+              sk.delInset[pg.key] = need(`操作按钮位置（${pg.key}）`, () => {
+                const li = first
+                const btn = li?.querySelectorAll('button')[1]
+                if (!li || !btn) return null
+                const lr = li.getBoundingClientRect()
+                const br = btn.getBoundingClientRect()
+                return {
+                  inset: Math.round((lr.right - br.right) * 10) / 10,
+                  centerDelta:
+                    Math.round(Math.abs(br.top + br.height / 2 - (lr.top + lr.height / 2)) * 10) / 10,
+                }
+              })
+            }
+          }
+          for (const id of skSchedIds) {
+            await f.contentWindow.fetch(`/api/schedules/${encodeURIComponent(id)}`, {
+              method: 'DELETE',
+            })
+          }
+          Object.assign(facts, {
+            'skeleton.rowMetrics': sk.rowMetrics,
+            'skeleton.headH': sk.headH,
+            'skeleton.searchInHead': sk.searchInHead,
+            'skeleton.rowH': sk.rowH,
+            'skeleton.delInset': sk.delInset,
+            'skeleton.headsTitleless': sk.titleInHead,
+            'skeleton.separatorHeights': sk.separatorHeights,
+            'skeleton.separatorNoHint': sk.separatorNoHint,
+            'skeleton.listBox': sk.listBox,
+            'skeleton.subRow': sk.sub,
+            'skeleton.subBaseline': sk.subBaseline,
+            'rowdetail.title': sk.title,
+            'rowdetail.chip': sk.chip,
+            'rowdetail.rowBox': sk.rowBox,
+            'rowdetail.hover': sk.hover,
+          })
+        }
+
+        /*
+         * ══════════════ 列表分组：两页同一个组头（D137）══════════════
+         *
+         * 这一档原来**两页各写一套**（任务页是带边框卡片按钮、智能体页是淡字行，
+         * 连 DOM 结构都不同）。现在组头是标准控件 `ListGroupHead` + `app.css` 的
+         * `.list-group-head` 一族，所以这里量**等式**：
+         *   · 两页组头同高（≤1px）、同字号、组名同字重（600）；
+         *   · 都有 chevron（折叠字形），计数都在右侧；
+         *   · 组间分隔线**只在第二组有**（第一组上方没有线——否则列表顶部会多一条悬空的）。
+         * 折叠行为本身由各页自己的判据守着（`tasks.groupCollapseToggle` / `agents.listGroups`）。
+         */
+        {
+          /** 按页面取"行标题"的类名（组头要跟它比字号与字色）。 */
+          const pgTitleClass = (hash) =>
+            hash === '#/tasks' ? 'task-title' : hash === '#/agents' ? 'agent-line' : null
+          const measureGroups = async (hash) => {
+            f.contentWindow.location.hash = hash
+            await until(() => f.contentWindow.location.hash === hash, 40)
+            await wait(400)
+            const heads = [...d().querySelectorAll('.list-pane .list-group-head')]
+            if (heads.length === 0) return null
+            const first = heads[0]
+            const second = heads[1] ?? null
+            const c = getComputedStyle(first)
+            const nameEl = first.querySelector('.list-group-name')
+            const tail = first.querySelector('.list-group-tail')
+            return {
+              n: heads.length,
+              h: Math.round(first.getBoundingClientRect().height),
+              fs: Math.round(parseFloat(c.fontSize) * 10) / 10,
+              nameWeight: nameEl ? getComputedStyle(nameEl).fontWeight : null,
+              hasChevron: !!first.querySelector('.chevron'),
+              glyph: (first.querySelector('.chevron')?.textContent ?? '').trim(),
+              countRight:
+                !!tail &&
+                Math.round(tail.getBoundingClientRect().right) >=
+                  Math.round(first.getBoundingClientRect().right) - 12,
+              // ★ D140：组头与行的**可分辨性**（使用者两轮反馈：颜色太接近 / 头比内容还小）
+              headBg: c.backgroundColor,
+              nameFs: nameEl ? Math.round(parseFloat(getComputedStyle(nameEl).fontSize) * 10) / 10 : null,
+              nameColor: nameEl ? getComputedStyle(nameEl).color : null,
+              // 未选中的行（`.list-row.active` 是选中态，底色本来就不同——见 app.css 的注释）
+              rowBg: (() => {
+                const r = d().querySelector('.list-pane .list-row:not(.active)') ?? d().querySelector('.list-pane .list-row')
+                return r ? getComputedStyle(r).backgroundColor : null
+              })(),
+              // 选中行的底色：组头**也不能**跟它同色，否则"选中的那一行"会被读成分组头
+              activeRowBg: (() => {
+                const r = d().querySelector('.list-pane .list-row.active')
+                return r ? getComputedStyle(r).backgroundColor : null
+              })(),
+              rowTitleFs: (() => {
+                const t = d().querySelector('.list-pane .list-row .' + (pgTitleClass(hash) ?? 'x'))
+                return t ? Math.round(parseFloat(getComputedStyle(t).fontSize) * 10) / 10 : null
+              })(),
+              rowTitleColor: (() => {
+                const t = d().querySelector('.list-pane .list-row .' + (pgTitleClass(hash) ?? 'x'))
+                return t ? getComputedStyle(t).color : null
+              })(),
+              /* D140 第二轮：分割从"只有第二组有顶线"改成**每个组头下方一条线**
+                 （两道线索：底色带 + 它下面那条线）。所以这里量三条：
+                 · 第一组**上方**不许有线（列表顶部不该凭空多一条）；
+                 · 每个组头下方必须是 1px；
+                 · 第二组与上一组之间要留出空隙（不然"带子 + 线"贴着上一行，还是分不清）。 */
+              borderTopFirst: getComputedStyle(first.closest('.list-group-head-wrap')).borderTopWidth,
+              borderBottomFirst: getComputedStyle(first.closest('.list-group-head-wrap')).borderBottomWidth,
+              borderBottomSecond: second
+                ? getComputedStyle(second.closest('.list-group-head-wrap')).borderBottomWidth
+                : null,
+              gapBeforeSecond: second
+                ? (() => {
+                    // 第二组上方那条"上一组最后一行"的下沿；
+                    // ⚠️ 上一组可能是**收起的**（智能体页「内置」默认收拢）⇒ 中间没有行，
+                    //    这时量不到"组间距"，记 null（与"只有一组"同样是"没量到"，不是缺陷）
+                    let el = second.closest('.list-group-head-wrap').previousElementSibling
+                    while (el && !el.classList.contains('list-row')) el = el.previousElementSibling
+                    return el
+                      ? Math.round(second.getBoundingClientRect().top - el.getBoundingClientRect().bottom)
+                      : null
+                  })()
+                : null,
+            }
+          }
+          facts['skeleton.groupHead'] = {
+            tasks: await measureGroups('#/tasks'),
+            agents: await measureGroups('#/agents'),
+          }
+        }
+
+        /**
+         * ★ 分批第 237 批（使用者："我新入库的 SKILL，必须要重新刷新才可以看到，不合理"）：
+         * **进「技能」页就该看到现在的真实样子**，不用先点「刷新」。
+         *
+         * 怎么量：应用**已经启动之后**（共享 store 早已载入）用接口新造一条技能——
+         * 这模拟的就是"别处写进来"（沉淀入库、CLI 装的、别的工具写进技能目录）。
+         * 然后切到 `#/skills`，**不点任何刷新**，看表格里有没有它。
+         *
+         * ⚠️ 服务端每次读都对账磁盘，所以这一条真正钉的是**页面有没有去读**（不是服务端）。
+         *
+         * ⚠️ **必须放在整支探针的最后**：它要把页面导航到「技能」页，而前面那些判据依赖
+         *    "停在聊天页的草稿态"（第一版插在中间，9 条聊天判据当场全红——这正是它的价值）。
+         */
+        /**
+         * ★ 分批第 239 批（使用者定："沉淀，确认入库后不删除，依然还可以继续反馈修改。
+         *   并可以持续入库"）：**入库之后留在审阅屏**，只多一行「已入库」说明，
+         *   「确认入库」还在（再点一次 = 更新同一份），「放弃」整页都没有。
+         *
+         * ⚠️ 这条**真的按一次入库**（会往探针那次性 daemon 的技能库里写一条），
+         *   所以和上面那条一样放在整支探针的最后——前面那些判据不该被库里多出来的东西影响。
+         */
+        facts['crystal.committedStaysOnReview'] = await (async () => {
+          // ⚠️ 这一段在 `cyEnter` / `cyQuery` 的作用域之外（它们在沉淀那一节里用 `const` 定义）
+          //    ⇒ 这里自己从 URL 取夹具 id、自己走一遍"切走 → 进来 → 等审阅态"。
+          const draftId = new URLSearchParams(location.search).get('crystalDraft')
+          if (!draftId) {
+            errors.push('没有起草夹具 id（这一条量不到）')
+            return null
+          }
+          f.contentWindow.location.hash = '#/tasks'
+          await untilNet(() => !d().querySelector('[data-review-actions]'), 40)
+          f.contentWindow.location.hash = `#/crystallize/${draftId}`
+          const entered = await untilNet(() => !!d().querySelector('[data-review-actions]'), 120)
+          if (!entered) {
+            errors.push('没进到审阅态（这一条量不到）')
+            return null
+          }
+          const commitBtn = d().querySelector('[data-review-commit]')
+          if (!commitBtn) {
+            errors.push('审阅态没有「确认入库」按钮')
+            return null
+          }
+          click(commitBtn)
+          const dialog = await untilNet(() => !!d().querySelector('[role="dialog"]'), 40)
+          if (!dialog) {
+            errors.push('点「确认入库」没弹确认框')
+            return null
+          }
+          const confirm = [...d().querySelectorAll('[role="dialog"] button')].find((b) =>
+            /^(确认|入库)/.test(text(b).trim()) && !text(b).includes('取消'),
+          )
+          if (!confirm) {
+            errors.push('确认框里找不到"确认"那一颗')
+            return null
+          }
+          click(confirm)
+          /**
+           * 入库是异步的：打接口 → 落 skills-mine → git 提交。所以先等**确认框关掉**
+           * （提交成功才会关），再等那一行说明。
+           * ⚠️ `untilNet` 每一轮只是一次真实往返，120 轮在本地不到一秒——而 git 提交
+           *   比它慢，第一版就是这么量到"还在保存中"的。这里给足 400 轮。
+           */
+          await untilNet(() => !d().querySelector('[role="dialog"]'), 400)
+          const noted = await untilNet(() => !!d().querySelector('[data-committed-note]'), 200)
+          const diag = {
+            dialogStillOpen: !!d().querySelector('[role="dialog"]'),
+            errorText: (text(d().querySelector('.crystal-flow .notice.bad')) ?? '').slice(0, 120),
+            confirmLabel: text(confirm).trim(),
+          }
+          const stillReview = !!d().querySelector('[data-review-actions]')
+          const stillCommit = !!d().querySelector('[data-review-commit]')
+          const note = text(d().querySelector('[data-committed-note]')) ?? ''
+          const noAbandon = ![...d().querySelectorAll('button')].some(
+            (b) => text(b).trim() === '放弃',
+          )
+          if (!noted) errors.push('入库成功之后没有出现「已入库」那一行说明')
+          if (!stillReview) errors.push('入库之后离开了审阅屏（应该留在原地继续改）')
+          if (!stillCommit) errors.push('入库之后「确认入库」没了（还应该能再入库一次）')
+          if (!noAbandon) errors.push('入库之后页面上又出现了「放弃」')
+          return { noted, stillReview, stillCommit, noAbandon, note: note.slice(0, 40), diag }
+        })()
+
+        facts['skills.reloadsOnEnter'] = await (async () => {
+          const lateSlug = 'probe-late-skill'
+          const created = await f.contentWindow
+            .fetch('/api/skills', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                skills: [
+                  {
+                    slug: lateSlug,
+                    name: lateSlug,
+                    description: '探针：应用启动之后才入库的一条技能',
+                    body: '# probe late skill\n\n启动之后才写进来的。\n',
+                  },
+                ],
+              }),
+            })
+            .then((r) => r.ok)
+            .catch(() => false)
+          if (!created) {
+            errors.push('造"晚到的技能"失败（POST /api/skills）——这一条量不到')
+            return null
+          }
+          f.contentWindow.location.hash = '#/skills'
+          const onPage = await until(() => d().querySelector('.detail-pane') !== null, 80)
+          // 再等一拍：页面自己那次读是异步的
+          await untilNet(() => (d().body.innerText ?? '').includes(lateSlug), 40)
+          const seen = (d().body.innerText ?? '').includes(lateSlug)
+          if (!onPage) errors.push('没切到「技能」页')
+          else if (!seen) {
+            errors.push('应用启动之后才入库的技能，在「技能」页上看不到（没有自动重读）')
+          }
+          return seen
+        })()
+        /**
+         * ★★ D220（使用者："建立对话的时候，只是新建一个 Item，不需要发送第一句话"）：
+         *   放在**最后**执行——它会"新建一条空对话 → 删掉"，中途会改变聊天页状态，
+         *   放中间会把后面一串判据的现场搞乱。
+         */
+        /*
+         * ★ D251：聊天的「改名保存」与智能体编辑页同一条判据——**没改动时置灰**。
+         *   原来这颗按钮恒可用：改名框一打开里面就是当前标题，点它不会有任何事发生
+         *   （`saveTitle()` 里也确实直接 return）——那是"看着能点、其实什么都不做"的假按钮。
+         */
+        facts['chat.renameSaveGated'] = await (async () => {
+          f.contentWindow.location.hash = '#/chat'
+          await until(() => !!d().querySelector('.list-pane'), 80)
+          const row = d().querySelector('.list-pane .list-row-main')
+          if (!row) return { skipped: '没有现成的对话（探针夹具里应该有）' }
+          click(row)
+          const headOk = await until(() => !!d().querySelector('.detail-head.chat-head h2'), 80)
+          if (!headOk) return { skipped: '点开对话后没有栏头标题' }
+          click(d().querySelector('.detail-head.chat-head h2'))
+          const opened = await until(() => !!d().querySelector('.detail-head.chat-head .rename-input'), 40)
+          if (!opened) return { skipped: '标题点不进改名态' }
+          const saveBtn = () => d().querySelector('.detail-head.chat-head .btn--primary')
+          const out = { 进改名态: true, 初始置灰: saveBtn()?.disabled === true, 改了之后可用: null }
+          const input = d().querySelector('.detail-head.chat-head .rename-input')
+          const setter = Object.getOwnPropertyDescriptor(input.constructor.prototype, 'value')?.set
+          setter?.call(input, (input.value ?? '') + '改')
+          input.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
+          await wait(120)
+          out.改了之后可用 = saveBtn()?.disabled === false
+          // 收尾：取消改名（别把标题改掉，后面还有判据）
+          const cancel = [...d().querySelectorAll('.detail-head.chat-head button')].find(
+            (b) => text(b) === '取消',
+          )
+          if (cancel) click(cancel)
+          return out
+        })()
+
+        facts['chat.createEmptyConversation'] = await (async () => {
+          f.contentWindow.location.hash = '#/chat'
+          await until(() => !!d().querySelector('.list-pane'), 80)
+          await wait(500)
+          const before = (await f.contentWindow.fetch('/api/conversations').then((r) => r.json())).items ?? []
+          const newBtn = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
+            (text(b) ?? '').includes('新建对话'),
+          )
+          if (!newBtn) {
+            errors.push('聊天页顶栏找不到「新建对话」')
+            return null
+          }
+          click(newBtn)
+          const draftOpen = await until(() => !!d().querySelector('#chat-agent'), 40)
+          const createBtn = d().querySelector('[data-chat-create]')
+          if (!createBtn) {
+            errors.push('起草态没有「创建对话」这颗按钮（[data-chat-create]）')
+            return { 起草态: draftOpen, 有创建键: false }
+          }
+          click(createBtn)
+          await wait(1500)
+          const after = (await f.contentWindow.fetch('/api/conversations').then((r) => r.json())).items ?? []
+          const created = after.find((c) => !before.some((b) => b.id === c.id)) ?? null
+          // 建好之后已经是**对话态** ⇒ 标题在 `.detail-head` 里（起草态的 `.pane-head` 没了）
+          const head = text(d().querySelector('.detail-pane .detail-head h2')) ?? ''
+          const result = {
+            起草态: draftOpen,
+            有创建键: true,
+            多了一条: created !== null,
+            标题是未命名: head === '未命名对话',
+            轮数: created ? created.turnCount : null,
+            建好之后有输入条: !!d().querySelector('.detail-pane textarea'),
+          }
+          // 收尾：删掉这条测试对话（别把探针的现场留给后面的运行）
+          if (created) {
+            await f.contentWindow.fetch('/api/conversations/' + created.id, { method: 'DELETE' })
+          }
+          return result
+        })()
+
+        publish(true)
+      }
+
+      main().catch((e) => {
+        errors.push('探针自身异常：' + (e && e.stack ? e.stack : String(e)))
+        publish(true)
+      })
+    </script>
+  </body>
+</html>
+        // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
+        publish(false)
+        // ══════════════ 建任务那一栏：至少不崩 ══════════════
+        // ⚠️ 2026-10（D58 第二步）：`#/new` 现在落到「任务」页并**在右栏里**开表单，
+        //    所以判据从"主区有内容"改成"右栏里那张表单真的画出来了 + 左边清单还在"
+        //    ——"有内容"太松了：整页画着列表也能过长，而那时建任务这条路是断的。
+        f.contentWindow.location.hash = '#/new'
+        await wait(900)
+        facts['new.hasContent'] = need('建任务那一栏真的画出来了', () => {
+          const body = d().querySelector('.detail-pane .create-body')
+          const form = d().querySelector('.detail-pane .create-body .newtask-form')
+          const rows = d().querySelectorAll('.list-pane .task-row').length
+          return !!body && !!form && rows > 0
+        })
+
+        // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
+        publish(false)
+        // ══════════════ 跨页"长得是不是同一套"（303 批）══════════════
+        //
+        // 语境：界面风格统一（298–302 批）把按钮/输入/徽标/字段收进了 `app.css` 的族里。
+        // 但那只是"**代码里**只有一份定义"——同一个变体在**各页渲染出来**到底一不一样，
+        // 类型检查看不见，静态护栏也看不见（护栏只读源码，量不出"聊天页主按钮 30px、
+        // 任务页 31px"这种）。所以这里把三件最该一样的东西量出来，跨页比一遍：
+        //   ① 同一种按钮变体（`btn--primary` 等）的高度与字号
+        //   ② 徽标（`.badge`）的形状（圆角/字号/内距）
+        //   ③ 列表行标题的字号
+        // 顶栏那一排单独记一份：它是**按位置定尺寸**的上下文按钮（`--ctl-h-sm`），
+        // 本来就比页面里的按钮矮，不参与"跨页比高度"，但要自己内部一致。
+        {
+          const stylePages = [
+            { key: 'chat', hash: '#/chat' },
+            { key: 'tasks', hash: '#/tasks' },
+            { key: 'agents', hash: '#/agents' },
+            { key: 'skills', hash: '#/skills' },
+            // ⚠️ 2026-11：`#/tools`（工具页）与 `#/groups`（智能体组页）都随功能退场删了
+            //    ⇒ 跨页风格样本换成**定时任务**与**关于**（同为"有列表/有按钮"的页）。
+            { key: 'schedules', hash: '#/schedules' },
+            { key: 'about', hash: '#/about' },
+          ]
+          const VARIANTS = ['btn--primary', 'btn--secondary', 'btn--ghost', 'btn--danger', 'btn--link']
+          // 尺寸修饰也算进"哪一类按钮"里：`btn--ghost` 与 `btn--ghost btn--sm` 是
+          // 两个不同的大小档，混在一个键里比字号只会得到"14 与 12 不一致"这种假红。
+          const SIZES = { 'btn--sm': 'sm', 'btn--mini': 'mini', 'btn--tight': 'tight', 'btn--icon': 'icon' }
+          const samples = {}
+          for (const pg of stylePages) {
+            f.contentWindow.location.hash = pg.hash
+            await wait(900)
+            samples[pg.key] = need(`风格样本（${pg.key}）`, () => {
+              const btns = {}
+              for (const b of d().querySelectorAll('button.btn, a.btn')) {
+                const variant =
+                  VARIANTS.find((c) => b.classList.contains(c)) ?? '(无变体)'
+                const inTopbar = !!b.closest('.topbar')
+                /**
+                 * ★ D180：**栏脚那一行的按钮单独一档**（`@foot`）。
+                 * `.foot-files` 自己把字号定在 `--fs-sm`（栏脚是紧凑带），按钮 `font: inherit`
+                 * 就跟着是 13px；而页面里的同变体按钮是 14px —— 这是**语境**的差，
+                 * 不是"同一类按钮被画成两种"。`@topbar` 早就用了同一种分档法。
+                 */
+                const inFoot = !!b.closest('.foot-files, .pane-foot')
+                const size = Object.keys(SIZES).find((c) => b.classList.contains(c)) ?? ''
+                const c = getComputedStyle(b)
+                const key =
+                  variant + (size === '' ? '' : '/' + SIZES[size]) + (inTopbar ? '@topbar' : '') + (inFoot && !inTopbar ? '@foot' : '')
+                // 高度**按内容变**是正常的（只有图标的、带两行的），所以只比字号；
+                // 高度照样记下来，报错时能一眼看出是哪一颗。
+                const sample = `${Math.round(parseFloat(c.fontSize) * 10) / 10}（高 ${Math.round(b.getBoundingClientRect().height)}）`
+                ;(btns[key] ??= []).push(sample)
+              }
+              /*
+               * ⚠️ 2026-11（D142）：采样时**排除 `.stage-tag`**——它是 `.badge` 的一个
+               *   变体（同一套配方，只把竖内距改成 0，免得把任务行撑高 2-3px，D61 定的）。
+               *   它现在同时带 `.badge` 类，不排除的话这一条会拿"变体"去跟"基准"比内距。
+               */
+              const badge = d().querySelector('.badge:not(.stage-tag)')
+              const bc = badge ? getComputedStyle(badge) : null
+              const rowTitle = d().querySelector(
+                '.list-pane .row-title, .list-pane .task-title, .list-pane .conv-title, .list-pane .agent-line strong',
+              )
+              return {
+                btns,
+                badge: bc
+                  ? {
+                      r: bc.borderRadius,
+                      fs: bc.fontSize,
+                      p: `${bc.paddingTop}/${bc.paddingRight}/${bc.paddingBottom}/${bc.paddingLeft}`,
+                    }
+                  : null,
+                rowTitleFs: rowTitle ? getComputedStyle(rowTitle).fontSize : null,
+              }
+            })
+          }
+          // ⚠️ 一次性赋值（不是先 `facts[...] = {}` 再往里填）：`publish()` 是增量的，
+          //    先放一个空对象会让**第一版快照**里这个键存在但没内容，判据当场红。
+          facts['style.pageStyles'] = samples
+        }
+
+        // ══════════════ 列表栏骨架（D61，D62 补智能体栏头带）══════════════
+        //
+        // 聊天 / 任务 / 智能体三页的列表栏共用同一套骨架：
+        //   · 栏头带：三页都有一条 51px 的栏头带。只有"栏标题 ≠ 页名"才放**标题**
+        //     （聊天「对话」——它的计数也跟在标题旁边）；任务与智能体放
+        //     **计数 + 搜索**（不放标题——与页名重复）。D62 给智能体补了带子
+        //     （D61 使用者反馈"变化不大，只有任务有点变化"）；D63 给聊天补了
+        //     计数 + 搜索（使用者："聊天页也改和任务类似呀"）。
+        //   · 搜索框永远进栏头右侧，不独行（任务列表模式从"独行怼在列表上方"改来）。
+        //   · 行高同一档（`--list-row-min-h`），每页内部恒定，三页互相相差 ≤1px。
+        //   · 删除/操作按钮同一位置（右缘内缩 `--sp-1`、垂直居中）。
+        //
+        // ⚠️ 必须放在**这一段**（最后）：聊天那组刻意"不造对话"量的是空态，只有
+        //    聊天段自己的夹具对话（`chatEnsureFixtureConversation`）造出来之后，
+        //    左栏才有行可量。放在它前面，聊天三条会全部"没量到"（实测踩过）。
+        {
+          const sk = {
+            headH: {}, searchInHead: {}, rowH: {}, delInset: {}, titleInHead: {},
+            title: {}, chip: {}, rowBox: {}, hover: {}, listBox: {}, rowMetrics: {}, sub: {}, subBaseline: {},
+          }
+          /**
+           * ★ 2026-11（D136）：采样页从 **3 页扩到 5 页**——加了定时任务与编排。
+           *
+           * ⚠️ 这是「编排列表风格不对」那次的根因：这一节的采样表是 D61–D66
+           *   统一时存在的那三页，之后**新增的列表页从来没进过这张表**，于是
+           *   "新页面是否与邻居一致"根本没有判据——新页面只有我为它**同时写的**
+           *   自有判据（例如 `workflows.row` 量"两行结构/标题单行/行高≥64"，
+           *   三条全过，而整行缩进 40px 它看不见）。自己写判据验证自己写的页面
+           *   等于自证。往后**任何新增的列表页都必须先进这张表**。
+           */
+          const skPages = [
+            { key: 'chat', hash: '#/chat', rows: '.conv-row', titleSel: '.conv-title', chipSel: null, subSel: '.conv-sub' },
+            { key: 'tasks', hash: '#/tasks', rows: '.task-row', titleSel: '.task-title', chipSel: '.stage-tag', subSel: '.task-meta' },
+            { key: 'agents', hash: '#/agents', rows: '.agent-row', titleSel: '.agent-line strong', chipSel: '.badge', subSel: '.agent-notes' },
+            { key: 'schedules', hash: '#/schedules', rows: '.sched-row', titleSel: '.sched-title', chipSel: null, subSel: '.sched-sub' },
+            { key: 'workflows', hash: '#/workflows', rows: '.wf-row', titleSel: '.wf-title', chipSel: '.badge', subSel: '.wf-sub' },
+            // ★ 2026-11（D138）：「沉淀」也是列表页（ListPane + ListRow），原来**不在采样表里**
+            //   ——它的行内容与另外五页不一致（标题字重 400、辅助信息大一号且字色更深）就是
+            //   这么漏掉的。凡是"左列表右详情"的页面都必须在这张表里，否则它只有自证。
+            { key: 'crystallize', hash: '#/crystallize', rows: '.crystal-row', titleSel: '.crystal-title', chipSel: '.badge', subSel: '.crystal-meta' },
+          ]
+          /*
+           * ⚠️ 骨架/行内细节对比要求**每页都有行**。定时任务那一段的夹具是"量完就删"的，
+           *   到这里列表已经空了——第一版没补，于是 `schedules` 的 rowH / listBox /
+           *   title / rowBox 全是"没量到"，而"没量到"在判据里等于**假绿**（曾经就这么
+           *   绿过：`workflows` 那一页缩进 40px、行距 0，五页对比里它根本不参与）。
+           *   所以这里造一条，量完删掉。
+           */
+          const skSchedIds = []
+          {
+            const execId = new URLSearchParams(location.search).get('chainExecutor') ?? ''
+            if (!execId) {
+              errors.push('骨架对比：拿不到夹具执行者 id（schedules 那几页会没量到）')
+            } else {
+              // 两条：一条量行距（行距要两条紧邻的兄弟行才量得到），另一条当备份
+              for (const name of ['探针骨架夹具一', '探针骨架夹具二']) {
+                const res = await f.contentWindow.fetch('/api/schedules', {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({
+                    name,
+                    cron: '0 9 * * *',
+                    executorType: 'agent',
+                    executorId: execId,
+                    taskText: 'x',
+                  }),
+                })
+                if (res.status === 201) skSchedIds.push((await res.json()).id)
+                else errors.push(`骨架对比：造定时任务夹具失败（HTTP ${res.status}）`)
+              }
+            }
+          }
+
+          for (const pg of skPages) {
+            f.contentWindow.location.hash = pg.hash
+            await until(() => f.contentWindow.location.hash === pg.hash, 40)
+            const haveRows = await until(() => {
+              if (d().querySelectorAll('.list-pane ' + pg.rows).length > 0) return true
+              if (d().querySelector('.board')) {
+                const listBtn = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
+                  b.textContent.trim().startsWith('列表'),
+                )
+                if (listBtn) { click(listBtn); return false }
+              }
+              return false
+            }, 50)
+            await wait(300)
+            const lp = d().querySelector('.list-pane')
+            const head = lp.querySelector(':scope > .pane-head')
+            // 栏头与搜索**不依赖行**：就算这一页没有行（理论上不该有），也要量
+            sk.headH[pg.key] = need(`列表栏头高度（${pg.key}）`, () =>
+              head ? Math.round(head.getBoundingClientRect().height) : null)
+            sk.searchInHead[pg.key] = need(`搜索框位置（${pg.key}）`, () => {
+              const inHead = !!head?.querySelector('input')
+              const inBody = !!lp.querySelector('.pane-body input')
+              return { inHead, inBody }
+            })
+            // D64：三页栏头带里**都不许有标题**（聊天原来的「对话」按要求去掉）——
+            // 栏头规则从"标题 ≠ 页名才放标题"实际落到"三页都不放"。
+            sk.titleInHead[pg.key] = need(`栏头带无标题（${pg.key}）`, () =>
+              !head?.querySelector('h2'))
+            if (pg.key === 'tasks') {
+              // D64 顺手修 D61 的漏：全局 `.list-head`（51px）曾漏到任务列表里的
+              // 分组标题「需你处理 / 其余任务」上，把它们**固定**撑成 51px
+              // （实测 sep0/sep1 都是 51px）。修掉之后是内容高度：单行那条
+              // （其余任务）38px、双行那条（需要注意+长提示折行）59px。
+              // D67：「需要注意」后面的解释句（"执行失败/被取消…"）按要求删了，
+              // 两条都回到单行 ~38px。漏的特征是"全部 == 51"——用 **min** 抓它。
+              // ★ 2026-11（使用者："平铺改一下，去掉之前的分类"）：「需要注意/
+              //   其余任务」分段连同 `.list-head` 一起删了；分组标题现在是
+              //   分组视图的 `.group-head`（组头）。同一意图换载体继续钉：
+              //   组头也是内容高度（不许被全局固定高度带成一条死带）。
+              sk.separatorHeights = need('任务分组标题是内容高度', () => {
+                const seps = [...lp.querySelectorAll('.pane-body .list-group-head')]
+                if (seps.length === 0) return { min: 0, max: 0 }
+                const hs = seps.map((x) => Math.round(x.getBoundingClientRect().height))
+                return { min: Math.min(...hs), max: Math.max(...hs) }
+              })
+              // D67：删掉的解释句要**钉住"没有"**（谁把它加回来就红）——
+              // 判据：组头（分组标题）的文本里不许再出现它。
+              sk.separatorNoHint = need('分组标题不带解释', () => {
+                const seps = [...lp.querySelectorAll('.pane-body .list-group-head')]
+                const t = seps.length > 0 ? text(seps[0]) ?? '' : ''
+                return !t.includes('执行失败') && !t.includes('——')
+              })
+            }
+            if (!haveRows) {
+              sk.rowH[pg.key] = null
+              continue
+            }
+            const first = d().querySelector('.list-pane ' + pg.rows)
+            sk.rowH[pg.key] = need(`列表行高（${pg.key}）`, () =>
+              first ? Math.round(first.getBoundingClientRect().height) : null)
+            /*
+             * ★ 2026-11（D136）：行高的**令牌**（`min-height`）与"页内是否恒定"。
+             *
+             * 为什么不能只比行高：`--list-row-min-h` 的注释写着"内容更高时跟随内容——
+             * 统一的是这条底线，不是把内容压扁"。编排行的辅助信息里带一枚徽标，
+             * 实际高度 67px（聊天 64 / 智能体 65），那是**内容差异**不是缺陷；
+             * 而"令牌不一致"（比如某页把底线改成 56px）才是缺陷。所以拆成两条量：
+             *   · 底线：每页 `min-height` 必须 = 64px（令牌一致）；
+             *   · 恒定：同一页内任意两行高度差 ≤1px（列表是用来扫的，节奏不能抖）。
+             */
+            sk.rowMetrics[pg.key] = need(`行高令牌（${pg.key}）`, () => {
+              const rows = [...d().querySelectorAll('.list-pane ' + pg.rows)]
+              if (rows.length === 0) return null
+              const hs = rows.map((r) => Math.round(r.getBoundingClientRect().height))
+              return {
+                minH: getComputedStyle(rows[0]).minHeight,
+                spread: Math.max(...hs) - Math.min(...hs),
+                /*
+                 * ★ D231（诊断用，长期留着）：**每一行的高度与首行文字**。
+                 *   只报 `spread` 的时候，"某一页差 32px"只能靠猜是哪一行——
+                 *   这次就是靠它才看到"某条夹具的副行换行了"。多 60 字节，值。
+                 */
+                rows: rows.map((r, i) => ({
+                  h: hs[i],
+                  text: String(r.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 60),
+                })),
+                n: hs.length,
+              }
+            })
+            // ── 行内细节（D65）：标题 / 徽标 / 行容器 / hover 三页统一 ──
+            sk.title[pg.key] = need(`行内标题（${pg.key}）`, () => {
+              const t = first?.querySelector(pg.titleSel)
+              if (!t) return null
+              const c = getComputedStyle(t)
+              return { fs: Math.round(parseFloat(c.fontSize) * 10) / 10, w: Number(c.fontWeight) }
+            })
+            if (pg.chipSel) {
+              sk.chip[pg.key] = need(`徽标形状（${pg.key}）`, () => {
+                const b = first?.querySelector(pg.chipSel)
+                return b ? getComputedStyle(b).borderRadius : null
+              })
+            }
+            /*
+             * ★ 2026-11（D138）：**辅助信息那一行的字号与字色**。
+             *   沉淀页原来这里比别的页大一号（`--fs-sm`）且没写字色（继承 `--text`）——
+             *   而"标题字号/字重"那条量不到它。只在**容器自己声明**了这两项的三页量
+             *   （定时任务 / 编排 / 沉淀）；另外三页把 `faint fs-xs` 写在元素或子元素上，
+             *   容器级读数是继承值，不比。
+             */
+            if (pg.subSel) {
+              sk.sub[pg.key] = need(`辅助行（${pg.key}）`, () => {
+                const el = first?.querySelector(pg.subSel)
+                if (!el) return null
+                const c = getComputedStyle(el)
+                return { fs: Math.round(parseFloat(c.fontSize) * 10) / 10, color: c.color }
+              })
+            }
+            /*
+             * ★ 2026-11（D142）：副行里**文字是否在同一基线上**。
+             *
+             * 这一行里常把文字与徽标混着放，徽标的盒子比文字高 —— `align-items: center`
+             * 对齐的是**盒子**，于是"最近 15 小时前"比前面几段低 3px（实测）。
+             * 现在统一 `.list-row-sub` 用 `align-items: baseline`。判据：副行内各段文字的
+             * 顶边极差 ≤1px。
+             */
+            if (pg.subSel) {
+              sk.subBaseline[pg.key] = need(`副行基线（${pg.key}）`, () => {
+                const sub = first?.querySelector(pg.subSel)
+                if (!sub) return null
+                /*
+                 * ⚠️ 只比**同字号**的几段：字号不同时，即使基线对齐，**顶边**也不一样
+                 *    （11px 的阶段标签与 12px 的元信息天然差 ~1.9px）。第一版没滤字号，
+                 *    任务页就一直红——那不是缺陷，是量法错了。
+                 */
+                const baseFs = getComputedStyle(sub).fontSize
+                const tops = []
+                const visit = (el) => {
+                  for (const child of el.children) {
+                    const own = [...child.childNodes]
+                      .filter((n) => n.nodeType === 3 && (n.textContent ?? '').trim() !== '')
+                      .map((n) => {
+                        const r = document.createRange()
+                        r.selectNodeContents(n)
+                        return { top: r.getBoundingClientRect().top, fs: getComputedStyle(child).fontSize }
+                      })
+                    if (own.length > 0) tops.push(...own)
+                    else visit(child)
+                  }
+                }
+                visit(sub)
+                const sameSize = tops.filter((x) => x.fs === baseFs)
+                return {
+                  alignItems: getComputedStyle(sub).alignItems,
+                  n: sameSize.length,
+                  // 同字号段不足两段 ⇒ 量不出极差（不是缺陷）
+                  spread:
+                    sameSize.length < 2
+                      ? null
+                      : Math.round(
+                          (Math.max(...sameSize.map((x) => x.top)) -
+                            Math.min(...sameSize.map((x) => x.top))) *
+                            10,
+                        ) / 10,
+                }
+              })
+            }
+            sk.rowBox[pg.key] = need(`行容器（${pg.key}）`, () => {
+              const c = first ? getComputedStyle(first) : null
+              return c ? { align: c.alignItems, gap: c.gap } : null
+            })
+            /*
+             * ★★ 2026-11（D136）：**行容器 `ul` 自身**的三件事——这一条是"编排列表风格
+             *   不对"那次的判据。以前量的是行（`.list-row`）里的东西，而行**被 ul 的
+             *   默认内距整体推开**这件事不在任何判据里：
+             *     · 缩进：`<ul>` 没重置 ⇒ 浏览器默认 `padding-left: 40px`，
+             *       整列右移 40px、行宽少 40px（定时任务与编排各犯过一次）；
+             *     · 行距：三个老页面是 `gap: var(--sp-1)`（4px），漏了就是 0；
+             *     · 行左沿：以 `.pane-body` 的**内容左缘**为基准，行应当从 0 开始
+             *       （pane 自己的内距不算——各页内距不同是合理的，缩进不是）。
+             */
+            sk.listBox[pg.key] = need(`行容器 ul（${pg.key}）`, () => {
+              const ul = first?.closest('ul')
+              if (!ul) return null
+              const c = getComputedStyle(ul)
+              const bodyEl = ul.closest('.pane-body') ?? ul.parentElement
+              const bc = bodyEl ? getComputedStyle(bodyEl) : null
+              const bodyContentLeft =
+                bodyEl.getBoundingClientRect().left + parseFloat(bc?.paddingLeft ?? '0')
+              const rows = [...ul.querySelectorAll(pg.rows)]
+              // 行距只在"两条行是紧邻兄弟"时量（分组视图里中间会夹着组头，那样量不到）
+              const gap =
+                rows.length >= 2 && rows[0].nextElementSibling === rows[1]
+                  ? Math.round(rows[1].getBoundingClientRect().top - rows[0].getBoundingClientRect().bottom)
+                  : null
+              /*
+               * ★ 2026-11（D141）：分段方式从"4px 空隙"改成"**行间一条 1px 的 `--line` 上边线**"
+               *   ——空隙在静止状态（不 hover、不选中）什么也读不出来。这里量：
+               *   `gap === 0`、第一行**没有**上边线、第二行有一条 `--line` 色的上边线。
+               */
+              const borderOf = (el) => {
+                if (!el) return null
+                const bc = getComputedStyle(el)
+                return { w: bc.borderTopWidth, color: bc.borderTopColor }
+              }
+              const all = [...ul.querySelectorAll(pg.rows)]
+              return {
+                padLeft: c.paddingLeft,
+                listStyle: c.listStyleType,
+                gap,
+                inset: Math.round(first.getBoundingClientRect().left - bodyContentLeft),
+                firstRowTop: borderOf(all[0]),
+                secondRowTop: borderOf(all[1]),
+              }
+            })
+            sk.hover[pg.key] = need(`行 hover 底色（${pg.key}）`, () => {
+              // D66：三页行 hover 统一在标准控件 ListRow 的 `.list-row:hover` 里
+              // （scoped 选择器形如 `.list-row.svelte-xxx:hover`，`:hover` 在 hash 后面）。
+              for (const sheet of [...d().styleSheets]) {
+                try {
+                  for (const rule of [...sheet.cssRules]) {
+                    const st = rule.selectorText ?? ''
+                    if (/\.list-row(?:\.|:)/.test(st) && st.includes(':hover')) {
+                      const bg = rule.style.background || rule.style.backgroundColor
+                      if (bg) return bg
+                    }
+                  }
+                } catch {}
+              }
+              return null
+            })
+            if (pg.key === 'chat' || pg.key === 'tasks') {
+              sk.delInset[pg.key] = need(`操作按钮位置（${pg.key}）`, () => {
+                const li = first
+                const btn = li?.querySelectorAll('button')[1]
+                if (!li || !btn) return null
+                const lr = li.getBoundingClientRect()
+                const br = btn.getBoundingClientRect()
+                return {
+                  inset: Math.round((lr.right - br.right) * 10) / 10,
+                  centerDelta:
+                    Math.round(Math.abs(br.top + br.height / 2 - (lr.top + lr.height / 2)) * 10) / 10,
+                }
+              })
+            }
+          }
+          for (const id of skSchedIds) {
+            await f.contentWindow.fetch(`/api/schedules/${encodeURIComponent(id)}`, {
+              method: 'DELETE',
+            })
+          }
+          Object.assign(facts, {
+            'skeleton.rowMetrics': sk.rowMetrics,
+            'skeleton.headH': sk.headH,
+            'skeleton.searchInHead': sk.searchInHead,
+            'skeleton.rowH': sk.rowH,
+            'skeleton.delInset': sk.delInset,
+            'skeleton.headsTitleless': sk.titleInHead,
+            'skeleton.separatorHeights': sk.separatorHeights,
+            'skeleton.separatorNoHint': sk.separatorNoHint,
+            'skeleton.listBox': sk.listBox,
+            'skeleton.subRow': sk.sub,
+            'skeleton.subBaseline': sk.subBaseline,
+            'rowdetail.title': sk.title,
+            'rowdetail.chip': sk.chip,
+            'rowdetail.rowBox': sk.rowBox,
+            'rowdetail.hover': sk.hover,
+          })
+        }
+
+        /*
+         * ══════════════ 列表分组：两页同一个组头（D137）══════════════
+         *
+         * 这一档原来**两页各写一套**（任务页是带边框卡片按钮、智能体页是淡字行，
+         * 连 DOM 结构都不同）。现在组头是标准控件 `ListGroupHead` + `app.css` 的
+         * `.list-group-head` 一族，所以这里量**等式**：
+         *   · 两页组头同高（≤1px）、同字号、组名同字重（600）；
+         *   · 都有 chevron（折叠字形），计数都在右侧；
+         *   · 组间分隔线**只在第二组有**（第一组上方没有线——否则列表顶部会多一条悬空的）。
+         * 折叠行为本身由各页自己的判据守着（`tasks.groupCollapseToggle` / `agents.listGroups`）。
+         */
+        {
+          /** 按页面取"行标题"的类名（组头要跟它比字号与字色）。 */
+          const pgTitleClass = (hash) =>
+            hash === '#/tasks' ? 'task-title' : hash === '#/agents' ? 'agent-line' : null
+          const measureGroups = async (hash) => {
+            f.contentWindow.location.hash = hash
+            await until(() => f.contentWindow.location.hash === hash, 40)
+            await wait(400)
+            const heads = [...d().querySelectorAll('.list-pane .list-group-head')]
+            if (heads.length === 0) return null
+            const first = heads[0]
+            const second = heads[1] ?? null
+            const c = getComputedStyle(first)
+            const nameEl = first.querySelector('.list-group-name')
+            const tail = first.querySelector('.list-group-tail')
+            return {
+              n: heads.length,
+              h: Math.round(first.getBoundingClientRect().height),
+              fs: Math.round(parseFloat(c.fontSize) * 10) / 10,
+              nameWeight: nameEl ? getComputedStyle(nameEl).fontWeight : null,
+              hasChevron: !!first.querySelector('.chevron'),
+              glyph: (first.querySelector('.chevron')?.textContent ?? '').trim(),
+              countRight:
+                !!tail &&
+                Math.round(tail.getBoundingClientRect().right) >=
+                  Math.round(first.getBoundingClientRect().right) - 12,
+              // ★ D140：组头与行的**可分辨性**（使用者两轮反馈：颜色太接近 / 头比内容还小）
+              headBg: c.backgroundColor,
+              nameFs: nameEl ? Math.round(parseFloat(getComputedStyle(nameEl).fontSize) * 10) / 10 : null,
+              nameColor: nameEl ? getComputedStyle(nameEl).color : null,
+              // 未选中的行（`.list-row.active` 是选中态，底色本来就不同——见 app.css 的注释）
+              rowBg: (() => {
+                const r = d().querySelector('.list-pane .list-row:not(.active)') ?? d().querySelector('.list-pane .list-row')
+                return r ? getComputedStyle(r).backgroundColor : null
+              })(),
+              // 选中行的底色：组头**也不能**跟它同色，否则"选中的那一行"会被读成分组头
+              activeRowBg: (() => {
+                const r = d().querySelector('.list-pane .list-row.active')
+                return r ? getComputedStyle(r).backgroundColor : null
+              })(),
+              rowTitleFs: (() => {
+                const t = d().querySelector('.list-pane .list-row .' + (pgTitleClass(hash) ?? 'x'))
+                return t ? Math.round(parseFloat(getComputedStyle(t).fontSize) * 10) / 10 : null
+              })(),
+              rowTitleColor: (() => {
+                const t = d().querySelector('.list-pane .list-row .' + (pgTitleClass(hash) ?? 'x'))
+                return t ? getComputedStyle(t).color : null
+              })(),
+              /* D140 第二轮：分割从"只有第二组有顶线"改成**每个组头下方一条线**
+                 （两道线索：底色带 + 它下面那条线）。所以这里量三条：
+                 · 第一组**上方**不许有线（列表顶部不该凭空多一条）；
+                 · 每个组头下方必须是 1px；
+                 · 第二组与上一组之间要留出空隙（不然"带子 + 线"贴着上一行，还是分不清）。 */
+              borderTopFirst: getComputedStyle(first.closest('.list-group-head-wrap')).borderTopWidth,
+              borderBottomFirst: getComputedStyle(first.closest('.list-group-head-wrap')).borderBottomWidth,
+              borderBottomSecond: second
+                ? getComputedStyle(second.closest('.list-group-head-wrap')).borderBottomWidth
+                : null,
+              gapBeforeSecond: second
+                ? (() => {
+                    // 第二组上方那条"上一组最后一行"的下沿；
+                    // ⚠️ 上一组可能是**收起的**（智能体页「内置」默认收拢）⇒ 中间没有行，
+                    //    这时量不到"组间距"，记 null（与"只有一组"同样是"没量到"，不是缺陷）
+                    let el = second.closest('.list-group-head-wrap').previousElementSibling
+                    while (el && !el.classList.contains('list-row')) el = el.previousElementSibling
+                    return el
+                      ? Math.round(second.getBoundingClientRect().top - el.getBoundingClientRect().bottom)
+                      : null
+                  })()
+                : null,
+            }
+          }
+          facts['skeleton.groupHead'] = {
+            tasks: await measureGroups('#/tasks'),
+            agents: await measureGroups('#/agents'),
+          }
+        }
+
+        /**
+         * ★ 分批第 237 批（使用者："我新入库的 SKILL，必须要重新刷新才可以看到，不合理"）：
+         * **进「技能」页就该看到现在的真实样子**，不用先点「刷新」。
+         *
+         * 怎么量：应用**已经启动之后**（共享 store 早已载入）用接口新造一条技能——
+         * 这模拟的就是"别处写进来"（沉淀入库、CLI 装的、别的工具写进技能目录）。
+         * 然后切到 `#/skills`，**不点任何刷新**，看表格里有没有它。
+         *
+         * ⚠️ 服务端每次读都对账磁盘，所以这一条真正钉的是**页面有没有去读**（不是服务端）。
+         *
+         * ⚠️ **必须放在整支探针的最后**：它要把页面导航到「技能」页，而前面那些判据依赖
+         *    "停在聊天页的草稿态"（第一版插在中间，9 条聊天判据当场全红——这正是它的价值）。
+         */
+        /**
+         * ★ 分批第 239 批（使用者定："沉淀，确认入库后不删除，依然还可以继续反馈修改。
+         *   并可以持续入库"）：**入库之后留在审阅屏**，只多一行「已入库」说明，
+         *   「确认入库」还在（再点一次 = 更新同一份），「放弃」整页都没有。
+         *
+         * ⚠️ 这条**真的按一次入库**（会往探针那次性 daemon 的技能库里写一条），
+         *   所以和上面那条一样放在整支探针的最后——前面那些判据不该被库里多出来的东西影响。
+         */
+        facts['crystal.committedStaysOnReview'] = await (async () => {
+          // ⚠️ 这一段在 `cyEnter` / `cyQuery` 的作用域之外（它们在沉淀那一节里用 `const` 定义）
+          //    ⇒ 这里自己从 URL 取夹具 id、自己走一遍"切走 → 进来 → 等审阅态"。
+          const draftId = new URLSearchParams(location.search).get('crystalDraft')
+          if (!draftId) {
+            errors.push('没有起草夹具 id（这一条量不到）')
+            return null
+          }
+          f.contentWindow.location.hash = '#/tasks'
+          await untilNet(() => !d().querySelector('[data-review-actions]'), 40)
+          f.contentWindow.location.hash = `#/crystallize/${draftId}`
+          const entered = await untilNet(() => !!d().querySelector('[data-review-actions]'), 120)
+          if (!entered) {
+            errors.push('没进到审阅态（这一条量不到）')
+            return null
+          }
+          const commitBtn = d().querySelector('[data-review-commit]')
+          if (!commitBtn) {
+            errors.push('审阅态没有「确认入库」按钮')
+            return null
+          }
+          click(commitBtn)
+          const dialog = await untilNet(() => !!d().querySelector('[role="dialog"]'), 40)
+          if (!dialog) {
+            errors.push('点「确认入库」没弹确认框')
+            return null
+          }
+          const confirm = [...d().querySelectorAll('[role="dialog"] button')].find((b) =>
+            /^(确认|入库)/.test(text(b).trim()) && !text(b).includes('取消'),
+          )
+          if (!confirm) {
+            errors.push('确认框里找不到"确认"那一颗')
+            return null
+          }
+          click(confirm)
+          /**
+           * 入库是异步的：打接口 → 落 skills-mine → git 提交。所以先等**确认框关掉**
+           * （提交成功才会关），再等那一行说明。
+           * ⚠️ `untilNet` 每一轮只是一次真实往返，120 轮在本地不到一秒——而 git 提交
+           *   比它慢，第一版就是这么量到"还在保存中"的。这里给足 400 轮。
+           */
+          await untilNet(() => !d().querySelector('[role="dialog"]'), 400)
+          const noted = await untilNet(() => !!d().querySelector('[data-committed-note]'), 200)
+          const diag = {
+            dialogStillOpen: !!d().querySelector('[role="dialog"]'),
+            errorText: (text(d().querySelector('.crystal-flow .notice.bad')) ?? '').slice(0, 120),
+            confirmLabel: text(confirm).trim(),
+          }
+          const stillReview = !!d().querySelector('[data-review-actions]')
+          const stillCommit = !!d().querySelector('[data-review-commit]')
+          const note = text(d().querySelector('[data-committed-note]')) ?? ''
+          const noAbandon = ![...d().querySelectorAll('button')].some(
+            (b) => text(b).trim() === '放弃',
+          )
+          if (!noted) errors.push('入库成功之后没有出现「已入库」那一行说明')
+          if (!stillReview) errors.push('入库之后离开了审阅屏（应该留在原地继续改）')
+          if (!stillCommit) errors.push('入库之后「确认入库」没了（还应该能再入库一次）')
+          if (!noAbandon) errors.push('入库之后页面上又出现了「放弃」')
+          return { noted, stillReview, stillCommit, noAbandon, note: note.slice(0, 40), diag }
+        })()
+
+        facts['skills.reloadsOnEnter'] = await (async () => {
+          const lateSlug = 'probe-late-skill'
+          const created = await f.contentWindow
+            .fetch('/api/skills', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                skills: [
+                  {
+                    slug: lateSlug,
+                    name: lateSlug,
+                    description: '探针：应用启动之后才入库的一条技能',
+                    body: '# probe late skill\n\n启动之后才写进来的。\n',
+                  },
+                ],
+              }),
+            })
+            .then((r) => r.ok)
+            .catch(() => false)
+          if (!created) {
+            errors.push('造"晚到的技能"失败（POST /api/skills）——这一条量不到')
+            return null
+          }
+          f.contentWindow.location.hash = '#/skills'
+          const onPage = await until(() => d().querySelector('.detail-pane') !== null, 80)
+          // 再等一拍：页面自己那次读是异步的
+          await untilNet(() => (d().body.innerText ?? '').includes(lateSlug), 40)
+          const seen = (d().body.innerText ?? '').includes(lateSlug)
+          if (!onPage) errors.push('没切到「技能」页')
+          else if (!seen) {
+            errors.push('应用启动之后才入库的技能，在「技能」页上看不到（没有自动重读）')
+          }
+          return seen
+        })()
+        /**
+         * ★★ D220（使用者："建立对话的时候，只是新建一个 Item，不需要发送第一句话"）：
+         *   放在**最后**执行——它会"新建一条空对话 → 删掉"，中途会改变聊天页状态，
+         *   放中间会把后面一串判据的现场搞乱。
+         */
+        /*
+         * ★ D251：聊天的「改名保存」与智能体编辑页同一条判据——**没改动时置灰**。
+         *   原来这颗按钮恒可用：改名框一打开里面就是当前标题，点它不会有任何事发生
+         *   （`saveTitle()` 里也确实直接 return）——那是"看着能点、其实什么都不做"的假按钮。
+         */
+        facts['chat.renameSaveGated'] = await (async () => {
+          f.contentWindow.location.hash = '#/chat'
+          await until(() => !!d().querySelector('.list-pane'), 80)
+          const row = d().querySelector('.list-pane .list-row-main')
+          if (!row) return { skipped: '没有现成的对话（探针夹具里应该有）' }
+          click(row)
+          const headOk = await until(() => !!d().querySelector('.detail-head.chat-head h2'), 80)
+          if (!headOk) return { skipped: '点开对话后没有栏头标题' }
+          click(d().querySelector('.detail-head.chat-head h2'))
+          const opened = await until(() => !!d().querySelector('.detail-head.chat-head .rename-input'), 40)
+          if (!opened) return { skipped: '标题点不进改名态' }
+          const saveBtn = () => d().querySelector('.detail-head.chat-head .btn--primary')
+          const out = { 进改名态: true, 初始置灰: saveBtn()?.disabled === true, 改了之后可用: null }
+          const input = d().querySelector('.detail-head.chat-head .rename-input')
+          const setter = Object.getOwnPropertyDescriptor(input.constructor.prototype, 'value')?.set
+          setter?.call(input, (input.value ?? '') + '改')
+          input.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
+          await wait(120)
+          out.改了之后可用 = saveBtn()?.disabled === false
+          // 收尾：取消改名（别把标题改掉，后面还有判据）
+          const cancel = [...d().querySelectorAll('.detail-head.chat-head button')].find(
+            (b) => text(b) === '取消',
+          )
+          if (cancel) click(cancel)
+          return out
+        })()
+
+        facts['chat.createEmptyConversation'] = await (async () => {
+          f.contentWindow.location.hash = '#/chat'
+          await until(() => !!d().querySelector('.list-pane'), 80)
+          await wait(500)
+          const before = (await f.contentWindow.fetch('/api/conversations').then((r) => r.json())).items ?? []
+          const newBtn = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
+            (text(b) ?? '').includes('新建对话'),
+          )
+          if (!newBtn) {
+            errors.push('聊天页顶栏找不到「新建对话」')
+            return null
+          }
+          click(newBtn)
+          const draftOpen = await until(() => !!d().querySelector('#chat-agent'), 40)
+          const createBtn = d().querySelector('[data-chat-create]')
+          if (!createBtn) {
+            errors.push('起草态没有「创建对话」这颗按钮（[data-chat-create]）')
+            return { 起草态: draftOpen, 有创建键: false }
+          }
+          click(createBtn)
+          await wait(1500)
+          const after = (await f.contentWindow.fetch('/api/conversations').then((r) => r.json())).items ?? []
+          const created = after.find((c) => !before.some((b) => b.id === c.id)) ?? null
+          // 建好之后已经是**对话态** ⇒ 标题在 `.detail-head` 里（起草态的 `.pane-head` 没了）
+          const head = text(d().querySelector('.detail-pane .detail-head h2')) ?? ''
+          const result = {
+            起草态: draftOpen,
+            有创建键: true,
+            多了一条: created !== null,
+            标题是未命名: head === '未命名对话',
+            轮数: created ? created.turnCount : null,
+            建好之后有输入条: !!d().querySelector('.detail-pane textarea'),
+          }
+          // 收尾：删掉这条测试对话（别把探针的现场留给后面的运行）
+          if (created) {
+            await f.contentWindow.fetch('/api/conversations/' + created.id, { method: 'DELETE' })
+          }
+          return result
+        })()
+
+        publish(true)
+      }
+
+      main().catch((e) => {
+        errors.push('探针自身异常：' + (e && e.stack ? e.stack : String(e)))
+        publish(true)
+      })
+    </script>
+  </body>
+</html>
         // ══════════════ 编排生成者（D255）：候选卡片 + 收进编排库 ══════════════
         /**
          * 使用者定的新流程（D255）：

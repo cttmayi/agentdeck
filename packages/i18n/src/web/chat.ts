@@ -564,44 +564,18 @@ export const chatText = {
     en: 'There is already a workflow named “{name}”. Replace it? Its code and its {n} inline agents are replaced wholesale (agents missing from this draft are deleted).',
   },
   'chat.wfOverwriteConfirm': { zh: '覆盖它', en: 'Replace' },
-  'chat.agentMakerAction': { zh: '确认生成智能体', en: 'Confirm agent' },
-  'chat.agentMakerPanelTitle': { zh: '确认生成智能体 · 岗位卡 + 配套技能', en: 'Confirm the agent · job card + skills' },
-  'chat.agentMakerDraftNote': {
-    zh: '岗位卡已由智能体生成者起草（规则由它描述，你确认过）——改一改，然后确认生成。',
-    en: 'The job card was drafted by the agent maker (it described the rules, you confirmed them) — tweak, then confirm.',
-  },
-  'chat.agentMakerNameLabel': { zh: '岗位名', en: 'Name' },
+  // ── 候选智能体卡片（2026-11，D256）──
   /*
-   * ⚠️ 2026-11（S4，D127）：`chat.agentMakerRoleLabel`（生成智能体面板里"角色"那一格）
-   *   随角色退场删——生成出来的就是普通智能体。
+   * 与候选编排卡片（`chat.wf*`）同一张图纸：生成者把候选写成存储形状放进工作目录，
+   * 聊天里出现一张卡；点「生成智能体」直接落库（建智能体 + 配套技能）并跳到智能体编辑页。
+   * ⚠️ 词条里不许出现 markdown 记号（`**` 与反引号）——i18n 守卫要求。
    */
-  'chat.agentMakerInstructionsLabel': {
-    zh: '指令（一段）· 边界 / 输出格式都在这一段里',
-    en: 'Instructions (one block) · boundary and output format live in here',
+  'chat.agentReadyTitle': { zh: '已生成智能体「{name}」', en: 'Agent drafted: “{name}”' },
+  'chat.agentBlockedTitle': { zh: '还不能生成：「{name}」', en: 'Not adoptable yet: “{name}”' },
+  'chat.agentMeta': {
+    zh: '配套技能 {n} 条（{skills}）· 指令 {chars} 字',
+    en: '{n} companion skills ({skills}) · {chars} chars of instructions',
   },
-  'chat.agentMakerBoundaryHint': {
-    zh: '草稿不是合同——检查「边界」段（生成者按最小权限缺省描述，你确认过）。',
-    en: 'The draft is not a contract — check the "boundary" section (the maker described it with minimal-permission defaults, which you confirmed).',
-  },
-  'chat.agentMakerSkillsLabel': { zh: '配套技能（AI 起草 · 随智能体一起确认）', en: 'Accompanying skills (AI-drafted, confirmed together)' },
-  'chat.agentMakerSkillsWarn': {
-    zh: '技能草稿未经验证——建议先让智能体干几轮，再用沉淀结晶正式版（提示，不是校验）。',
-    en: 'Skill drafts are unverified — run the agent a few times first, then crystallize the official version (a hint, not a gate).',
-  },
-  'chat.agentMakerSkillBodyPlaceholder': {
-    zh: 'SKILL.md 正文（When to Use / Procedure）',
-    en: 'SKILL.md body (When to Use / Procedure)',
-  },
-  'chat.agentMakerRemoveSkill': { zh: '去掉这条', en: 'Drop this one' },
-  'chat.agentMakerConfirm': { zh: '确认生成', en: 'Confirm & create' },
-  'chat.agentMakerConfirmHint': {
-    zh: '配套技能作为新智能体的内置技能（不进共享技能池）· 人确认是唯一入口',
-    en: 'Companion skills become the new agent\'s built-in skills (not in the shared pool) · a human confirm is the only way in',
-  },
-  'chat.agentMakerDone': {
-    zh: '已创建智能体「{name}」+ {n} 条配套技能作为它的内置技能',
-    en: 'Created agent "{name}" with {n} companion skill(s) as its built-in skills',
-  },
-  'chat.agentMakerFail': { zh: '生成失败：{error}', en: 'Creation failed: {error}' },
-  'chat.agentMakerLoading': { zh: '正在读岗位卡…', en: 'Loading the job card…' },
+  'chat.agentAdopt': { zh: '生成智能体', en: 'Create agent' },
+  'chat.agentAdopted': { zh: '已生成智能体「{name}」', en: 'Created agent “{name}”' },
 } as const satisfies TextCatalog
