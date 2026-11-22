@@ -128,17 +128,24 @@ description: 周报的三段结构：结论 / 证据 / 下一步
         保存失败的原话就留在浮层里（不关窗、不跳走）。
       </p>
 
-      <h2>5. 哪些能改（这张表就是实现范围）</h2>
+      <h2>5. 限制只有通用的几条（没有"这个文件不许改"的特例）</h2>
       <div class="table-wrap"><table class="table">
-        <thead><tr><th>文件</th><th>能改吗</th><th>为什么</th></tr></thead>
+        <thead><tr><th>限制</th><th>怎么判</th><th>为什么</th></tr></thead>
         <tbody>
-          <tr><td><code>instructions.md</code>、<code>skills/&lt;名&gt;/SKILL.md</code>、<code>main.js</code>、<code>task.md</code></td><td>✅ 正文直接改</td><td>磁盘为准，与技能的 frontmatter 规范化同一条链</td></tr>
-          <tr><td><code>agent.json</code> / <code>workflow.json</code> / <code>schedule.json</code></td><td>⚠️ 校验后写</td><td>里面有 <code>id</code> 与引用键，写坏了 run / issue 全指空</td></tr>
-          <tr><td><code>agent.json</code> 的 <code>name</code></td><td>❌ 拒绝</td><td>D231：目录名 = 名字的 slug，改名要搬目录 ⇒ 走正规入口</td></tr>
-          <tr><td><code>memory.jsonl</code>、<code>log/*.jsonl</code>、<code>migrations.json</code></td><td>❌ 只读</td><td>append-only 日志与平台账本</td></tr>
-          <tr><td>二进制 / 非 UTF-8</td><td>❌ 拒绝并说明</td><td>与技能安装"只收文本"同一口径；十六进制那一面仍可看</td></tr>
+          <tr><td><b>只收 UTF-8 文本</b></td><td>读回来非文本 / 二进制 ⇒ 拒绝并说明</td><td>与技能安装"只收文本"同一口径；十六进制那一面仍可看</td></tr>
+          <tr><td><b>大小上限</b></td><td>与技能上限同一个数（256 KB）；超了不落盘、说清多少字节</td><td>超限写下去，注入 / 读取那一侧会炸在一个很远的地方</td></tr>
+          <tr><td><b>路径必须待在 scope 目录里</b></td><td>拒 <code>..</code>、绝对路径、<code>\</code> 开头、盘符</td><td>与技能支持文件同一道防线</td></tr>
+          <tr><td><b><code>.json</code> 必须能 parse</b></td><td><code>JSON.parse</code> 失败 ⇒ 不落盘，原话 + 位置回显</td><td>只查**格式**；语义（谁引用谁）不查</td></tr>
+          <tr><td><b><code>.jsonl</code> 每一行都要能 parse</b></td><td>逐行 <code>JSON.parse</code>，第 N 行坏 ⇒ 报第 N 行、不落盘</td><td>append-only 日志的形状是"一行一条"，坏一行整份读不出来</td></tr>
+          <tr><td><b>原子写</b></td><td>tmp → fsync → rename</td><td>半截文件 = 读到坏数据</td></tr>
         </tbody>
       </table></div>
+      <p class="lead">
+        ⚠️ **没有**按文件名开的白名单 / 黑名单：<code>agent.json</code>、<code>memory.jsonl</code>、
+        <code>migrations.json</code> 都**能改**——只过上面那几条通用检查（格式、编码、大小、路径）。
+        也就是说 <code>id</code> 这类引用键**允许被手改**，改坏了引用会断——平台不拦，
+        只保证"你写进去的是合法 JSON"。这是使用者的决定（"只有通用限制，不需要特殊限制"）。
+      </p>
 
       <h2>6. 接口：把已有的那对端点 scope 化</h2>
       <pre class="code-mock">GET /api/fs/&lt;scope&gt;/files?dir=      ← 一层目录（与 /api/runs/:id/files 同一份实现）
