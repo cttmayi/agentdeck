@@ -111,10 +111,18 @@
       />
     {:else if asAgent}
       <!--
-        ★ D245（使用者："我心目中可以作为某种高级默认隐藏目录显示，而不是有一个
-        打开目录的按钮"）：**不是按钮 + 浮层**，而是页面上**一节默认收起**的目录树
-        ——折叠段头一行，展开就是它的文件；点文件名仍是那个 FileViewer 浮层。
+        ★ D245（使用者："可以作为某种高级默认隐藏目录显示，而不是有一个打开目录的
+        按钮"）：**一节默认收起**的目录树，不是按钮 + 浮层。
+        ★ 位置（对 `ui-style.md` §2.4「整行宽的辅助块只能放在主内容之后」）：
+        它放在**表单卡片之后、页面底部**——正文的第一块永远是这一页要你回答的东西
+        （名字 / CLI / 指令 / 技能 / 入口），"它的文件"是补充视角，不该抢在最前面。
       -->
+      <AgentDetail
+        agent={asAgent}
+        scope={{ kind: 'workflow', workflowId, workflowName: wf?.name ?? '' }}
+        onclose={ondone}
+        onchanged={() => {}}
+      />
       {#if !isNew}
       <div class="fold-section" data-wf-agent-dir>
         <button type="button" class="fold-head" aria-expanded={dirOpen} onclick={() => (dirOpen = !dirOpen)}>
@@ -133,12 +141,7 @@
         {/if}
       </div>
       {/if}
-      <AgentDetail
-        agent={asAgent}
-        scope={{ kind: 'workflow', workflowId, workflowName: wf?.name ?? '' }}
-        onclose={ondone}
-        onchanged={() => {}}
-      />
+
     {/if}
   {/snippet}
 </MainArea>
