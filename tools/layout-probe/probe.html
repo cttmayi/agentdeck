@@ -4159,8 +4159,14 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           f.contentWindow.location.hash = '#/chat'
           await until(() => !d().querySelector('.detail-pane'))
           f.contentWindow.location.hash = '#/schedules'
-          await until(() => !!d().querySelector('.detail-pane .detail-actions'))
-          const still = !!d().querySelector('.detail-pane .detail-actions')
+          /*
+           * ⚠️ 等的是**定时任务表单自己的锚点**（`.freq-picker`），不是"某个 .detail-actions"。
+           *   原来等后者，D250 给聊天起草态的栏头加了 `.detail-actions` 之后这条会在
+           *   **切页那一瞬间**抢到聊天的栏头（表单一闪就测完了 ⇒ 量到"没有保存按钮"）。
+           *   判据必须绑在"这一屏的东西"上，而不是"一类容器"上。
+           */
+          await until(() => !!d().querySelector('.detail-pane .freq-picker'))
+          const still = !!d().querySelector('.detail-pane .freq-picker')
           const save = [...d().querySelectorAll('.detail-pane .detail-actions button')].find(
             (b) => text(b) === '保存',
           )
@@ -4186,7 +4192,8 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             return false
           }
           click(openBtn)
-          await until(() => !!d().querySelector('.detail-pane .detail-actions'))
+          // ⚠️ 等的同样是**定时任务表单自己的锚点**（`.freq-picker`），理由见上面那条注释
+          await until(() => !!d().querySelector('.detail-pane .freq-picker'))
           const pv = (el, v) => {
             el.value = v
             el.dispatchEvent(new Event('input', { bubbles: true }))
@@ -4703,9 +4710,13 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           const labels = [...d().querySelectorAll('.detail-pane .detail-actions button')].map(
             (b) => (text(b) ?? '').trim(),
           )
+          // ★ D250：「名字」这一格编辑态也要在（原来只在新建态，于是编排建成后改不了名）
+          const nameInput = d().querySelector('.detail-pane input#wf-name')
           return {
             withDetail: !!shell && shell.className.includes('with-detail'),
             有代码: (area?.value ?? '').length > 0,
+            有名字格: nameInput !== null,
+            名字格有值: (nameInput?.value ?? '') !== '',
             动作: labels,
           }
         })()
@@ -5148,11 +5159,29 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             60,
           )
           if (!jumped) errors.push('点了「AI 生成…」没有跳到聊天页')
-          // 起草态：右栏栏头是「新建对话」，且执行者下拉在
+          /*
+           * ★ D250：起草态的判据改成**钩子**（`[data-chat-create]`）而不是类名。
+           *   原来靠 `.pane-head` 认——那是"把判据写进实现"，于是栏头想换成 ④ 新建视图的
+           *   `.detail-head` 时，这条判据反而成了挡路的东西。现在量三件事：
+           *     ① 它落在起草态（那一屏唯一的钩子在）；
+           *     ② 栏头是 `.detail-head`（④ 新建视图的标准骨架）；
+           *     ③ 主操作在栏头右侧的 `.detail-actions` 里，而不是底下。
+           */
           const drafting = await until(
-            () => (text(d().querySelector('.detail-pane .pane-head h2')) ?? '').includes('新建对话'),
+            () => (text(d().querySelector('.detail-pane .detail-head h2')) ?? '').includes('新建对话')
+              && !!d().querySelector('[data-chat-create]'),
             60,
           )
+          const draftHead = d().querySelector('.detail-pane .detail-head')
+          const draftCreate = d().querySelector('[data-chat-create]')
+          facts['chat.draftHead'] = {
+            是新建视图栏头: !!draftHead,
+            旧栏头没了: d().querySelector('.detail-pane .pane-head') === null,
+            主操作在栏头: !!(draftHead && draftCreate && draftHead.contains(draftCreate)),
+            主操作在动作列:
+              !!draftHead && !!draftCreate && draftCreate.closest('.detail-actions') !== null,
+            有取消: !!d().querySelector('[data-chat-cancel]'),
+          }
           if (!drafting) errors.push('点了「AI 生成…」落在聊天页，但**不在起草态**（旧对话被打开了）')
           const sel = d().querySelector('#chat-agent')
           const picked = sel === null ? null : sel.value

@@ -4395,7 +4395,7 @@ a > button { width: 100%; }
               </thead>
               <tbody>
                 <tr><td>聊天</td><td><code>#/chat</code></td><td>① 列表页</td><td>栏头</td><td>✅ 一致</td></tr>
-                <tr><td>创建对话</td><td><code>#/chat</code>（草稿态）</td><td>④ 新建视图</td><td>栏头 <code>[data-chat-create]</code></td><td>✅ 一致</td></tr>
+                <tr><td>创建对话</td><td><code>#/chat</code>（草稿态）</td><td>④ 新建视图</td><td>栏头 <code>[data-chat-create]</code></td><td>✅ 一致（D250 栏头换成 <code>.detail-head</code>，并补了「取消」）</td></tr>
                 <tr><td>任务</td><td><code>#/tasks</code></td><td>① 列表页</td><td>栏头（选中态）</td><td>✅ 一致</td></tr>
                 <tr><td>新建任务</td><td><code>#/tasks/new</code></td><td>④ 新建视图</td><td>栏头 <code>[data-task-submit]</code></td><td>✅ 一致（D243 取消吸底）</td></tr>
                 <tr><td>智能体</td><td><code>#/agents</code></td><td>① 列表页</td><td>栏头（选中态）</td><td>✅ 一致</td></tr>
@@ -4404,18 +4404,19 @@ a > button { width: 100%; }
                 <tr><td><b>安装技能</b></td><td><code>#/skills</code>（面板态）</td><td><b>④ 新建视图</b></td><td>栏头 <code>[data-skills-install-submit]</code></td><td>✅ 一致（D244 从 ⑤ 迁过来）</td></tr>
                 <tr><td>沉淀</td><td><code>#/crystallize</code></td><td>① 列表页 + 流程页</td><td>流程页栏头</td><td>✅ 一致</td></tr>
                 <tr><td>定时任务</td><td><code>#/schedules</code></td><td>① 列表页</td><td>栏头（新建态）</td><td>✅ 一致</td></tr>
-                <tr><td>编排</td><td><code>#/workflows</code></td><td>① 列表页</td><td>栏头（选中 / 新建态）</td><td>✅ 一致</td></tr>
+                <tr><td>编排</td><td><code>#/workflows</code></td><td>① 列表页</td><td>栏头（选中 / 新建态）</td><td>✅ 一致（D250：编辑态也有「名字」输入框）</td></tr>
                 <tr><td>编排运行画面</td><td><code>#/workflows/run/&lt;id&gt;</code></td><td>④ 新建视图（整页一屏）</td><td>栏头</td><td>✅ 一致</td></tr>
                 <tr><td>编排内建智能体 · 新建</td><td><code>#/workflows/agents/&lt;wid&gt;/new</code></td><td>④ 新建视图</td><td>栏头</td><td>✅ 一致（D243）</td></tr>
-                <tr><td>编排内建智能体 · 编辑</td><td><code>#/workflows/agents/&lt;wid&gt;/&lt;aid&gt;</code></td><td>① 列表页的详情列</td><td>栏头</td><td>✅ 一致（复用智能体编辑页）</td></tr>
+                <tr><td>编排内建智能体 · 编辑</td><td><code>#/workflows/agents/&lt;wid&gt;/&lt;aid&gt;</code></td><td>① 列表页的详情列</td><td>栏头</td><td>✅ 一致（与新建**同一个组件** <code>AgentForm</code>，D249）</td></tr>
                 <tr><td>设置</td><td><code>#/settings</code></td><td>③ 卡片页</td><td>卡片内 / 栏头</td><td>✅ 一致</td></tr>
                 <tr><td>关于</td><td><code>#/about</code></td><td>③ 卡片页</td><td>—</td><td>✅ 一致</td></tr>
               </tbody>
             </table>
           </div>
           <p class="demo-rule-note">
-            <b>这一版没有待办</b>：16 行全部一致（安装技能 D244 迁完）。以后新增页面/入口，
-            往这张表里加一行、并指到 ①–⑤ 里的一类——**归不到任何一类，就说明骨架还没定义**。
+            <b>这一版没有待办</b>：16 行全部一致（安装技能 D244、编排编辑态可改名 D250、
+            创建对话的栏头 D250）。以后新增页面/入口，往这张表里加一行、并指到 ①–⑤ 里的一类
+            ——**归不到任何一类，就说明骨架还没定义**。
           </p>
         </section>
       </div>

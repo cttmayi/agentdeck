@@ -1129,22 +1129,38 @@
         {:else if drafting}
           <!--
             ★★ D220（使用者："建立对话的时候只是新建一个 Item，不需要发送第一句话"）：
-              栏头还是原来的 `pane-head`（不换类名：探针按它认"起草态"），右边多一颗
-              「创建对话」——按它就直接建出一条**空对话**，进对话页再敲第一句话
+              右边那颗「创建对话」按下去直接建出一条**空对话**，进对话页再敲第一句话
               （标题由那句话命名）。输入条照旧在（打第一句就建对话那条老路仍然可用）。
+            ★ D250：栏头从 `.pane-head` 换成 **`.detail-head`**——这一屏是
+              **④ 新建视图**（`ui-style.md` §2.4.2），骨架就那一份：标题「新建 X」在左、
+              主操作在右侧 `.detail-actions` 里（D243 定的规矩，"新建视图没有例外"）。
+              原来用旧类名只是为了探针按类名认"起草态"——那是把判据写进实现的坏示范，
+              现在探针改认 `[data-chat-create]`（这一屏唯一的钩子）。
+            ★ 顺带补一颗「取消」：`head` snippet 会**整个接管**栏头，`MainArea` 的窄屏返回
+              按钮因此不渲染——窄屏进起草态原先没有任何出口。取消 = 回空态（不建对话）。
           -->
-          <div class="pane-head">
-            <h2>{$t('chat.newConversation')}</h2>
-            <button
-              type="button"
-              class="btn btn--primary"
-              data-chat-create
-              disabled={creating || draftPick.agentId === ''}
-              title={$t('chat.createHint')}
-              onclick={() => void createDraftConversation()}
-            >
-              {creating ? $t('common.creating') : $t('chat.createConversation')}
-            </button>
+          <div class="detail-head">
+            <div class="detail-head-main">
+              <h2>{$t('chat.newConversation')}</h2>
+            </div>
+            <div class="detail-actions">
+              <button
+                type="button"
+                class="btn btn--primary"
+                data-chat-create
+                disabled={creating || draftPick.agentId === ''}
+                title={$t('chat.createHint')}
+                onclick={() => void createDraftConversation()}
+              >
+                {creating ? $t('common.creating') : $t('chat.createConversation')}
+              </button>
+              <button
+                type="button"
+                class="btn btn--ghost"
+                data-chat-cancel
+                onclick={() => (drafting = false)}
+              >{$t('common.cancel')}</button>
+            </div>
           </div>
         {:else if activeConversation !== null}
       <div class="detail-head chat-head">

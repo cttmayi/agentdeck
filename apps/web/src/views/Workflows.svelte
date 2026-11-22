@@ -449,6 +449,16 @@
               </button>
             {/each}
           </div>
+        {/if}
+
+        {#if detailOpen}
+          <!--
+            ★ D250：「名字」这一格**编辑态也要有**。它原来包在 `{#if creating}` 里
+            （只有新建时能填），于是编排**建成之后改不了名**：`formName` 从库里载入、
+            `save()` 也会把它发出去，可界面上根本没有输入点——一个"数据在、界面没有"的
+            典型缺陷（这类东西在本仓库是明令禁止的，见 CLAUDE.md 硬约束第 5 条）。
+            现在它和「代码」一样两态都在：新建时在模板行下面，编辑时在代码上面。
+          -->
           <div class="field">
             <label for="wf-name">{$t('workflows.nameLabel')}</label>
             <input
@@ -459,9 +469,6 @@
               autocomplete="off"
             />
           </div>
-        {/if}
-
-        {#if detailOpen}
           <div class="field">
             <label for="wf-code">{$t('workflows.codeLabel')}</label>
             <!-- ★ 2026-11 使用者："编排代码的显示需要有代码高亮等专业编辑" ⇒ CodeEditor
