@@ -10,12 +10,12 @@
     loadError,
   } from '../lib/stores.ts'
   import MainArea from '../components/MainArea.svelte'
-  import NewAgentForm from '../components/NewAgentForm.svelte'
   import WorkspaceSettings from '../components/WorkspaceSettings.svelte'
   import ListPane from '../components/ListPane.svelte'
   import ListGroupHead from '../components/ListGroupHead.svelte'
 import ListRow from '../components/ListRow.svelte'
-  import AgentDetail from '../components/AgentDetail.svelte'
+  import AgentForm from '../components/AgentForm.svelte'
+  import { blankAgent } from '../lib/agent-blank.ts'
   import type { Agent } from '../lib/api.ts'
   import { hasEntry, isHalfBuiltinAgent, isPlatformMember } from '../lib/members.ts'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
@@ -58,6 +58,12 @@ import ListRow from '../components/ListRow.svelte'
    */
   /** 当前点开查看的 agent。null = 还没有选（右栏显示占位）。 */
   let selectedId: string | null = null
+  /**
+   * ★ D249：新建态交给 `AgentForm` 的那份**空白智能体**（只提供"还没有库里那一份"的
+   * 基准，不承载任何请求）。做成常量：每次渲染都 `blankAgent()` 会造新对象，
+   * 那份对象是 `agent` prop，无谓地让下游重算。
+   */
+  const blank = blankAgent()
   /**
    * ★ 2026-11（D164）：**复制来的预填**（复制 = 带配置的新建，不是立即落库）。
    * 新建表单读它来初始化；用户点「新建智能体」时清空。
@@ -498,20 +504,29 @@ import ListRow from '../components/ListRow.svelte'
     {#snippet body()}
       {#if settingsOpen}
         <WorkspaceSettings onclose={() => (settingsOpen = false)} />
-      {:else if creating}
-        <NewAgentForm
-          prefill={createPrefill ?? undefined}
-          onclose={() => (creating = false)}
+      {:else if creating || selected}
+        <!--
+          ★ D249（使用者："按 B 做，我就是要同一页面"）：**新建与编辑是同一个组件**
+          （`AgentForm`，`mode` 决定）。原来这里是两个组件 `NewAgentForm` / `AgentDetail`
+          ——同一张卡两份实现。新建态交一份空白智能体（`blankAgent()`），它只提供
+          "还没有库里那一份"的基准值，不承载任何接口请求。
+        -->
+        <!--
+          ★ D249：`{#key}` 是必须的——新建与编辑现在是**同一个组件**，`mode` 变了但实例
+          会被复用，而草稿/预填只在 mount 时初始化（复用的话"点复制"拿到的还是上一条
+          编辑态里的草稿：名字空着、指令是旧的。探针 `agents.copyPrefill` 当场红过）。
+        -->
+        {#key creating ? 'create' : selected?.id ?? 'none'}
+        <AgentForm
+          mode={creating ? 'create' : 'edit'}
+          agent={creating ? blank : selected ?? blank}
+          prefill={creating ? createPrefill ?? undefined : undefined}
+          onclose={creating ? () => (creating = false) : () => (selectedId = null)}
           oncreated={() => {
             creating = false
             createPrefill = null
             void loadAgents()
           }}
-        />
-      {:else if selected}
-        <AgentDetail
-          agent={selected}
-          onclose={() => (selectedId = null)}
           onchanged={() => void loadAgents()}
           oncopy={(prefill) => {
             /*
@@ -526,6 +541,7 @@ import ListRow from '../components/ListRow.svelte'
             selectedId = null
           }}
         />
+        {/key}
       {/if}
     {/snippet}
   </MainArea>

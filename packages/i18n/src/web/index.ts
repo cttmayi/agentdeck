@@ -23,7 +23,7 @@ import { workflowsText } from './workflows.ts'
  * 界面文案总表。
  *
  * 分文件的依据是**代码结构**（一个区域一份）——看到 `agents.new` 就知道去
- * `Agents.svelte` / `NewAgentForm.svelte` 找调用点，改文案时不用全局搜中文。
+ * `Agents.svelte` / `AgentForm.svelte` 找调用点，改文案时不用全局搜中文。
  *
  * ⚠️ **合并时同名的键会静默覆盖**（对象展开的语义就是"后者赢"），而且**漏接
  *    一张表不会有任何报错**——症状只是那个区域的词条在界面上显示成键名

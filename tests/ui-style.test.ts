@@ -87,6 +87,37 @@ const ALLOW = {
 }
 
 describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
+  /**
+   * ★ D249（使用者："按 B 做，我就是要同一页面"）：智能体的**新建与编辑只有一个组件**。
+   *
+   * 为什么这条要机器钉住：它们曾经是两个文件（`NewAgentForm.svelte` + `AgentDetail.svelte`），
+   * 于是"两页不一样"这个毛病被反复修了三轮（D240 格子错位、D242 CLI 选项与技能框、
+   * D248 名字与目录一节）——每一轮都是同一张卡的两份实现又漂了一点。
+   * 合并之后能悄悄回退的方式只有一个：**再拆一个文件出来**。所以这里钉文件名与 `mode`。*/
+  test('★ 智能体的新建与编辑是同一个组件（D249）：不许再拆回两个文件', async () => {
+    const files = await load()
+    for (const gone of [
+      'apps/web/src/components/NewAgentForm.svelte',
+      'apps/web/src/components/AgentDetail.svelte',
+    ]) {
+      assert.equal(
+        files.has(gone),
+        false,
+        `${gone} 不该再存在——新建与编辑合成的组件是 \`AgentForm.svelte\`（mode 决定）`,
+      )
+    }
+    const form = files.get('apps/web/src/components/AgentForm.svelte') ?? ''
+    assert.match(form, /export let mode: 'create' \| 'edit'/, '`AgentForm` 要有 mode 这一维')
+    // 两个入口（智能体页 / 编排内建智能体编辑页）都必须用它
+    for (const page of [
+      'apps/web/src/views/Agents.svelte',
+      'apps/web/src/components/WorkflowAgentEditor.svelte',
+    ]) {
+      const src = files.get(page) ?? ''
+      assert.match(src, /<AgentForm/, `${page} 必须渲染 \`AgentForm\``)
+    }
+  })
+
   test('字号不写裸值：只认 `var(--fs-*)`、`inherit`、`em`（例外）', async () => {
     const files = await load()
     const bad = declarations(files, 'font-size').filter(

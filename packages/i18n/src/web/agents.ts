@@ -1,8 +1,8 @@
 import type { TextCatalog } from '../text.ts'
 
 /**
- * 智能体区域（`views/Agents.svelte`、`components/AgentDetail.svelte`、
- * `components/NewAgentForm.svelte`、`components/ActionPicker.svelte`）。
+ * 智能体区域（`views/Agents.svelte`、`components/AgentForm.svelte`——D249 起新建与
+ * 编辑是同一个组件）.
  *
  * ⚠️ zh 的值改之前先看一眼**有没有东西钉着它**：中文是默认语言，既有测试、布局
  *    探针与文档都引用它。⚠️ 但"与迁移之前逐字一致"**不再是判据**（2026-09 的文案
@@ -107,6 +107,10 @@ export const agentsText = {
   },
   'agents.dirAfterCreate': { zh: '创建后才能编辑这里面的文件', en: 'Editable after the agent is created' },
   'agents.memoryAfterCreate': { zh: '创建后才能开记忆', en: 'Memory can be enabled after creation' },
+  'agents.createNeedsName': {
+    zh: '名字非空、入口至少勾一项，才能创建',
+    en: 'Name is required, and pick at least one entry',
+  },
   'agents.exclusiveSkillsAfterCreate': {
     zh: '创建后才能写独有技能（在这个智能体的目录里）',
     en: 'Own skills can be written after creation (in this agent’s folder)',
@@ -309,7 +313,7 @@ export const agentsText = {
   // 2026-11（使用者点名去掉）：智能体页底部「本机 CLI」概览整块删除——CLI 名 +
   //   版本号列表搬去了「关于」页（运行环境区）。词条跟着删，不留死键。
 
-  // ── NewAgentForm.svelte ──
+  // ── 新建态与编辑态共用的文案（D249 合并后同一组件）──
   /**
    * ⚠️ 这里**原有一个 `agents.headIntro`**（`这里配置每个智能体：它的指令、行动权限，
    *    以及由谁来审它。` / `Each agent is configured here: …`）——2026-10（D63）按
@@ -432,8 +436,6 @@ export const agentsText = {
     zh: '（没核对过）',
     en: ' (not checked)',
   },
-  /** 详情页那一行的短标签（与上面的表单标签是同一个字段，两处都要短）。 */
-  'agents.runtimeRowLabel': { zh: 'CLI', en: 'CLI' },
   'agents.created': { zh: '智能体已创建', en: 'Agent created' },
 
   /**
@@ -480,7 +482,7 @@ export const agentsText = {
   //   `agents.actionsMovedToGroup`、调试/未解析/没有工具包这几段）——组页的 ③ 行动
   //   与 `ActionPicker` 一起删了，界面里再没有地方显示或配置动作。
 
-  // ── AgentDetail.svelte ──
+  // ── 编辑态（含只读/记忆/独有技能）──
   'agents.saved': { zh: '已保存', en: 'Saved' },
   // ★ 2026-11：编辑页底部新增「删除」（保存 / 删除 / 取消，与组页同款）。
   //   历史 run 不删（那是执行时的快照）；被智能体组引用 / 是默认智能体时，
@@ -620,7 +622,7 @@ export const agentsText = {
    *    只显示 name 的话会出现三个一模一样的东西，使用者只能靠猜。
    */
   // ★ 分批第 209 批：`skillFromDir`（「（来自 {dir}）」）删了——那句话从技能选项上撤掉，
-  //   来源目录改为悬停 `title`（见 `AgentDetail` 里那段注释）。
+  //   来源目录改为悬停 `title`（见 `AgentForm` 里那段注释）。
   /** 行动权限为空时的说明（在「行动权限」那一段里，与标准无关）。 */
   /**
    * 顿号：一串 skill name 之间的列表分隔符（老数据那两句提示里用）。

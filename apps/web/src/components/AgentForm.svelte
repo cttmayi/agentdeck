@@ -10,6 +10,7 @@
     deleteAgent,
     deleteExclusiveSkill,
     listExclusiveSkills,
+    createAgent,
     loadAgents,
     loadSkills,
     saveExclusiveSkill,
@@ -38,7 +39,27 @@
   } from '../lib/members.ts'
 
   /**
-   * 智能体详情 / 编辑（FR-AGENT-19）。
+   * **智能体的新建与编辑是同一页、同一套代码**（D249，使用者："按 B 做，我就是要同一页面"）。
+   *
+   * 合并前是两个文件（`NewAgentForm.svelte` + `AgentDetail.svelte`）：同一张卡、两份
+   * markup、两份样式、两份保存逻辑。使用者先要"形状统一"（D248：名字回卡片第一格、
+   * 目录一节两页都在、不可用的置灰），再要"就是同一页面"——于是合成这一个组件，
+   * 由 `mode` 决定：
+   *
+   *   · `mode='create'`：`agent` 传一份**空白**的（`blankAgentForForm()`，id 为空），
+   *     主操作是「创建」（`data-agent-create`），提交走 POST；
+   *   · `mode='edit'`：`agent` 是库里那条，主操作是「保存」（`data-agent-save`），
+   *     提交走 PATCH（编排内建智能体的 PUT/PATCH/DELETE 走 workflow 路由）。
+   *
+   * 只有"对已存在实体才有意义"的东西在新建态被**置灰或不出**：记忆格（置灰）、
+   * 独有技能（锁定说明）、目录一节（置灰点不开）、设为默认 / 复制 / 删除（不出）。
+   *
+   * ⚠️ 别再把新建拆回一个独立组件：两套实现差开过一次（D240/D242/D248 三次都是
+   *    在补"两页不一样"），探针 `workflows.agentsNewMatchesAgentForm` 钉着"两页同一张卡"。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 智能体编辑（FR-AGENT-19）
+   * ══════════════════════════════════════════════════════════════════
    *
    * ══════════════════════════════════════════════════════════════════
    * 这一版重做了**显示**，重点在三件事
@@ -56,6 +77,24 @@
    * 前一个的改动抹掉——而这里没有并发控制，减少提交面是最省事的缓解。
    * 而且"只改名字却把指令清空"那种坑也不会发生。
    */
+  /** `'create'` = 新建（`agent` 传一份空白的），`'edit'` = 编辑（默认）。 */
+  export let mode: 'create' | 'edit' = 'edit'
+  /**
+   * ★ D164：**复制 → 预填一张新建表单**（不是立即落库）。只在 `mode='create'` 时有意义。
+   *   传的是 `rawInstructions`（库里存的**原文**）：拿组装后的全文预填，会把平台守则
+   *   变成"使用者写的"文本，而副本作为自建智能体不会再组装一次。
+   */
+  export let prefill:
+    | {
+        name: string
+        instructions: string
+        skillIds: string[]
+        runtimeKey: string
+        entries: string[]
+      }
+    | undefined = undefined
+  /** 新建成功后（父组件决定切到哪儿）。 */
+  export let oncreated: () => void = () => {}
   export let agent: Agent
   export let onclose: () => void
   export let onchanged: () => void
@@ -63,7 +102,7 @@
    * ★ 2026-11（D164）：**复制 → 预填一张新建表单**（不是立即落库）。
    *
    * 组件自己不认识"新建"这个状态（它在 `Agents.svelte` 手里），所以这里只把**预填数据**
-   * 交出去，由页面切到 `creating` 并把它交给 `NewAgentForm`。
+   * 交出去，由页面切到 `creating`（本组件随之 `mode='create'` 重挂）。
    */
   export let oncopy:
     | ((prefill: {
@@ -91,6 +130,12 @@
     | { kind: 'agent' }
     | { kind: 'workflow'; workflowId: string; workflowName?: string } = { kind: 'agent' }
   $: isWf = scope.kind === 'workflow'
+  $: isNew = mode === 'create'
+  /**
+   * 能不能点「创建」：名字非空，且（非编排那条时）入口至少勾一个——服务端同样会拒。
+   * 编排内建智能体的入口锁死「编排」，所以那一项对它恒成立。
+   */
+  $: canCreate = draft.name.trim() !== '' && (isWf || hasAnyEntry(draft.entries ?? []))
 
   let busy = false
   let error = ''
@@ -123,7 +168,8 @@
   // 换了 agent 就重新读（`selected` 是派生值，agent prop 会变）。
   // ⚠️ 用 legacy `$:` 而不是 `$effect`：本组件是 legacy 模式（`export let` + `$:`），
   //    引入 runes 会把整文件切到 runes 模式，`export let` 直接变编译错误。
-  $: agent && void loadExclusive()
+  // 新建态还没有实体，独有技能/记忆都无处可读（读 `/api/agents/` 只会 404）。
+  $: if (!isNew && agent.id !== '') void loadExclusive()
 
   async function loadExclusive(): Promise<void> {
     exclusiveLoading = true
@@ -481,7 +527,36 @@
   }
 
   type Draft = ReturnType<typeof blankDraft>
-  let draft = blankDraft()
+
+  /**
+   * ★ D249：**新建态的草稿**——与编辑态同一个形状，只是没有"库里那一份"可比。
+   *
+   * 三处默认值有讲究（D249 合并前住在 `NewAgentForm` 里，别改回去）：
+   *   · 指令初值 = 工作区的「默认工作守则」——服务端也会在空指令时预填，但界面上必须
+   *     **先看见**（"我什么都没写，它自己长出了规矩"是最难接受的一类，分批第 47 批）；
+   *   · `runtimeKey = 'default'`（跟随全局默认，D242）——不要写成 `'claude'`：那会把
+   *     当时的默认值烙进记录里，与服务端 `resolveRuntimeKey` 的决定相反；
+   *   · 入口：编排内建智能体只有 `'workflow'`（D241，用 `scope.kind` 判而不是 `$: isWf`
+   *     ——legacy 模式下 `$:` 在初始化**之后**才跑，用 `isWf` 会先填成三项）。
+   */
+  function blankNewDraft(): Draft {
+    return {
+      name: prefill?.name ?? '',
+      instructions: prefill?.instructions ?? $identity?.defaultAgentConduct ?? '',
+      skillIds: [...(prefill?.skillIds ?? [])],
+      runtimeKey: prefill?.runtimeKey ?? 'default',
+      // 新建时还没有实体，记忆无处可存 ⇒ 恒关（那一格在新建态是置灰的）
+      memoryEnabled: false,
+      entries: prefill?.entries?.length
+        ? [...prefill.entries]
+        : scope.kind === 'workflow'
+          ? ['workflow']
+          : [...USER_ENTRY_CHOICES],
+      reviewStandard: null,
+    }
+  }
+
+  let draft = mode === 'create' ? blankNewDraft() : blankDraft()
 
 
   /**
@@ -503,7 +578,7 @@
    *    会过期的拷贝，就该由它自己作废。否则换个地方复用这个组件，同一个坑再来一次。
    */
   let draftOwner = agent.id
-  $: if (agent.id !== draftOwner) {
+  $: if (!isNew && agent.id !== draftOwner) {
     draftOwner = agent.id
     draft = blankDraft()
     error = ''
@@ -533,7 +608,7 @@
     memPreviewStats = null
     memPreviewError = ''
     memError = ''
-    void loadMemory(agent.id)
+    if (mode !== 'create') void loadMemory(agent.id)
   }
 
   /**
@@ -698,6 +773,51 @@
    *    （`changedCount` 那一套是给"查看/编辑两态"用的，两态没了它就没意义了。）
    */
   async function save(): Promise<void> {
+    /*
+     * ★ D249：**新建**（`mode='create'`）走 POST——与编辑同一条表单、同一张卡，
+     *   只差落库地址与"要不要算 patch"。
+     *   ⚠️ 编排内建智能体没有 runtime/入口/审核标准之外的东西：POST 只发名字 + 指令 +
+     *      技能 + CLI（D241 起 CLI 是它的真字段）。
+     */
+    if (mode === 'create') {
+      if (!canCreate || busy) return
+      const name = draft.name.trim()
+      busy = true
+      error = ''
+      try {
+        if (scope.kind === 'workflow') {
+          await api(`/api/workflows/${encodeURIComponent(scope.workflowId)}/agents`, {
+            method: 'POST',
+            body: JSON.stringify({
+              name,
+              instructions: draft.instructions,
+              skillIds: draft.skillIds,
+              runtimeKey: draft.runtimeKey,
+            }),
+          })
+          const out = await api<{ items: Workflow[] }>('/api/workflows')
+          workflows.set(out.items ?? [])
+        } else {
+          await createAgent({
+            name,
+            instructions: draft.instructions,
+            skillIds: draft.skillIds,
+            runtimeKey: draft.runtimeKey,
+            reviewStandard: draft.reviewStandard,
+            entries: draft.entries,
+          })
+        }
+        showToast(tx('agents.created'))
+        // 关不关、切到哪儿，由父组件决定（它是"正在新建"这个状态的持有者）
+        oncreated()
+      } catch (err) {
+        // 服务端的原话照给（重名那一句由它说，界面不自己编）
+        error = err instanceof Error ? err.message : String(err)
+      } finally {
+        busy = false
+      }
+      return
+    }
     /*
      * ★ D238：编排内建智能体的保存**只发它真有的三个字段**（名字 / 指令 / 技能）。
      *   走 `buildPatch()` 会把 runtime / entries / memory 一起送过去——那些字段
@@ -1065,8 +1185,15 @@
    */
 </script>
 
+<!--
+  ★ D249：**一个表单**，`id` 只在新建态给（`new-agent-form`）——探针按这个 id 认
+  "新建视图那张表单"，编辑态按 `.agent-form` / `[data-agent-save]` 认。原来新建与编辑
+  是两个组件，各有一个 `<form>`；合并后同一时刻只存在这一个，所以 id 不必再靠
+  "两页各钉一个"来区分，只留新建那一个（判据要它）。
+-->
 <form
   class="agent-form"
+  id={mode === 'create' ? 'new-agent-form' : undefined}
   onsubmit={(e) => {
     e.preventDefault()
     void save()
@@ -1144,14 +1271,19 @@
         名字只有卡片里一个输入点，标题栏不再需要第二套编辑态。
       -->
       <h2>
+        {#if isNew}
+          <!-- 新建态：标题是这一页的用途（④ 新建视图的规矩：标题「新建 X」） -->
+          <span class="agent-head-name ellipsis" data-agent-new-title>{$t('agents.newTitle')}</span>
+        {:else}
         <span class="agent-head-name ellipsis" data-agent-head-name>{draft.name}</span>
+        {/if}
         <!--
           ⚠️ 2026-11（D155）：这里原来给自建的智能体挂一枚「智能体」徽标。使用者："智能体的
           徽标就不显示了吧，**都是智能体**"——一枚人人都有的徽标不区分任何东西，纯噪点。
           现在标题栏只在**平台成员**（与已下线的审核者）身上留一枚徽标，因为那一条确实需要
           一个"它由平台维护"的记号。
         -->
-        {#if readOnly || retiredBuiltin}
+        {#if !isNew && (readOnly || retiredBuiltin)}
           <!--
             ★ 分批第 275 批（使用者："为什么起草者显示的是『平台内置：删不掉，只能「恢复成
               默认值」』"）：那**是一整句解释塞在徽标的位置上**。它写于 2026-10，那时这一页
@@ -1177,7 +1309,11 @@
       data-agent-head-sub
       title={draft.runtimeKey === 'default' ? $t('agents.runtimeFollowDefaultHint') : ''}
     >
-      {#if isWf}
+      {#if isNew}
+        {#if scope.kind === 'workflow'}
+          <span class="faint">{$t('workflows.agentsOfWorkflow', { name: scope.workflowName ?? '' })}</span>
+        {/if}
+      {:else if isWf}
         {$t('workflows.agentsHeadSub', {
           name: (scope.kind === 'workflow' ? scope.workflowName : '') ?? '',
           n: String(draft.skillIds.length),
@@ -1202,7 +1338,20 @@
       "设成默认"改的是**工作区设置**，不是这条智能体，与它只读与否无关）。
     -->
     <div class="detail-actions">
-      {#if !readOnly}
+      {#if isNew}
+        <!--
+          ★ D249：新建态的栏头动作就这两颗（④ 新建视图：主操作在栏头，D243）。
+          「创建」的置灰条件与服务端同一句：名字非空 + 入口至少一项（编排那条锁死「编排」）。
+        -->
+        <button
+          type="submit"
+          class="btn btn--primary"
+          data-agent-create
+          disabled={busy || !canCreate}
+          title={!canCreate ? $t('agents.createNeedsName') : ''}
+        >{busy ? $t('common.creating') : $t('common.create')}</button>
+        <button type="button" class="btn btn--ghost" onclick={onclose}>{$t('common.cancel')}</button>
+      {:else if !readOnly}
         <!-- ★ 2026-11（D146）：入口一个都不留也**不给保存**——服务端同样会拒。 -->
         <button
           type="submit"
@@ -1222,7 +1371,10 @@
         ⚠️ 写成功后界面跟着数据走：`setDefaultAgent()` 内部会重拉列表，
           列表上那枚「默认」徽章随之移动（这里不手动改任何状态）。
       -->
-      {#if isWf}
+      {#if isNew}
+        <!-- 新建态：设为默认 / 复制 / 删除 都不画（用户 D248 的决定：对"还不存在的东西"
+             的动作，塞进新建页只会把主操作挤远） -->
+      {:else if isWf}
         <button
           type="button"
           class="btn btn--secondary"
@@ -1240,6 +1392,7 @@
           onclick={() => void makeDefault()}
         >{$t('agents.setDefault')}</button>
       {/if}
+      {#if !isNew}
       <!-- ★ 2026-11（D160）：**复制**（平台成员与自建都能用；想改内置就改副本）。 -->
       <button
         type="button"
@@ -1262,6 +1415,7 @@
           >{$t('agents.deleteButton')}</button
         >
       {/if}
+      {/if}
     </div>
   </header>
 
@@ -1272,7 +1426,7 @@
   <section class="card agent-card pair-field">
     <!--
       ★ D248（使用者："智能体的新建和编辑，我想统一化，现在主要差异是智能体的名字和打开目录"）：
-      **名字回到卡片第一格**，与新建页（`NewAgentForm`）同一位置、同一样子。
+      **名字回到卡片第一格**——新建态也在这同一格（同一个组件、同一份 markup）。
       两个页面从此格子同序：名字 / CLI / 指令 / 技能 / 入口 / 记忆。
       ⚠️ 标题栏那颗「改名」已删（D248）——名字只有一个输入点，就是这里。
       只读智能体（平台内置）同样**置灰保留**这一格（不可用时置灰，不删格子）。
@@ -1283,6 +1437,7 @@
         bind:value={draft.name}
         aria-label={$t('agents.nameLabel')}
         data-agent-name
+        placeholder={$t('agents.namePlaceholder')}
         autocomplete="off"
         disabled={readOnly}
         required
@@ -1312,7 +1467,9 @@
           ⚠️ 2026-11（D123）：「行动权限」那一行随动作能力退场删了。
         -->
         <label class="cell runtime-cell" class:locked={readOnly}>
-          {$t('agents.runtimeRowLabel')}
+          <!-- ★ D249：两页合一之后这一格的标签用新建页那句「用哪个 CLI」——它比光一个
+               「CLI」更说得清这一格在问什么（编辑页原来只写 "CLI"）。 -->
+          {$t('agents.runtimeFieldLabel')}
           <!-- 服务端连 CLI 都不许改（内置整份只读），界面就别让它看起来能改。 -->
           <span class="field field-lock">
             {#if readOnly}<span class="lockmark">{$t('agents.lockReadOnly')}</span>{/if}
@@ -1324,7 +1481,11 @@
               >{$t('agents.runtimeFollowDefault')}</option
             >
             {#each runtimeOptions as key (key)}
-              <option value={key}>{key}</option>
+              {@const r = $identity?.runtimes.find((x) => x.key === key)}
+              <!-- ★ D249：未核对的 runtime 在选项上就标出来（新建页原来的做法；
+                   下面那段 `evidenceWarnings` 是编辑页的详细说明——两者一起保留：
+                   下拉里一眼可见，展开看细节。） -->
+              <option value={key}>{key}{r && r.evidence !== 'verified' ? $t('agents.runtimeUnverified') : ''}</option>
             {/each}
             <!--
               ⚠️ ★ 分批第 270 批（使用者："CLI 有一个『跟随全局默认』和『Default 当前』，
@@ -1350,7 +1511,7 @@
 
         <label class="cell instructions-cell">
           {$t('agents.instructionsLabel')}
-          <!-- ★ 与 `NewAgentForm.svelte` 里那一栏**同一个字段、同一个要求**（D48）：
+          <!-- ★ 与新建态**同一个字段、同一个要求**（D48）：
                指令是一份几百到上千字的文档，不是一行备注。 -->
           <span class="field field-lock">
             {#if readOnly}<span class="lockmark">{$t('agents.lockReadOnly')}</span>{/if}
@@ -1361,6 +1522,7 @@
             class="instructions"
             bind:value={draft.instructions}
             label={$t('agents.instructionsLabel')}
+            placeholder={$t('agents.instructionsPlaceholderPlain')}
             locked={readOnly}
             rows={6}
           />
@@ -1422,6 +1584,11 @@
               {/if}
             {/if}
           {:else}
+            {#if pickableSkills.length === 0}
+              <!-- ★ D249：技能库还空着时说出来（新建页原来有这句；合并后编辑页也适用
+                   ——那时这一格是空框，不说一句会让人以为是加载失败）。 -->
+              <p class="hint">{$t('agents.noSkillsOption')}</p>
+            {:else}
             <div class="skill-picker">
               {#each pickableSkills as s (s.id)}
                 <label class="skill-option">
@@ -1444,6 +1611,7 @@
                 </label>
               {/each}
             </div>
+            {/if}
           {/if}
 
           <!--
@@ -1459,7 +1627,11 @@
               （独有技能当前靠平台播种/文件/API 添加，界面不提供新增入口）。
           -->
           <section class="exclusive-cell" data-exclusive-skills>
-          {#if exclusiveLoading}
+          {#if isNew}
+            <!-- ★ D248/D249：新建态**这一段也在**（技能框里的下一段），但还写不了——
+                 独有技能是文件（`<目录>/skills/<名字>/SKILL.md`），实体都没建出来。 -->
+            <p class="empty-value hint" data-exclusive-locked>{$t('agents.exclusiveSkillsAfterCreate')}</p>
+          {:else if exclusiveLoading}
             <p class="empty-value">{$t('agents.exclusiveSkillsLoading')}</p>
           {:else}
             <!-- ★ 2026-11（使用者："我就是要显示成『勾选 名字』的样子"）：独有技能
@@ -1498,7 +1670,7 @@
               {/each}
             </div>
           {/if}
-          {#if editorOpen}
+          {#if !isNew && editorOpen}
             <div class="exclusive-editor" data-exclusive-editor>
               <label class="exclusive-name-row">
                 <span class="cell-label-inner">{$t('agents.exclusiveSkillsName')}</span>
@@ -1533,6 +1705,9 @@
             </div>
           {/if}
           </section>
+          <!-- ★ D249：框底那句"挂上会随它一起送过去"（新建页原来的文案）——它是这一格
+               的说明，落在框内侧底部，与左边指令格的说明位置对称。 -->
+          <span class="hint">{$t('agents.executorSkillsHint')}</span>
           </div>
         </div>
 
@@ -1594,6 +1769,24 @@
             最后才裁）。**没有"停用/退役"**：久不用的靠注入顺序自然沉底。
           ★ 与「指令」一起随页面底部那个「保存」提交，提交的是**差量**。
         -->
+        {#if isNew}
+          <!--
+            ★ D248/D249：新建态**这一格照样在**（不可用置灰，不删——删了两页结构就不一样），
+            只是还没有实体：记忆无处可存、开关无处可开。
+          -->
+          <fieldset class="cell memory-cell" disabled data-agent-memory>
+            <span class="cell-label mem-head">
+              <span title={$t('agents.memoryHint')}>{$t('agents.memoryLabel')}</span>
+              <span class="mem-count" data-memory-count>{$t('agents.memoryCount', { n: '0' })}</span>
+              <span class="spacer"></span>
+              <label class="mem-switch locked" title={$t('agents.memoryAfterCreate')}>
+                <input type="checkbox" disabled />
+                <span>{$t('agents.memoryEnabled')}</span>
+              </label>
+            </span>
+            <p class="hint">{$t('agents.memoryAfterCreate')}</p>
+          </fieldset>
+        {:else}
         <fieldset class="cell memory-cell" disabled={isWf} data-agent-memory>
           {#if isWf}<span class="lockmark" title={$t('workflows.agentsMemoryLockedHint')}>{$t('agents.lockReadOnly')}</span>{/if}
           <!--
@@ -1790,6 +1983,7 @@
             <p class="row-hint warn" data-memory-error>{memError}</p>
           {/if}
         </fieldset>
+        {/if}
 
         <!--
           ⚠️ 2026-10 / 2026-11（D123）：这里原来是「行动权限」那一节（`ActionPicker`），
@@ -1806,7 +2000,10 @@
   整行宽的辅助块只在主内容**之后**——正文第一块永远是这一页要你回答的东西。
   独有技能就是 `<智能体目录>/skills/<名字>/SKILL.md`，所以这里也是"独有技能写入口"的落点。
 -->
-{#if dirBase}
+{#if isNew}
+  <!-- ★ D248/D249：新建态这一节**在、但置灰**（"创建后才能编辑这里面的文件"） -->
+  <AgentDirSection base={null} disabled />
+{:else if dirBase}
   <AgentDirSection base={dirBase} />
 {/if}
 
@@ -2034,7 +2231,7 @@
   /**
    * ★ 2026-11（D156）：**栏头吸顶**。
    *
-   * 这一页的栏头是 `AgentDetail` 自己渲染的（改名输入框 / 只读态 / 脏态这几件事都在
+   * 这一页的栏头是 `AgentForm` 自己渲染的（只读态 / 脏态 / 创建态这几件事都在
    * 组件内部，没法像任务页那样交给 `MainArea` 的 `title`/`actions`），而它因此住在
    * `.pane-body`（`overflow-y: auto`）里——不钉住的话正文一滚，标题和「保存 / 删除」
    * 就一起滚走了，与任务页 / 聊天页（栏头在滚动容器**外面**）观感不同。
@@ -2068,8 +2265,9 @@
    * 与 `MemberSlotForm.svelte` 里「新建私有」的 `.grid-form` 同一套布局——
    * 名字 / CLI 一行，指令 / 技能一行；角色（编辑态）与记忆占整行。
    */
-  /* ★ D187：**两列栅格不在这里**——它就是全局 `.pair-field`（与 `NewAgentForm` 一份）。
-     原来这一条与 `NewAgentForm.svelte` 里那一条**逐字相同**（注释自己都写着"两处一致"），
+  /* ★ D187：**两列栅格不在这里**——它就是全局 `.pair-field`。
+     ⚠️ D249 之前这段注释在说"与 `NewAgentForm.svelte` 那一份逐字相同"——两份一样本身就是
+     bug 的前兆（改一处忘一处），所以那次合并把它们变成了这一份。
      现在只剩"卡片这张皮"。 */
   .card.agent-card {
     margin: 0;
@@ -2143,7 +2341,7 @@
    * 指令输入框：要能读完一份 800 字的角色设定（D48）。
    *
    * 22rem = 352px 是实测值（13px 字号 / 行高 1.6 ⇒ 16 行），与
-   * `NewAgentForm.svelte` 里那一份**必须一致**。
+   * 指令框那一份**必须一致**（现在只有这一处：新建与编辑同一个组件）。
    *
    * ⚠️ 两个文件里各有一份这个规则，因为 Svelte 的 `<style>` 默认**不外泄**，
    *    两个组件没法共用一条作用域规则（提到全局 `app.css` 也不对：那里放的是
