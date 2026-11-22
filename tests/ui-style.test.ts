@@ -1049,7 +1049,7 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
   test('★★ 动作按钮必须归进按钮族：裸 `<button>` 只许出现在结构性控件里', async () => {
     const STRUCTURAL = [
       // 折叠 / 导航 / 行 / 标签这一族（形状由 `.X button` 的元素选择器定）
-      'fold-head', 'expand-toggle', 'nav-item', 'row', 'dir', 'column-label',
+      'fold-head', 'expand-toggle', 'nav-item', 'row', 'dir', 'dir-head', 'column-label',
       'list-group-head', 'list-row-main', 'list-row-action', 'card', 'card-head',
       'tab', 'run-tab', 'theme-picker', 'view-switch', 'stage-chips', 'source-toggle',
       // 各自的专用控件

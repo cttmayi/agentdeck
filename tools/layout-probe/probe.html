@@ -4936,6 +4936,34 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               return b === null || b === undefined ? null : b.disabled !== true
             })(),
             /*
+             * ★ D252：**「目录」是卡片里的最后一格**（在框里、整行宽、上面一条横线），
+             *   不是卡片外面的折叠段。使用者原话："那个『目录』独独的在框外面，
+             *   总觉得不好看，是否可以放框里面，框的最下面，用一个横线隔开上面的内容"。
+             */
+            目录在卡片里: !!pane?.querySelector('.card.agent-card [data-agent-dir]'),
+            目录是整行宽: (() => {
+              const card = pane?.querySelector('.card.agent-card')
+              const dir = card?.querySelector('[data-agent-dir]')
+              if (!card || !dir) return null
+              const c = card.getBoundingClientRect()
+              const d2 = dir.getBoundingClientRect()
+              const inner =
+                card.clientWidth -
+                parseFloat(getComputedStyle(card).paddingLeft) -
+                parseFloat(getComputedStyle(card).paddingRight)
+              return d2.width >= inner - 2 && !!c
+            })(),
+            目录上面有横线: (() => {
+              const dir = pane?.querySelector('.card.agent-card [data-agent-dir]')
+              if (!dir) return null
+              const cs = getComputedStyle(dir)
+              return cs.borderTopWidth !== '0px' && cs.borderTopStyle !== 'none'
+            })(),
+            目录标签字号: (() => {
+              const el = pane?.querySelector('.card.agent-card [data-agent-dir] .cell-label')
+              return el ? getComputedStyle(el).fontSize : null
+            })(),
+            /*
              * ★ D247：「← 返回编排」与名字**同一行、名字在它右边**。原来那颗返回是网格的
              *   直接子项，抢掉第 1 行第 1 列，名字只能落到第 2 行（按钮下面）。
              */

@@ -1705,6 +1705,16 @@ hr {
  * ⚠️ 记忆条目的行（`.mem-list` / `.mem-row` / `.mem-add` …）仍然留在组件里——那些是
  *    编辑页特有的交互，新建页没有。
  */
+/**
+ * ★ D252：**表单格子里的字段标签**（`--fs-sm` / `--text-faint`）——现在只有一处定义。
+ * 原来是 `AgentForm` 的 scoped 样式，但「目录」那一格由子组件 `AgentDirSection` 渲染，
+ * scoped 样式打不进去（不同的哈希）⇒ 要么抄一份、要么挪进来。按"一处定义"挪进来。
+ */
+.cell-label {
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+}
+
 fieldset.memory-cell {
   border: 0;
   padding: 0;
