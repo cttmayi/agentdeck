@@ -51,12 +51,10 @@
         </tbody>
       </table></div>
 
-      <h2>2. 形态：就是今天那个 FileViewer——**原文面直接就能编辑**，没有"编辑态"</h2>
       <p class="lead">
         两处更正：① 文件是**弹出**的（<code>FileViewer</code> 内部就是 <code>Modal size="wide"</code>），
         不是固定两栏；② 它今天就有**两面**——<b>渲染</b> / <b>原文</b>，还有「复制原文」。
         但编辑**不另开一个模式**：<b>原文面本身就是可编辑的文本框</b>，渲染面照旧只读。
-        ——没有「编辑」按钮、没有"编辑态"，就是那一面能改。
       </p>
       <p class="lead">
         于是工具条只多一颗「保存」（有改动才亮）：<code>路径 · 大小 · [渲染 | 原文] · 复制原文 · 保存 · 关闭</code>。
@@ -96,37 +94,7 @@ description: 周报的三段结构：结论 / 证据 / 下一步
         </div>
       </div>
 
-      <h2>3. 屏 ①：保存失败——原话就在浮层里，字不动</h2>
-      <div class="mock-frame" style="height:17rem;position:relative">
-        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
-          <div style="width:80%;background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--radius);box-shadow:var(--shadow-2)">
-            <div style="display:flex;align-items:center;gap:var(--sp-2);padding:var(--pad-frame-head);border-bottom:1px solid var(--line)">
-              <span class="mono faint fs-xs">agent.json</span>
-              <span class="fv-toggle" role="group" style="display:inline-flex;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden">
-                <button type="button" style="padding:0 var(--sp-2);height:24px;background:none;border:0;color:var(--text-faint)">渲染</button>
-                <button type="button" class="active" style="padding:0 var(--sp-2);height:24px;background:var(--surface-2);border:0;color:var(--accent)">原文</button>
-              </span>
-              <span style="flex:1"></span>
-              <button type="button" class="btn btn--primary btn--sm">保存</button>
-              <button type="button" class="btn btn--ghost btn--sm">关闭</button>
-            </div>
-            <div style="padding:var(--pad-frame-body)">
-              <div class="notice bad" style="margin-bottom:var(--sp-2)">JSON 解析失败：第 4 行第 3 列期望 <code>,</code>——没有写入任何东西。</div>
-              <pre class="code-mock" style="margin:0;max-height:6rem">{
-  "id": "01M80…",
-  "name": "审稿员"
-  "skillIds": []   ← 漏了逗号
-}</pre>
-            </div>
-          </div>
-        </div>
-      </div>
-      <p class="lead">
-        <b>关闭</b>（× / Esc / 关闭）时有未保存改动先问一句，别让人一按 Esc 丢掉刚写的字；
-        <b>保存失败不关窗</b>——原话在正文上方，改完再按保存。
-      </p>
-
-      <h2>5. 限制只有通用的几条（没有"这个文件不许改"的特例）</h2>
+      <h2>3. 限制只有通用的几条（没有"这个文件不许改"的特例）</h2>
       <div class="table-wrap"><table class="table">
         <thead><tr><th>限制</th><th>怎么判</th><th>为什么</th></tr></thead>
         <tbody>
@@ -145,13 +113,13 @@ description: 周报的三段结构：结论 / 证据 / 下一步
         只保证"你写进去的是合法 JSON"。这是使用者的决定（"只有通用限制，不需要特殊限制"）。
       </p>
 
-      <h2>6. 接口：把已有的那对端点 scope 化</h2>
+      <h2>4. 接口：把已有的那对端点 scope 化</h2>
       <pre class="code-mock">GET /api/fs/&lt;scope&gt;/files?dir=      ← 一层目录（与 /api/runs/:id/files 同一份实现）
 GET /api/fs/&lt;scope&gt;/file?path=      ← 一个文件的文本（FileViewer 已有三面渲染）
 PUT /api/fs/&lt;scope&gt;/file {text}     ← 白名单 + 校验 + 原子写（二期）
 scope ∈ agent:&lt;id&gt; | workflow:&lt;id&gt; | wf-agent:&lt;wid&gt;/&lt;aid&gt; | skill:&lt;名字&gt; | run:&lt;id&gt; | conversation:&lt;id&gt;</pre>
 
-      <h2>7. 明确不做 / 待拍板</h2>
+      <h2>5. 明确不做 / 待拍板</h2>
       <div class="table-wrap"><table class="table">
         <tbody>
           <tr><td>新建 / 删除 / 改名文件</td><td>一期不做（独有技能的新增删除仍走"放进目录 + 刷新"或正规入口）</td></tr>
