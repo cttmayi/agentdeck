@@ -4181,6 +4181,109 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           return true
         })()
 
+        /*
+         * ★ D251（使用者："刚才请你整理的『新建 / 编辑』，请全面按智能体的方式修正一遍"）：
+         *   **定时任务的编辑表单**要与智能体编辑页同一条排布与判据——
+         *     · 次操作「取消」在；危险动作「删除」也在（编辑一条已有的东西时，
+         *       "删掉它"与"改它"是同一屏的两个动作，智能体编辑页就是这么排的）；
+         *     · 没改动时「保存」置灰（改名之外什么都没动，点它不会有任何事发生）；
+         *     · 改了之后「保存」变可用。
+         *   顺便量"删除只出现在编辑态"：新建表单里不该有它。
+         */
+        facts['schedules.editFormActions'] = await (async () => {
+          /*
+           * 夹具：自己建一条（这一刻列表还是空的——后面的判据才建夹具），用完就删。
+           * ⚠️ 第一版在这里直接"选列表第一条"，于是拿不到行、静默 skipped ⇒ 判据看着绿、
+           *   其实一个数都没量。这类"空过"比红更糟，所以现在没数据就当场建一条。
+           */
+          const execId = new URLSearchParams(location.search).get('chainExecutor') ?? ''
+          if (!execId) return { skipped: '拿不到夹具执行者 id' }
+          const name = '探针编辑表单判据'
+          const res = await f.contentWindow.fetch('/api/schedules', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              name,
+              cron: '0 9 * * *',
+              executorType: 'agent',
+              executorId: execId,
+              taskText: 'x',
+            }),
+          })
+          if (res.status !== 201) return { skipped: `夹具没建出来（${res.status}）` }
+          const created = await res.json()
+          try {
+            f.contentWindow.location.hash = '#/chat'
+            await until(() => !d().querySelector('.detail-pane'))
+            f.contentWindow.location.hash = '#/schedules'
+            const rowOk = await until(
+              () =>
+                [...d().querySelectorAll('.list-pane .list-row-main')].some((r) =>
+                  (text(r) ?? '').includes(name),
+                ),
+              80,
+            )
+            if (!rowOk) return { skipped: '列表里没出现刚建的夹具' }
+            const row = [...d().querySelectorAll('.list-pane .list-row-main')].find((r) =>
+              (text(r) ?? '').includes(name),
+            )
+            click(row)
+            await until(() => !!d().querySelector('.detail-pane .detail-actions'))
+            const editBtn = [...d().querySelectorAll('.detail-pane .detail-actions button')].find(
+              (b) => text(b) === '编辑',
+            )
+            if (!editBtn) return { skipped: '详情态没有「编辑」按钮' }
+            click(editBtn)
+            await until(() => !!d().querySelector('.detail-pane .freq-picker'))
+            /*
+             * ⚠️ 等一拍再量"初始置灰"：回填是**一次 flush 里连做多件事**（重置 → 填字段 →
+             *   重算签名），`.freq-picker` 一出现就量会读到"回填到一半"的那一帧
+             *   （第一版就是这么读到 `保存初始置灰:false` 的，而函数本身是对的）。
+             */
+            await wait(250)
+            const acts = () => [...d().querySelectorAll('.detail-pane .detail-actions button')]
+            const byText = (t2) => acts().find((b) => text(b) === t2)
+            const out = {
+              有取消: !!byText('取消'),
+              有删除: !!byText('删除'),
+              保存初始置灰: byText('保存')?.disabled === true,
+              改了之后可用: null,
+              新建态没有删除: null,
+            }
+            const nameInput = d().querySelector('.detail-pane input[type=text]')
+            if (nameInput) {
+              const setter = Object.getOwnPropertyDescriptor(
+                nameInput.constructor.prototype,
+                'value',
+              )?.set
+              setter?.call(nameInput, (nameInput.value ?? '') + '改')
+              nameInput.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
+              await wait(120)
+              out.改了之后可用 = byText('保存')?.disabled === false
+            }
+            // 收尾一：取消编辑 → 新建态不该有「删除」
+            const c1 = byText('取消') ?? [...d().querySelectorAll('.detail-pane button')].find(
+              (b) => text(b) === '取消',
+            )
+            if (c1) click(c1)
+            await until(() => !!d().querySelector('.detail-pane .detail-actions'))
+            const newBtn = [...d().querySelectorAll('button')].find((b) => text(b) === '新建定时任务')
+            if (newBtn) {
+              click(newBtn)
+              await until(() => !!d().querySelector('.detail-pane .freq-picker'))
+              out.新建态没有删除 = ![...d().querySelectorAll('.detail-pane .detail-actions button')].some(
+                (b) => text(b) === '删除',
+              )
+              const c2 = [...d().querySelectorAll('.detail-pane button')].find((b) => text(b) === '取消')
+              if (c2) click(c2)
+              await until(() => !d().querySelector('.detail-pane .freq-picker'))
+            }
+            return out
+          } finally {
+            await f.contentWindow.fetch(`/api/schedules/${created.id}`, { method: 'DELETE' })
+          }
+        })()
+
         // 2026-11（使用者："编辑框太小，想弹出编辑器来编辑"）：大编辑器全流程——
         //   点「⛶ 展开」→ 弹层出现、6 个变量 chips 在弹层 → 改内容 → 「取消」原值
         //   不变（快照+确认语义）→ 再展开 → 改 + 点变量 chip 插入 → 「保存」写回。
@@ -4712,11 +4815,17 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           )
           // ★ D250：「名字」这一格编辑态也要在（原来只在新建态，于是编排建成后改不了名）
           const nameInput = d().querySelector('.detail-pane input#wf-name')
+          // ★ D251：与智能体编辑页同一排布与判据——有取消、没改动时保存置灰
+          const saveBtn = [...d().querySelectorAll('.detail-pane .detail-actions button')].find(
+            (b) => (text(b) ?? '').trim() === '保存',
+          )
           return {
             withDetail: !!shell && shell.className.includes('with-detail'),
             有代码: (area?.value ?? '').length > 0,
             有名字格: nameInput !== null,
             名字格有值: (nameInput?.value ?? '') !== '',
+            有取消: labels.includes('取消'),
+            保存初始置灰: saveBtn?.disabled === true,
             动作: labels,
           }
         })()
@@ -12776,6 +12885,38 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
          *   放在**最后**执行——它会"新建一条空对话 → 删掉"，中途会改变聊天页状态，
          *   放中间会把后面一串判据的现场搞乱。
          */
+        /*
+         * ★ D251：聊天的「改名保存」与智能体编辑页同一条判据——**没改动时置灰**。
+         *   原来这颗按钮恒可用：改名框一打开里面就是当前标题，点它不会有任何事发生
+         *   （`saveTitle()` 里也确实直接 return）——那是"看着能点、其实什么都不做"的假按钮。
+         */
+        facts['chat.renameSaveGated'] = await (async () => {
+          f.contentWindow.location.hash = '#/chat'
+          await until(() => !!d().querySelector('.list-pane'), 80)
+          const row = d().querySelector('.list-pane .list-row-main')
+          if (!row) return { skipped: '没有现成的对话（探针夹具里应该有）' }
+          click(row)
+          const headOk = await until(() => !!d().querySelector('.detail-head.chat-head h2'), 80)
+          if (!headOk) return { skipped: '点开对话后没有栏头标题' }
+          click(d().querySelector('.detail-head.chat-head h2'))
+          const opened = await until(() => !!d().querySelector('.detail-head.chat-head .rename-input'), 40)
+          if (!opened) return { skipped: '标题点不进改名态' }
+          const saveBtn = () => d().querySelector('.detail-head.chat-head .btn--primary')
+          const out = { 进改名态: true, 初始置灰: saveBtn()?.disabled === true, 改了之后可用: null }
+          const input = d().querySelector('.detail-head.chat-head .rename-input')
+          const setter = Object.getOwnPropertyDescriptor(input.constructor.prototype, 'value')?.set
+          setter?.call(input, (input.value ?? '') + '改')
+          input.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
+          await wait(120)
+          out.改了之后可用 = saveBtn()?.disabled === false
+          // 收尾：取消改名（别把标题改掉，后面还有判据）
+          const cancel = [...d().querySelectorAll('.detail-head.chat-head button')].find(
+            (b) => text(b) === '取消',
+          )
+          if (cancel) click(cancel)
+          return out
+        })()
+
         facts['chat.createEmptyConversation'] = await (async () => {
           f.contentWindow.location.hash = '#/chat'
           await until(() => !!d().querySelector('.list-pane'), 80)

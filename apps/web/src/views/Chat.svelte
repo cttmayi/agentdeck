@@ -1177,7 +1177,15 @@
                 if (e.key === 'Escape') renaming = false
               }}
             />
-            <button class="btn btn--primary" onclick={() => void saveTitle()}>{$t('chat.renameSave')}</button>
+            <!--
+              ★ D251：与智能体编辑页同一条判据——**没改动时主操作置灰**（改名框一打开
+              里面就是当前标题，此时「改名保存」点了也不会有事发生，那是假按钮）。
+            -->
+            <button
+              class="btn btn--primary"
+              disabled={renameValue.trim() === '' || renameValue.trim() === (activeConversation.title ?? '')}
+              onclick={() => void saveTitle()}
+            >{$t('chat.renameSave')}</button>
             <button class="btn btn--ghost" onclick={() => (renaming = false)}>{$t('chat.renameCancel')}</button>
           {:else}
             <!-- ★ 2026-11（使用者报的）：标题太长会把「改名」按钮挤到第二行 ⇒ 栏头整体 3 行。

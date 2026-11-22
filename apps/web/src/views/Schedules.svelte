@@ -202,6 +202,64 @@ import type { WebTextId } from '@agentdeck/i18n'
    *    不标记，等 list 到了再填。
    */
   let hydratedFor: string | null = null
+  /**
+   * ★ D251：**草稿有没有改动**——与智能体编辑页同一条规矩：没改动时「保存 / 保存并触发」
+   *   置灰（点了也不会有事发生，那是假按钮）。
+   *
+   * 判据不是"进页面时拍一份签名再比"，而是**跟库里的那一份比**：
+   *   · 编辑态：与 `list` 里存着的那条（名字 / cron→表单 / 任务正文 / 执行者 / 启动方式 /
+   *     工作目录）逐项比；
+   *   · 新建态：名字非空就算"可保存"（其余字段都有默认值，与原来那条校验同源）。
+   *
+   * ⚠️⚠️ 为什么不是"快照"：本组件是 legacy 反应式，`$:` 只认**语句里静态出现的变量名**。
+   *   写成 `$: dirty = sign() !== base`，`sign()` 里读的那些字段编译器看不见 ⇒ 这一句
+   *   只在初始化时算一次，之后怎么改都不变（"保存永远灰着"）。第一版就是这么写的，
+   *   探针量到 `改了之后可用:false` 当场逮住。所以这里把签名的计算**摊成一句 `$:`**，
+   *   让字段名直接出现在语句里（同一个坑在智能体编辑页的 `dirty` 上也踩过）。
+   */
+  /** 库里那条的签名（只在编辑态有意义）：与上面 `sig` 同一组字段、同一个顺序。 */
+  function savedSignature(s: ScheduleView): string {
+    return JSON.stringify([
+      s.name,
+      scheduleCronToForm(s.cron),
+      s.taskText,
+      s.executorId,
+      s.resumeMode,
+      s.workDir ?? '',
+    ])
+  }
+
+  /**
+   * **草稿有没有改动**（保存按钮置灰的判据，D251）。
+   *
+   * ⚠️⚠️ 写成**接收参数的纯函数**，在模板里显式把依赖传进去——不要写成 `$: formDirty = …`。
+   *   踩了两次、两次都是同一个根因：legacy 反应式只认**语句里静态出现的变量名**，而
+   *   `$: formDirty = (() => { …读 formName… })()` 这种把字段读在函数体里的写法，编译器
+   *   一个依赖都看不见 ⇒ 这一句只在初始化时算一次（回填之后还是 `true`，保存永远不灰）。
+   *   实测：两个签名逐字相同、`formDirty` 仍是 `true`（探针把两个签名都打出来比对过）。
+   *   智能体编辑页的 `dirty` 用的是同一条处置（`isDirty(draft, agent, memRows)` 传参）。
+   */
+  function isFormDirty(
+    name: string,
+    formNow: ScheduleForm,
+    taskText: string,
+    agentId: string,
+    resume: string,
+    workDir: string,
+    sf: typeof $schedForm,
+    row: ScheduleView | null,
+  ): boolean {
+    if (sf === null) return false
+    const sig = JSON.stringify([name, formNow, taskText, agentId, resume, workDir])
+    if (sf.mode === 'create') return name.trim() !== ''
+    return row !== null && sig !== savedSignature(row)
+  }
+
+  /** 编辑态正在编辑的那条（`selected` 在表单态是 null——`openEdit()` 会清掉它）。 */
+  $: editRow =
+    $schedForm !== null && $schedForm.mode === 'edit'
+      ? (list.find((x) => x.id === ($schedForm as { id: string }).id) ?? null)
+      : null
   function resetFormFields(): void {
     formName = ''
     form = defaultScheduleForm()
@@ -347,6 +405,15 @@ import type { WebTextId } from '@agentdeck/i18n'
     try {
       await api(`/api/schedules/${s.id}`, { method: 'DELETE' })
       showToast(tx('schedules.deletedToast'))
+      /*
+       * ★ D251：**从编辑表单里删掉它之后要把表单收起来**——那条东西已经不存在了，
+       * 表单再开着就是在编辑一条"查无此条"的记录（`editRow` 会变 null，删除按钮消失，
+       * 但字段还在，看着像还能保存）。详情态删（`selectedId === s.id`）同样要清。
+       */
+      if ($schedForm !== null && $schedForm.mode === 'edit' && $schedForm.id === s.id) {
+        schedForm.set(null)
+      }
+      if (selectedId === s.id) selectedId = null
       await load()
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err))
@@ -600,11 +667,17 @@ import type { WebTextId } from '@agentdeck/i18n'
     {#snippet actions()}
       {@const s = selected}
       {#if $schedForm}
-        <!-- ★ 保存放栏头（使用者要求：主操作在表单上部，不在最底下） -->
+        <!--
+          ★ 保存放栏头（使用者要求：主操作在表单上部，不在最底下）
+          ★ D251：与智能体编辑页同一条排布（§2.6 主操作 → 普通 → 次操作 → 危险）与同一条
+            判据（**没改动时主操作置灰**）；编辑态还带「删除」——编辑一条已有的东西时，
+            "删掉它"与"改它"是同一屏里的两个动作（智能体编辑页就是这么排的）。
+        -->
         <button
           type="button"
           class="btn btn--primary"
-          disabled={busy}
+          disabled={busy || !isFormDirty(formName, form, formTaskText, formAgentId, formResume, formWorkDir, $schedForm, editRow)}
+          title={isFormDirty(formName, form, formTaskText, formAgentId, formResume, formWorkDir, $schedForm, editRow) ? '' : $t('schedules.saveNothing')}
           onclick={() => void save()}
         >
           {$t('schedules.save')}
@@ -613,7 +686,7 @@ import type { WebTextId } from '@agentdeck/i18n'
         <button
           type="button"
           class="btn btn--secondary"
-          disabled={busy}
+          disabled={busy || !isFormDirty(formName, form, formTaskText, formAgentId, formResume, formWorkDir, $schedForm, editRow)}
           onclick={() => void save(true)}
         >
           {$t('schedules.saveAndTrigger')}
@@ -621,6 +694,22 @@ import type { WebTextId } from '@agentdeck/i18n'
         <button type="button" class="btn btn--ghost" onclick={closeForm}>
           {$t('schedules.cancel')}
         </button>
+        {#if $schedForm.mode === 'edit' && editRow !== null}
+          <!--
+            ★ D251：编辑态也能删——与智能体编辑页的「删除」同一个位置（栏头最右）。
+            ⚠️ 目标从 `editRow` 拿而不是 `selected`：**表单态下 `selectedId` 是 null**
+              （`openEdit()` 会把它清掉，右栏被表单整块占住），所以 `selected` 在这一态
+              永远是 null——第一版照 `s !== null` 判，按钮一次都没画出来。
+          -->
+          <button
+            type="button"
+            class="btn btn--danger"
+            disabled={busy}
+            onclick={() => void deleteSchedule(editRow)}
+          >
+            {$t('schedules.delete')}
+          </button>
+        {/if}
       {:else if s !== null}
         <button type="button" class="btn btn--secondary" onclick={() => void triggerNow(s)}>
           {$t('schedules.triggerNow')}

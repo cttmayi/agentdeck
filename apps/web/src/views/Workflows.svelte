@@ -215,6 +215,15 @@
   }
 
   /** 窄屏返回（`MainArea` 的 `.back-to-list`）：右栏收掉，回到列表。 */
+  /**
+   * ★ D251（使用者："刚才请你整理的『新建 / 编辑』，请全面按智能体的方式修正一遍"）：
+   **草稿有没有改动**——与智能体编辑页同一条规矩：没改动时「保存」置灰
+   （点了也不会有事发生，那是假按钮）。新建态还要名字与代码都非空。
+   */
+  $: wfDirty = creating
+    ? formName.trim() !== '' && formCode.trim() !== ''
+    : selected !== null && (formName !== selected.name || formCode !== selected.code)
+
   function closeDetail(): void {
     creating = false
     selectedId = null
@@ -411,10 +420,32 @@
       {/snippet}
 
       {#snippet actions()}
+        <!--
+          ★ D251：**与智能体编辑页同一条排布与判据**（§2.6：主操作 → 普通动作 → 次操作 → 危险）：
+            · 「保存」在最前，且**没改动时置灰**（新建态还要求名字与代码都非空）；
+            · 「取消」是次操作（回列表，丢掉草稿）；
+            · 「运行 / 删除」只对**已存在**的编排画出来（新建态没有可跑可删的东西）。
+          原来这里是"运行 / 删除 / 保存"，既没有取消、保存也恒可用——同一个"新建/编辑"
+          动作族里两套规矩，正是这次要收掉的那类分叉。
+        -->
+        <button
+          type="button"
+          class="btn btn--primary"
+          disabled={busy || !wfDirty}
+          title={wfDirty ? '' : $t('workflows.saveNothing')}
+          onclick={() => void save()}
+        >
+          {$t('workflows.save')}
+        </button>
         {#if !creating && selected}
           <button type="button" class="btn btn--secondary" onclick={() => (runOpen = true)}>
             {$t('workflows.run')}
           </button>
+        {/if}
+        <button type="button" class="btn btn--ghost" onclick={closeDetail}>
+          {$t('common.cancel')}
+        </button>
+        {#if !creating && selected}
           <button
             type="button"
             class="btn btn--danger"
@@ -424,9 +455,6 @@
             {$t('workflows.delete')}
           </button>
         {/if}
-        <button type="button" class="btn btn--primary" disabled={busy} onclick={() => void save()}>
-          {$t('workflows.save')}
-        </button>
       {/snippet}
 
       {#snippet body()}

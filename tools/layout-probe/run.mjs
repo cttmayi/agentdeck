@@ -2138,6 +2138,7 @@ const CHECKS = [
      * （标题「未命名对话」、轮数 0），输入条这时才出现。
      */
     label: '★★ 新建对话 = 只建一条 item（点「创建对话」得到未命名空对话：0 轮、标题未命名、随后可输入）',
+    // 起草态骨架另见 `chat.draftHead`；改名保存的置灰判据见 `chat.renameSaveGated`（D251）
     // 起草态自己的骨架另有判据：`chat.draftHead`（D250）
     ok: (v) =>
       !!v &&
@@ -2148,6 +2149,20 @@ const CHECKS = [
       v['轮数'] === 0 &&
       v['建好之后有输入条'] === true,
     show: (v) => (v ? JSON.stringify(v) : '没量到'),
+  },
+  {
+    view: '聊天',
+    key: 'chat.renameSaveGated',
+    /**
+     * ★ D251：改名框打开时里面就是当前标题 ⇒ **没改动时「改名保存」置灰**，
+     *   改一个字符之后才可用。这条与智能体编辑页的「保存」同一条判据。
+     */
+    label: '★ 聊天改名：没改动时「改名保存」置灰、改了才可用（与智能体编辑页同一条判据，D251）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      (v.skipped !== undefined || (v['进改名态'] === true && v['初始置灰'] === true && v['改了之后可用'] === true)),
+    show: (v) => JSON.stringify(v),
   },
   {
     view: '聊天',
@@ -2221,6 +2236,29 @@ const CHECKS = [
   { view: '定时任务（D115）', key: 'schedules.scheduleLineOneRow',
     label: '★ 2026-11：每月/间隔那行放一行（「每月第」与 select、「每」与「分钟」top 相同）——防 flex-wrap 在窄列拆行回归',
     ok: (v) => v === true },
+  {
+    view: '定时任务（D115）',
+    key: 'schedules.editFormActions',
+    /**
+     * ★ D251：定时任务的**编辑表单**与智能体编辑页同一条排布与判据
+     *   （次操作「取消」+ 危险动作「删除」都在；没改动时「保存」置灰；改了才可用）。
+     *   另一半点"删除只出现在编辑态"——只量编辑态的话，"新建表单里也长了删除"照样绿，
+     *   而那是"删一个还不存在的东西"。
+     */
+    label:
+      '★★ 定时任务的编辑表单与智能体编辑页同款：有「取消」也有「删除」、没改动时「保存」置灰、'
+      + '改了才可用；**新建表单里没有「删除」**（D251）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      (v.skipped !== undefined ||
+        (v['有取消'] === true &&
+          v['有删除'] === true &&
+          v['保存初始置灰'] === true &&
+          v['改了之后可用'] === true &&
+          v['新建态没有删除'] === true)),
+    show: (v) => JSON.stringify(v),
+  },
   { view: '定时任务（D115）', key: 'schedules.promptEditor',
     label: '★ 2026-11：模板大编辑器——展开弹层、取消不生效、保存生效、变量插入',
     ok: (v) => v === true },
@@ -2428,6 +2466,9 @@ const CHECKS = [
       // ★ D250：编辑态也有「名字」输入框（原来只在新建态 ⇒ 编排建成后改不了名）
       v['有名字格'] === true &&
       v['名字格有值'] === true &&
+      // ★ D251：与智能体编辑页同一排布与判据——次操作「取消」在、没改动时「保存」置灰
+      v['有取消'] === true &&
+      v['保存初始置灰'] === true &&
       ['运行', '删除', '保存'].every((l) => v['动作'].includes(l)),
     show: (v) => JSON.stringify(v),
   },

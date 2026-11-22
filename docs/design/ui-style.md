@@ -863,6 +863,26 @@ D223 之后连那处也没有了——使用者说「还有些页面也是第一
 ⚠️ 名字只有**一个输入点**（卡片第一格）。别再加"标题栏就地改名"那套——两套输入点是
 分批第 269 批踩过的坑，D248 的解法是删掉第二套、而不是删掉卡片那一格。
 
+### 「新建 / 编辑」这一族页面的共同规矩（D248 / D249 / D250 / D251）
+
+同一件事在"新建"与"编辑"两种状态下**只有一套做法**。逐条（每一条都有探针或结构判据钉着）：
+
+| # | 规矩 | 钉在哪 |
+|---|---|---|
+| 1 | **同一个组件 / 同一份表单**（智能体是 `AgentForm` + `mode`；编排是同一页的 `creating`；定时任务是同一个表单 + `$schedForm.mode`） | `tests/ui-style.test.ts`（旧组件不许复活） |
+| 2 | **名字只有一个输入点**，且在表单里（栏头只显示它）。聊天没有卡片 ⇒ 标题就地改名是那一族的唯一输入点 | 探针 `agents.noRenameEntry` / `workflows.selectShows`（有名字格） |
+| 3 | **主操作在栏头**（④ 新建视图没有例外，D243） | `template.panelHead` / `heads.sweep` |
+| 4 | **没改动时主操作置灰**（新建态还要求必填项非空）——"点了也不会有事发生"的按钮就是假按钮 | 探针 `workflows.selectShows`（保存初始置灰）、`schedules.editFormActions`、`chat.renameSaveGated` |
+| 5 | **取消是次操作**，在栏头动作列里（智能体 / 编排 / 定时任务 / 新建对话都有） | 同上三条 + `chat.draftHead` |
+| 6 | **对"已存在实体"才有意义的动作只在该态出现**（运行 / 删除 / 设为默认 / 复制）；**新建态不画**，不是灰着占位 | `agentsEditJump`（设为默认/复制禁用是"编排内建"那一档）、`schedules.editFormActions`（新建态没有删除） |
+| 7 | **不可用的字段置灰、不删**（记忆格 / 独有技能 / 目录一节 / 入口三项） | `agentsNewMatchesAgentForm` |
+| 8 | **栏头排布**：主操作 → 普通动作 → 次操作 → 危险（§2.6） | `workflows.selectShows` 的 `动作` 顺序 |
+
+⚠️ 第 4 条踩过两次同一个坑（`Schedules` 的 `formDirty` 与 `AgentForm` 的 `dirty`）：**legacy 反应式只认
+语句里静态出现的变量名**——把字段读在函数体里，那句 `$:` 只在初始化时算一次，"保存永远灰着"。
+处置统一是**把依赖当参数传进去**（`isFormDirty(formName, form, …, $schedForm, editRow)` /
+`isDirty(draft, agent, memRows)`）。
+
 判断"合并对不对"的三条机器判据（`tests/ui-style.test.ts` + 探针）：
 ① 旧的两个文件（`NewAgentForm.svelte` / `AgentDetail.svelte`）**不许再存在**；
 ② `AgentForm` 必须有 `mode` 这一维，两个入口（智能体页 / 编排内建智能体编辑页）都渲染它；
