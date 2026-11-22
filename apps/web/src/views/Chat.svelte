@@ -16,7 +16,7 @@
   import ChatMemoryTidy from '../components/ChatMemoryTidy.svelte'
   import ChatSettings from '../components/ChatSettings.svelte'
   import AgentMakerConfirm from '../components/AgentMakerConfirm.svelte'
-  import WorkflowMakerConfirm from '../components/WorkflowMakerConfirm.svelte'
+  import ChatWorkflowCandidates from '../components/ChatWorkflowCandidates.svelte'
   import { api, type Agent, type ChatTurnView, type Conversation } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
@@ -35,7 +35,7 @@
   } from '../lib/chat.ts'
   import { memberLabel } from '../lib/members.ts'
   import { get } from 'svelte/store'
-  import { goCrystallize, pickChatAgentIntent, showToast } from '../lib/view.ts'
+  import { goCrystallize, pickChatAgentIntent, showToast, wfAgentReturn } from '../lib/view.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { absoluteTime, relativeTime } from '../lib/time.ts'
   import type { WebTextId } from '@agentdeck/i18n'
@@ -205,7 +205,6 @@
    */
   let agentMakerOpen = false
   /** 编排生成者的采纳面板（D135）。 */
-  let workflowMakerOpen = false
   /**
    * 聊天页自己的「设置」抽屉（分批第 242 批）。
    *
@@ -1262,11 +1261,6 @@
             ★ 2026-11（D135）：编排生成者写完草稿（`workflow-draft/workflow-draft.md`）
             才出现「确认采纳编排」——与上面那颗同一模式：**按条件出现**，不置灰。
           -->
-          {#if detail?.hasWorkflowDraft}
-            <button class="btn btn--ghost" onclick={() => (workflowMakerOpen = true)}>
-              {$t('chat.workflowMakerAction')}
-            </button>
-          {/if}
           <button class="btn btn--danger" onclick={() => void remove($activeConversationId ?? '')}>
             {$t('chat.delete')}
           </button>
@@ -1451,6 +1445,22 @@
             <ChatBubble role="user" pending text={pendingText} />
             <p class="faint fs-xs">{$t('chat.sending')}</p>
           </article>
+        {/if}
+        <!--
+          ★ D255：**候选编排卡片**（编排生成者把存储形状写进工作目录之后出现）。
+          它替代了原来栏头那颗「确认采纳编排」按钮 + 一份可改草稿的面板：
+          产物是文件，人要看着文件决定收不收；点「收进编排库」直接入库并跳到编排编辑页。
+        -->
+        {#if detail?.workflowCandidates && detail.workflowCandidates.length > 0}
+          <ChatWorkflowCandidates
+            conversationId={$activeConversationId ?? ''}
+            candidates={detail.workflowCandidates}
+            onadopted={(w) => {
+              // 一次性意图：编排页挂载时拿它选中刚收进来的那条（与"从编辑页返回"同一个机制）
+              wfAgentReturn.set(w.id)
+              location.hash = '#/workflows'
+            }}
+          />
         {/if}
         {/if}
       {/snippet}
@@ -1655,7 +1665,6 @@
     />
 
     <!-- ★ 2026-11 设计定稿（§3.5）：「确认生成智能体」面板（岗位卡 + 配套技能审阅） -->
-    <WorkflowMakerConfirm bind:open={workflowMakerOpen} conversationId={$activeConversationId ?? ''} />
     <AgentMakerConfirm
       bind:open={agentMakerOpen}
       conversationId={activeConversation?.id ?? ''}

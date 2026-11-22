@@ -208,6 +208,38 @@ export interface Workflow {
 }
 
 /**
+ * **候选编排**（2026-11，D255）：聊天工作目录 `workflow-draft/<名字>/` 里的那一份，
+ * 带平台预检的结果。
+ *
+ * 界面上它就是聊天里那张卡：名字 / 几个人 / 能不能收 / 哪一条不对。
+ * ⚠️ 预检只是**省一次往返**——点「收进编排库」时服务端会重新校验（不信任界面）。
+ */
+export interface WorkflowCandidateProblem {
+  level: 'error' | 'warn'
+  message: string
+}
+
+export interface WorkflowCandidateAgent {
+  name: string
+  /** 指令前两行（卡片上"这个人是谁"）。 */
+  instructionsPreview: string
+  /** 自己带的技能名。 */
+  skills: string[]
+}
+
+export interface WorkflowCandidate {
+  /** 子目录名（入库时原样传回）。 */
+  dir: string
+  name: string
+  summary: string
+  agents: WorkflowCandidateAgent[]
+  problems: WorkflowCandidateProblem[]
+  /** 绝对路径（"打开目录"用）。 */
+  absDir: string
+  codeLines: number
+}
+
+/**
  * 编排内嵌智能体（只在编排里有效，不占智能体页——D234 落成 `workflows/<id>/agents/<名字>/`）。
  *
  * 与账号智能体同一副形状：`id` 是身份（run 引用它）、目录名是名字的 name（改名跟着搬）、

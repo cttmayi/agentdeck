@@ -60,6 +60,25 @@ export interface Workflow {
   source: 'template' | 'manual' | 'ai'
   /** 模板键（source==='template' 时记录是哪个模板，展示用）。 */
   templateKey: string | null
+  /**
+   * ★ D255：一句话说明（AI 生成时由生成者写在 `workflow.json` 里）。
+   *
+   * 以前这个字段压根不存在——聊天里生成的那份 `summary` 被解析出来、摆在确认面板上，
+   * 落库时**悄悄丢了**（"数据在、无处存"）。现在它是 `workflow.json` 的一个真字段。
+   */
+  summary?: string
+  /**
+   * ★ D255：**按哪一版编排写法写的**（资料包 `api-version.json` 的 `version`）。
+   *
+   * 编排原语会改；记下这一版，"将来不兼容改版时能说清这条是老版本"才有依据。
+   * 手工/模板写的编排没有这个字段（视为"与当前一致"）。
+   */
+  apiVersion?: string
+  /**
+   * ★ D255：**谁生成的**（`conversation:<对话id>`）。只用于"同一份候选里同名再采纳"
+   * 的判断与追溯；不参与解析。
+   */
+  origin?: string
   /** 编排内嵌智能体（只在编排里有效，不占智能体组页）。 */
   inlineAgents: WorkflowInlineAgent[]
   createdAt: number

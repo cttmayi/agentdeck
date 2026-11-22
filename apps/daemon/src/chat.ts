@@ -12,6 +12,8 @@ import type { RunExecutor } from './executor.ts'
 import { resolveWorkDir } from './workdir.ts'
 import { loadInjectableSkills, skillSourcesOfAgent } from './agent-injectable-skills.ts'
 import { effectiveInstructions } from './builtin-drafter.ts'
+import { materialPackForSlot, seedMaterial } from './material-seed.ts'
+import { loadSlotTable, slotOfAgent } from './platform-slots.ts'
 
 /**
  * 聊天那一轮的服务端逻辑。
@@ -159,6 +161,21 @@ export async function submitChatTurn(
     fallbackId: conversation.id,
     workRoot,
   }).path
+
+  /*
+   * ★ D255：**生成者对话每次起 run 之前，把「写法资料」覆盖写进工作目录**。
+   *
+   * 为什么在提交 run 之前、而不是启动时塞一次：资料要跟着**当前版本**走——API 改了，
+   * 下一轮 agent 就该读到新版（不需要重启 daemon、不需要升"内置身份版本"，D143 的坑）。
+   * 为什么失败不抛：资料是辅助，缺了最多写得差一点；对话必须照常能说。
+   */
+  // `Agent` 记录上没有 `slot`（它是**槽位表**算出来的，D154）⇒ 这里查一次表
+  const slotTable = await loadSlotTable(store, conversation.workspaceId).catch(() => null)
+  const slot = slotTable === null ? null : slotOfAgent(slotTable, agent.id as string)
+  const pack = materialPackForSlot(slot)
+  if (pack !== null) {
+    await seedMaterial({ workDir: dir, pack, now }).catch(() => false)
+  }
 
   const seq = maxSeq(await store.listChatTurns(conversation.id)) + 1
   const turn: ChatTurn = {

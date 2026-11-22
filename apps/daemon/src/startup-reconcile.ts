@@ -43,7 +43,7 @@ import {
   ensureBuiltinAgentMakerSkills,
   migratePlatformSkillsToExclusive,
 } from './agent-maker-skills.ts'
-import { ensureBuiltinWorkflowMakerSkills } from './workflow-maker-skills.ts'
+import { retireWorkflowMakerPlatformSkill } from './workflow-maker-skill-retire.ts'
 import { runAgentLegacyCleanupOnce } from './agent-legacy-cleanup.ts'
 import { migrateMemoryEnabledDefaults } from './memory.ts'
 import {
@@ -95,7 +95,7 @@ export type ReconcileStepId =
   | 'builtin-agents'
   | 'drafter-skill-mount'
   | 'agent-maker-skills'
-  | 'workflow-maker-skills'
+  | 'workflow-maker-skill-retire'
   | 'agent-legacy-cleanup'
   | 'platform-member-fields'
   | 'workflow-refs-scan'
@@ -133,9 +133,15 @@ export const RECONCILE_PLAN: ReadonlyArray<{
     what: '智能体生成者的平台技能：老库里的迁进独有目录 + 缺的播种',
   },
   {
-    id: 'workflow-maker-skills',
+    id: 'workflow-maker-skill-retire',
     needs: ['builtin-agents'],
-    what: '编排生成者的平台技能（orchestration-authoring）播种',
+    /*
+     * ★ D255：D143 那份独有技能（`orchestration-authoring`）**退役**——编排写法改成
+     *   "资料包"（工作目录 `material/orchestration/`，源在 `docs/material/`）。
+     *   技能是"播种一次、不敢覆盖"的，而写法会经常变；留着它就是第二个真相。
+     *   这一步只删**这个名字**的独有技能（使用者自己造的不动），幂等。
+     */
+    what: '编排生成者的旧平台技能（orchestration-authoring）退役',
   },
   {
     id: 'agent-legacy-cleanup',
@@ -338,19 +344,15 @@ export async function reconcileStartup(deps: ReconcileDeps): Promise<ReconcileRe
       }
     },
 
-    'workflow-maker-skills': async () => {
+    'workflow-maker-skill-retire': async () => {
       /*
-       * ★ 2026-11（D143）：使用者问「"编排生成者（内置）" 里面并没有描述 API 的细节，
-       *   它怎么会知道怎么写编排呢」——API 细节走技能（与生成者同一分工，D111），
-       *   指令里只留"动笔之前照它写"。播种失败不阻塞启动（与上面同一口径）。
+       * ★ D255：D143 那份独有技能（`orchestration-authoring`）退役——编排写法改由
+       *   **资料包**承担（工作目录 `material/orchestration/`，源在 `docs/material/`，
+       *   每次对话前覆盖写）。技能是"播种一次就不再覆盖"的，而写法会经常变；
+       *   留着它就是第二个真相（模型读到哪一版取决于谁的运气）。
        */
-      const ensure = await ensureBuiltinWorkflowMakerSkills(store, workspaceId)
-      if (ensure.seeded.length > 0) {
-        info(`编排生成者平台技能已就位（独有技能）：${ensure.seeded.join('、')}`)
-      }
-      if (ensure.skipped.length > 0) {
-        warn(`编排生成者平台技能播种跳过：${ensure.skipped.join('；')}`)
-      }
+      const out = await retireWorkflowMakerPlatformSkill(store, workspaceId)
+      if (out.removed) info('编排生成者的旧平台技能已退役（orchestration-authoring）')
     },
 
     'agent-legacy-cleanup': async () => {

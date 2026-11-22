@@ -12,7 +12,12 @@
 > 拍板：按钮"目录存在就出现"；内建智能体**不挂外围技能、但可以自生成技能**；名字**允许中文**；一条编排**软上限 8 人**；
 > 资料目录 `material/orchestration`（外加 agent / skill 两包）。
 >
-> 本文只讲设计。定稿在 §1，开放项在 §11。
+> **状态：已实施（D255，2026-11）**。实现落在：`docs/material/**`（唯一手写源）→ `tools/material/sync.mjs`
+> → `apps/daemon/catalog/material/**`（随包）→ `material-seed.ts`（每次对话前覆盖写进工作目录）；
+> 预检 `workflow-candidate.ts`、入库 `workflow-adopt.ts`、界面 `ChatWorkflowCandidates.svelte`；
+> 旧面板 `WorkflowMakerConfirm` 与 `workflow-draft` / `workflow-commit` 两条接口已删除，
+> D143 那份平台技能已幂等退役（`workflow-maker-skill-retire.ts`）。
+> 本文保留作设计依据；逐条判据见 `docs/srs/requirements.md` §16 的 **D255**。
 
 ---
 

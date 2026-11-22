@@ -69,12 +69,7 @@ import {
 import { FileStore } from '@agentdeck/store-file'
 import { resolveReviewStandard } from './review-standard.ts'
 import { readAgentDraftArtifacts, parseAgentDraft } from './agent-maker.ts'
-import {
-  WORKFLOW_DRAFT_DIR,
-  WORKFLOW_DRAFT_FILE,
-  parseWorkflowDraft,
-  validateWorkflowCode,
-} from './workflow-maker.ts'
+
 import {
   describeCron,
   loadSchedules,
@@ -111,8 +106,11 @@ import {
   migratePlatformSkillsToExclusive,
 } from './agent-maker-skills.ts'
 import { MEMORY_EXISTING_MEMORY_FILE, MEMORY_TRANSCRIPT_FILE } from './platform-actions.ts'
-import { checkWorkflowAgentRefs, resolveWorkflowAgent } from './workflow-agents.ts'
+import { resolveWorkflowAgent } from './workflow-agents.ts'
 import { dirOfScope, listScope, parseScope, readScopeFile, writeScopeFile } from './fs-scope.ts'
+import { readCandidate, readCandidates } from './workflow-candidate.ts'
+import { adoptCandidate } from './workflow-adopt.ts'
+import { bundledMaterialVersion } from './material-seed.ts'
 import { slugForAgentName } from '@agentdeck/store-file'
 import { builtinAccountingRows, reconcileStartup } from './startup-reconcile.ts'
 import {
@@ -134,7 +132,6 @@ import {
   ownerOf,
   parseUserEntries,
   platformMemberRefsInWorkflows,
-  workflowReferenceableNames,
 } from './platform-member.ts'
 import { CONDUCT_MAX_CHARS, GENERAL_WORK_CONDUCT } from './agent-conduct.ts'
 import { forgetRuntimeConfigHome, isIsolatedRuntime } from './run-hooks/runtime-config.ts'
@@ -2624,7 +2621,7 @@ async function injectedSkillsOf(
                * 老版本播种的那条，两条都接编排）。
                *
                * 现在：找不到 / **重名（歧义）** / 接入点里没有 `workflow` 三种情况分开报，
-               * 与采纳校验（`checkWorkflowAgentRefs`）**同一句话**。
+               * 与运行时解析（`resolveWorkflowAgent`）**同一句话**。
                */
               /*
                * ★ D232：名字 → 人 走**存储层那一处**（`getAgentByName`，D231 加的），
@@ -8341,7 +8338,14 @@ async function injectedSkillsOf(
          * ★ 2026-11（D135）：**这个对话能不能「确认采纳编排」**——判据同构：
          *   工作目录的 `workflow-draft/` 里有 `workflow-draft.md`（编排生成者写好了草稿）。
          */
-        let hasWorkflowDraft = false
+        /**
+         * ★★ D255：**候选编排**（工作目录 `workflow-draft/<名字>/` 里那些，带校验结果）。
+         *
+         * 界面拿它画聊天里那张卡片（名字 / 几个人 / 能不能收 / 哪一条不对），
+         * 和旧按钮一样是"按条件出现"，只是条件从"有没有一份 md"变成"有没有候选目录"。
+         * ⚠️ 预检只是**省一次往返**：入库那一刻服务端会重新校验（不信任界面）。
+         */
+        let workflowCandidates: Awaited<ReturnType<typeof readCandidates>> = []
         {
           const dir = resolveWorkDir({
             requested: conversation.workDir,
@@ -8354,20 +8358,14 @@ async function injectedSkillsOf(
           } catch {
             hasAgentDraft = false
           }
-          try {
-            hasWorkflowDraft = (await readdir(join(dir, WORKFLOW_DRAFT_DIR))).includes(
-              WORKFLOW_DRAFT_FILE,
-            )
-          } catch {
-            hasWorkflowDraft = false
-          }
+          workflowCandidates = await readCandidates(dir).catch(() => [])
         }
         sendJson(res, 200, {
           conversation,
           turns: view,
           workDir: conversation.workDir ?? lastRun?.workDir ?? null,
           hasAgentDraft,
-          hasWorkflowDraft,
+          workflowCandidates,
         })
         return
       }
@@ -8468,19 +8466,26 @@ async function injectedSkillsOf(
 
     /*
      * ══════════════════════════════════════════════════════════════════
-     * 编排生成者（D135）：读草稿 / 采纳
+     * 编排生成者（D255）：候选 → 收进编排库
      * ══════════════════════════════════════════════════════════════════
      *
-     * 与上面岗位卡那两条同构：草稿在**对话的工作目录**里（`workflow-draft/`），
-     * 采纳时**以请求里的最终版为准**（人可能改过代码），服务端重新解析 + 校验三道
-     * （语法 / 节点名 / 名字），通过就落成一条编排（`source: 'ai'`）。
+     * 使用者定调：「在聊天的工作目录生成**存储的格式**，等人点确认后再入库」
+     * ＋「点「收进编排库」→ **直接保存，进入编辑编排页面**（如果有同名，要提示是否覆盖）」。
      *
-     * ⚠️ 只有「编排生成者」的对话能采纳：别的 agent 把 workflow-draft.md 放进工作目录
-     *   不是"生成编排"，这条接口不替它背书（与岗位卡同一条）。
+     * 所以只有两条路：
+     *
+     *   GET  …/workflow-candidates   预检（界面刷新用；对话详情里也带一份）
+     *   POST …/workflow-adopt        { dir, overwrite?, existingId? } —— 校验 + 搬目录 + 补字段
+     *
+     * 旧的 `workflow-draft`（草稿 md）/ `workflow-commit`（解析 md 后落库）**已删除**：
+     * 产物是目录，解析那一步不再需要（旧的 `workflow-draft.md` 文件在磁盘上不动）。
+     *
+     * ⚠️ 只有「编排生成者」的对话能入库：别的 agent 往工作目录里放一个同名目录不是
+     *   "生成编排"，这条接口不替它背书（与岗位卡同一条）。
      */
-    const wfDraftMatch = /^\/api\/conversations\/([^/]+)\/workflow-draft$/.exec(path)
-    if (req.method === 'GET' && wfDraftMatch) {
-      const id = wfDraftMatch[1] as ConversationId
+    const wfCandidatesMatch = /^\/api\/conversations\/([^/]+)\/workflow-candidates$/.exec(path)
+    if (req.method === 'GET' && wfCandidatesMatch) {
+      const id = wfCandidatesMatch[1] as ConversationId
       const conversation = await store.getConversation(id)
       if (!conversation || conversation.workspaceId !== workspaceId) {
         sendJson(res, 404, { error: '对话不存在' })
@@ -8492,128 +8497,92 @@ async function injectedSkillsOf(
         fallbackId: conversation.id,
         workRoot,
       }).path
-      let text: string | null = null
-      try {
-        text = await readFile(join(dir, WORKFLOW_DRAFT_DIR, WORKFLOW_DRAFT_FILE), 'utf8')
-      } catch {
-        text = null
-      }
-      if (text === null) {
-        sendJson(res, 404, { error: '还没有编排草稿', code: 'workflow_draft_missing' })
-        return
-      }
-      const parsed = parseWorkflowDraft(text)
-      sendJson(res, 200, {
-        workflowDraft: text,
-        ...(parsed.ok
-          ? { name: parsed.name, summary: parsed.summary, code: parsed.code, parseError: null }
-          : { name: '', summary: '', code: '', parseError: parsed.error }),
-      })
+      sendJson(res, 200, { candidates: await readCandidates(dir) })
       return
     }
 
-    const wfCommitMatch = /^\/api\/conversations\/([^/]+)\/workflow-commit$/.exec(path)
-    if (req.method === 'POST' && wfCommitMatch) {
-      const id = wfCommitMatch[1] as ConversationId
+    const wfAdoptMatch = /^\/api\/conversations\/([^/]+)\/workflow-adopt$/.exec(path)
+    if (req.method === 'POST' && wfAdoptMatch) {
+      const id = wfAdoptMatch[1] as ConversationId
       const conversation = await store.getConversation(id)
       if (!conversation || conversation.workspaceId !== workspaceId) {
         sendJson(res, 404, { error: '对话不存在' })
         return
       }
-      /*
-       * ★ 2026-11（D154）：判据是**槽位表**——"我那条编排生成者"是哪个 id。
-       *   改之前读记录上的老字段（`builtinKind`），那条现在新记录里根本不存在。
-       */
+      // ★ 只有编排生成者的对话能入库（判据是**槽位表**，D154）
       const wfSlots = await loadSlotTable(store, workspaceId)
       const makerId = wfSlots['workflow-maker'] ?? null
       if (makerId === null || (conversation.agentId as string) !== makerId) {
         sendJson(res, 400, {
-          error: '只有「编排生成者」的对话能采纳编排（这条对话的执行者不是它）',
-          code: 'workflow_commit_not_maker',
+          error: '只有「编排生成者」的对话能收编排（这条对话的执行者不是它）',
+          code: 'workflow_adopt_not_maker',
         })
         return
       }
-      const body = (await readJsonBody(req)) as { workflowDraft?: unknown }
-      const draftText = typeof body?.workflowDraft === 'string' ? body.workflowDraft : ''
-      if (draftText.trim() === '') {
-        sendJson(res, 400, { error: '需要 workflowDraft（草稿正文）', code: 'workflow_draft_required' })
+      const body = (await readJsonBody(req)) as {
+        dir?: unknown
+        overwrite?: unknown
+        existingId?: unknown
+      }
+      const dirName = typeof body?.dir === 'string' ? body.dir : ''
+      if (dirName.trim() === '') {
+        sendJson(res, 400, { error: '需要 dir（候选目录名）', code: 'workflow_candidate_required' })
         return
       }
-      const parsed = parseWorkflowDraft(draftText)
-      if (!parsed.ok) {
-        sendJson(res, 400, {
-          error: `编排草稿解析失败：${parsed.error}`,
-          code: 'workflow_draft_invalid',
-        })
-        return
-      }
-      const agents = await store.listAgents(workspaceId)
+      const workDir = resolveWorkDir({
+        requested: conversation.workDir,
+        subject: { type: 'conversation', id: conversation.id },
+        fallbackId: conversation.id,
+        workRoot,
+      }).path
       /*
-       * ★ 2026-11（D145）：节点名只认**能被编排引用**的那些（`entries` 里有 `workflow`）。
-       *   改之前是全量名单 ⇒ 平台成员（起草者 / 编排生成者）也能通过校验，然后在运行
-       *   时才被引擎拒——"校验说行、跑起来必炸"是最坏的一种不一致。
+       * 同名冲突：**由界面先问人**（用户拍板"如果有同名，要提示是否覆盖"），
+       * 所以这里只负责在"没带上覆盖意图"时如实 409，并给出现有那条的 id/name。
        */
-      /*
-       * ★★ 2026-11（D163）：**先查"名字能不能唯一解析"**，再走语法/名字校验——
-       *   重名是"名字存在但选不出是哪条"，`validateWorkflowCode` 那层看不出来（它只查有没有）。
-       *   ⚠️ 与引擎解析同一句话（`resolveWorkflowAgent`），否则就是"校验说行、跑起来必炸"。
-       */
-      /*
-       * ★ D234：采纳校验与运行时**同一套池子**（本编排内建 + 全局）。
-       *   这一层没有 wf（编排还没建出来），所以内建池是空的——与"新建的编排还没有内建智能体"
-       *   一致；等编排建好之后再改代码添加内建智能体时，走的是保存/运行那条路。
-       */
-      const refs = await checkWorkflowAgentRefs(
-        (name) => store.getAgentByName(name),
-        parsed.code,
+      const candidate = await readCandidate(workDir, dirName)
+      const sameName = workflows.find(
+        (w) => w.workspaceId === workspaceId && w.name.trim() === candidate.name.trim(),
       )
-      if (!refs.ok) {
-        /*
-         * ⚠️ 错误码保持向后兼容：**"不存在"与"存在但不可引用"仍然报
-         *   `workflow_code_unknown_agent`**（界面与既有用例认这个），只有**重名歧义**
-         *   用新码 `workflow_code_ambiguous`——那是一种以前根本不会出现的失败。
-         */
-        sendJson(res, 400, {
-          error: refs.error,
-          code: refs.code === 'agent_ambiguous' ? 'workflow_code_ambiguous' : 'workflow_code_unknown_agent',
-          /*
-           * `unknownAgents` 是既有契约（界面与用例都读它点名"是哪几个"）。
-           * 重名那档另外给 `ambiguousAgents`——两件事不是一回事，混成一个字段会让人
-           * 以为"名字不存在"。
-           */
-          ...(refs.code === 'agent_ambiguous'
-            ? { ambiguousAgents: [refs.name] }
-            : { unknownAgents: [refs.name] }),
+      const overwrite = body.overwrite === true
+      const existingId = typeof body.existingId === 'string' ? body.existingId : undefined
+      if (sameName !== undefined && !(overwrite && existingId === sameName.id)) {
+        sendJson(res, 409, {
+          error: `库里已有一条同名编排「${sameName.name}」`,
+          code: 'workflow_name_taken',
+          existing: { id: sameName.id, name: sameName.name },
         })
         return
       }
-      const check = validateWorkflowCode(parsed.code, workflowReferenceableNames(agents))
-      if (!check.ok) {
-        sendJson(res, 400, {
-          error:
-            check.syntaxError !== null
-              ? `编排代码有语法错误：${check.syntaxError}`
-              : `编排代码里引用了不存在的智能体：${check.unknownAgents.join('、')}`,
-          code: check.syntaxError !== null ? 'workflow_code_syntax' : 'workflow_code_unknown_agent',
-          ...(check.syntaxError !== null ? {} : { unknownAgents: check.unknownAgents }),
-        })
-        return
-      }
-      const wf = {
-        id: ulid() as string,
+      const adopted = await adoptCandidate({
+        dataDir: options.dataDir,
+        workDir,
+        dir: dirName,
         workspaceId,
-        name: parsed.name,
-        code: parsed.code,
-        // ★ 采纳 ⇒ 来源是 AI（列表徽标那一档终于有人产出了）
-        source: 'ai' as const,
-        templateKey: null,
-        inlineAgents: [],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        conversationId: conversation.id,
+        ...(await bundledMaterialVersion('orchestration').then((v) =>
+          v === undefined ? {} : { apiVersion: v },
+        )),
+        ...(overwrite && existingId !== undefined ? { existingId } : {}),
+      })
+      if (!adopted.ok) {
+        if (adopted.reason === 'invalid') {
+          sendJson(res, 400, {
+            error: '这条候选还收不了',
+            code: 'workflow_candidate_invalid',
+            problems: adopted.candidate.problems,
+            candidate: adopted.candidate,
+          })
+        } else {
+          sendJson(res, 500, { error: adopted.message, code: 'workflow_adopt_failed' })
+        }
+        return
       }
-      workflows.push(wf)
-      await saveWorkflow(options.dataDir, wf as Workflow)
-      sendJson(res, 201, { workflow: wf, unverifiable: check.unverifiable })
+      // 内存里的清单跟着数据走（覆盖 = 换掉那一条，新建 = 加一条）
+      const idx = workflows.findIndex((w) => w.id === adopted.workflow.id)
+      if (idx >= 0) workflows[idx] = adopted.workflow
+      else workflows.push(adopted.workflow)
+      await saveWorkflow(options.dataDir, adopted.workflow)
+      sendJson(res, 201, { workflow: adopted.workflow })
       return
     }
 

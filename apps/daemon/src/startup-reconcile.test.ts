@@ -43,7 +43,7 @@ describe('★ 计划本身：八步都在，依赖都指向前面的步骤', () 
       'builtin-agents',
       'drafter-skill-mount',
       'agent-maker-skills',
-      'workflow-maker-skills',
+      'workflow-maker-skill-retire',
       'agent-legacy-cleanup',
       'platform-member-fields',
       'workflow-refs-scan',

@@ -264,11 +264,13 @@ src/engine.test.ts 严格测试（16 用例）
 
 ## 7. AI 生成编排（编排生成者，D135）
 
-> ★ 生成者**实际照着写的那份**是它的独有平台技能
-> [`apps/daemon/catalog/platform-skills/orchestration-authoring/SKILL.md`](../../apps/daemon/catalog/platform-skills/orchestration-authoring/SKILL.md)
-> （D143）：签名表、Reply 形状、`{{task}}` 的含义、两种把关者、四种可抄形状、五条踩坑。
-> 它与引擎的一致性由 `apps/daemon/src/workflow-maker-skills.test.ts` 钉着——
-> **正文里每段 ```js 都能被 `validateWorkflowCode` 编译通过**、六个原语一个不少。
+> ★ 生成者**实际照着写的那份**是「资料包」（2026-11，D255 起；D143 那份独有技能已退役）：
+> [`docs/material/orchestration/api.md`](../material/orchestration/api.md)
+> ——签名、Reply 形状、`{{task}}`、两种把关者、四种可抄写法、五个坑。
+> 平台在**每次对话前**把它覆盖写进工作目录的 `material/orchestration/`（源在 `docs/material/`，
+> 与 `catalog/material/` 逐字节同步，`tests/material-sync.test.ts` 钉着）。
+> 一致性由 `apps/daemon/src/material-orchestration.test.ts` 盯着——**api.md 与 examples/ 里
+> 每段代码都能被编译通过**、六个原语一个不少。
 > 本节讲"为什么这样设计"，那份讲"怎么写"。
 
 编排代码是**人写的字符串**（§1），所以"让 AI 帮我写"一直是个自然的入口，但

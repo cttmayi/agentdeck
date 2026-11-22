@@ -542,35 +542,28 @@ export const chatText = {
    * 按钮按条件出现（agent-draft/ 目录有 agent-draft.md 才出现），不搞置灰——没有素材时置灰
    * 按钮是一种半开的门（设计稿 §9.7）。
    */
-  // ── 编排生成者的采纳面板（2026-11，D135）──
+  // ── 编排生成者：候选编排卡片（2026-11，D255）──
   /*
-   * 与「确认生成智能体」那一族同构、同一条纪律（**按条件出现**，不置灰）。
+   * 使用者定的流程：生成者把候选写成**存储的形状**（工作目录 `workflow-draft/<名字>/`），
+   * 聊天里出现一张卡；点「收进编排库」**直接保存**并跳到编排编辑页；同名先问覆盖。
    * ⚠️ 词条里不许出现 markdown 记号（`**` 与反引号）——i18n 守卫要求。
    */
-  'chat.workflowMakerAction': { zh: '确认采纳编排', en: 'Adopt workflow' },
-  'chat.workflowMakerPanelTitle': { zh: '确认采纳编排', en: 'Adopt workflow' },
-  'chat.workflowMakerPanelHint': { zh: '采纳后进编排页，可继续改', en: 'Lands in Workflows, still editable' },
-  'chat.workflowMakerLoading': { zh: '正在读草稿…', en: 'Reading the draft…' },
-  'chat.workflowMakerClosed': { zh: '已采纳。', en: 'Adopted.' },
-  'chat.workflowMakerDraftNote': {
-    zh: '这是编排生成者写的草稿。采纳之前你可以改名、改代码——采纳是最后一次把关的机会。',
-    en: 'Drafted by the workflow maker. You can rename and edit before adopting — this is your last check.',
+  'chat.wfReadyTitle': { zh: '已生成编排「{name}」', en: 'Workflow drafted: “{name}”' },
+  'chat.wfBlockedTitle': { zh: '还没能收：「{name}」', en: 'Not adoptable yet: “{name}”' },
+  'chat.wfMeta': {
+    zh: '{n} 个内建智能体（{names}）· 代码 {lines} 行',
+    en: '{n} inline agents ({names}) · {lines} lines of code',
   },
-  'chat.workflowMakerNameLabel': { zh: '编排名', en: 'Workflow name' },
-  'chat.workflowMakerSummaryLabel': { zh: '一句话说明（可选）', en: 'One-line summary (optional)' },
-  'chat.workflowMakerCodeLabel': { zh: '编排代码', en: 'Workflow code' },
-  'chat.workflowMakerCodeHint': {
-    zh: '采纳前会查两件事：语法对不对、代码里引用的智能体是否存在。',
-    en: 'Before adopting we check the syntax, and that every referenced agent exists.',
+  'chat.wfOpenDir': { zh: '打开目录', en: 'Open folder' },
+  'chat.wfAdopt': { zh: '收进编排库', en: 'Add to workflows' },
+  'chat.wfAdopted': { zh: '已收进编排库「{name}」', en: 'Added “{name}” to workflows' },
+  'chat.wfOpenDirFailed': { zh: '打不开目录：{error}', en: 'Cannot open the folder: {error}' },
+  'chat.wfOverwriteTitle': { zh: '同名编排已存在', en: 'A workflow with that name exists' },
+  'chat.wfOverwriteBody': {
+    zh: '库里已经有一条叫「{name}」的编排。要用这次的生成覆盖它吗？它的代码与 {n} 个内建智能体会被整份替换（原来有、这次没有的人会被删掉）。',
+    en: 'There is already a workflow named “{name}”. Replace it? Its code and its {n} inline agents are replaced wholesale (agents missing from this draft are deleted).',
   },
-  'chat.workflowMakerParseError': { zh: '草稿解析失败：{error}', en: 'Draft could not be parsed: {error}' },
-  'chat.workflowMakerLoadFail': { zh: '读不到草稿：{error}', en: 'Cannot read the draft: {error}' },
-  'chat.workflowMakerFail': { zh: '采纳失败：{error}', en: 'Adopting failed: {error}' },
-  'chat.workflowMakerDone': { zh: '已采纳「{name}」', en: 'Adopted “{name}”' },
-  'chat.workflowMakerDoneUnverifiable': {
-    zh: '已采纳「{name}」（有 {n} 处引用是拼出来的，没法静态校验）',
-    en: 'Adopted “{name}” ({n} references built at runtime — not statically checked)',
-  },
+  'chat.wfOverwriteConfirm': { zh: '覆盖它', en: 'Replace' },
   'chat.agentMakerAction': { zh: '确认生成智能体', en: 'Confirm agent' },
   'chat.agentMakerPanelTitle': { zh: '确认生成智能体 · 岗位卡 + 配套技能', en: 'Confirm the agent · job card + skills' },
   'chat.agentMakerDraftNote': {

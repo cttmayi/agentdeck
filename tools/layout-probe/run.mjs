@@ -1525,39 +1525,41 @@ const CHECKS = [
       'S4/D127 角色退场；+ 配套技能 meeting-notes-format + 「未经验证」提示）',
     ok: (v) => v === true,
   },
-  // ── 编排生成者（D135）：与上面那一族同构，产物换成编排 ──
+  // ── 编排生成者（D255）：卡片 + 收进编排库（产物是"存储的形状"，仍要人按那一下）──
   {
     view: '聊天',
-    key: 'chat.workflowMakerButtonShows',
+    key: 'chat.wfCandidateCard',
     label:
-      '★ 2026-11（D135）：`workflow-draft/workflow-draft.md` 写好之后栏头出现「确认采纳编排」'
-      + '（条件出现、不置灰——没草稿就没有按钮），左栏同时有那条对话',
-    ok: (v) => v === true,
-  },
-  {
-    view: '聊天',
-    key: 'chat.workflowMakerPanel',
-    label:
-      '★★ 采纳面板是**可改的**：编排名与说明填好了、代码在**编辑器**里（行号 + 原语着色），'
-      + '且草稿里那层 ```js 围栏已经剥掉（剥不掉 ⇒ 采纳时必报语法错）',
+      '★★★ 编排生成者把候选**写成存储的形状**（workflow-draft/<名字>/）之后，聊天里出现候选卡片：'
+      + '名字/摘要/内建智能体与代码行数、没有错、可收；工作目录里同时有平台写的 material/（写法资料）',
     ok: (v) =>
       !!v &&
-      v.编排名填好 === true &&
-      v.说明填好 === true &&
-      v.围栏已剥掉 === true &&
-      v.代码在 === true &&
-      v.行号 >= 1 &&
-      v.原语着色 >= 1 &&
-      v.行高一致 === true,
+      v['卡片在'] === true &&
+      String(v['标题']).includes('探针两段流水线') &&
+      String(v['摘要']).includes('先记账再复核') &&
+      v['没有报错'] === true &&
+      v['收进可点'] === true &&
+      v['有打开目录'] === true &&
+      (v['工作目录顶层'] ?? []).includes('material') &&
+      (v['工作目录顶层'] ?? []).includes('workflow-draft'),
     show: (v) => JSON.stringify(v),
   },
   {
     view: '聊天',
-    key: 'chat.workflowMakerAdopt',
+    key: 'chat.wfAdopt',
     label:
-      '★★★ 点「采纳」真的落库：面板关掉，编排列表里多出这一条且 `source: ai`'
-      + '（这条铁律没变——生成者只起草，落库是人按的那一下）',
-    ok: (v) => !!v && v.关掉面板 === true && v.落库 === true && v.来源ai === true,
+      '★★★ 点「收进编排库」⇒ **直接入库**并跳到编排编辑页（那条被选中、代码里引用的是候选自带的人）；'
+      + '同名再收一次先问人、取消后不多一条；source: ai 且记下 apiVersion',
+    ok: (v) =>
+      !!v &&
+      v['跳到编排页'] === true &&
+      String(v['编排页标题']).includes('探针两段流水线') &&
+      v['代码带内建人'] === true &&
+      v['落库'] === true &&
+      v['来源ai'] === true &&
+      v['版本记下'] === true &&
+      v['同名要确认'] === true &&
+      v['取消后没多一条'] === true,
     show: (v) => JSON.stringify(v),
   },
   {
@@ -6876,14 +6878,24 @@ function writeFakeGenericCli() {
       'PROBE_MAKER_EOF',
       `    printf '{"type":"text","text":"岗位卡已写入 agent-draft.md。"}\\n'`,
       '    exit 0 ;;',
-      // ★ 2026-11（D135 编排生成者）：带编排记号 ⇒ 把编排草稿写进 `$PWD/workflow-draft/`。
-      //   与上面那条同一个道理（heredoc 引号带 EOF ⇒ `$` 不展开）。
+      // ★ D255 编排生成者：带编排记号 ⇒ 把**候选编排写成存储的形状**
+      //   （`$PWD/workflow-draft/<编排名>/`：workflow.json + main.js + agents/…），
+      //   与真机生成者做的事同构（heredoc 引号带 EOF ⇒ `$` 不展开）。
       `  *${PROBE_WORKFLOW_MARKER}*)`,
-      `    mkdir -p "$PWD/workflow-draft"`,
-      `    cat > "$PWD/workflow-draft/workflow-draft.md" <<'PROBE_WFLOW_EOF'`,
-      PROBE_WORKFLOW_DRAFT_MD,
+      `    mkdir -p "$PWD/workflow-draft/探针两段流水线/agents/探针用的执行者"`,
+      `    cat > "$PWD/workflow-draft/探针两段流水线/workflow.json" <<'PROBE_WFLOW_EOF'`,
+      PROBE_WORKFLOW_JSON,
       'PROBE_WFLOW_EOF',
-      `    printf '{"type":"text","text":"编排草稿已写入 workflow-draft.md。"}\\n'`,
+      `    cat > "$PWD/workflow-draft/探针两段流水线/main.js" <<'PROBE_WFLOW_EOF'`,
+      PROBE_WORKFLOW_MAIN_JS,
+      'PROBE_WFLOW_EOF',
+      `    cat > "$PWD/workflow-draft/探针两段流水线/agents/探针用的执行者/agent.json" <<'PROBE_WFLOW_EOF'`,
+      PROBE_WORKFLOW_AGENT_JSON,
+      'PROBE_WFLOW_EOF',
+      `    cat > "$PWD/workflow-draft/探针两段流水线/agents/探针用的执行者/instructions.md" <<'PROBE_WFLOW_EOF'`,
+      PROBE_WORKFLOW_AGENT_MD,
+      'PROBE_WFLOW_EOF',
+      `    printf '{"type":"text","text":"编排写好了：workflow-draft/探针两段流水线/。"}\n'`,
       '    exit 0 ;;',
       '  *) echo "agent-cli: 探针假 CLI 只服务起草那一屏（其余 run 保持"跑不起来"的原样）" >&2; exit 127 ;;',
       'esac',
@@ -6960,17 +6972,20 @@ const PROBE_MAKER_SKILL_MD = [
  *    而探针量的是"人改完能不能采纳"，不是"校验有没有拦"。
  */
 const PROBE_WORKFLOW_MARKER = 'PROBE-WORKFLOW-DRAFT'
-const PROBE_WORKFLOW_DRAFT_MD = [
-  '---',
-  'name: 探针两段流水线',
-  'summary: 先记账再复核（探针夹具）',
-  '---',
-  '',
-  '```js',
-  "await flow([agent('探针用的执行者')], '{{task}}')",
-  '```',
-  '',
+/**
+ * ★ D255：候选编排的夹具内容（**存储形状**，不是草稿 md）。
+ *
+ * 顺带钉住两条事实：① 名字允许中文（`探针两段流水线` / `探针用的执行者`）；
+ * ② 代码只引用**这个候选自己 `agents/` 下的**人（平台不改写、也不需要库里先有这个人）。
+ */
+const PROBE_WORKFLOW_JSON = '{"name":"探针两段流水线","summary":"先记账再复核（探针夹具）"}'
+const PROBE_WORKFLOW_MAIN_JS = [
+  "const 执行 = agent('探针用的执行者')",
+  "const r = await flow([执行], '{{task}}')",
+  'return r.message',
 ].join('\n')
+const PROBE_WORKFLOW_AGENT_JSON = '{"name":"探针用的执行者"}'
+const PROBE_WORKFLOW_AGENT_MD = '你是探针用的执行者：只回一句话。'
 
 /** 起 daemon（同一个数据目录、同一个端口，可能起两次——见下面"为什么起两次"）。 */
 let daemon = null

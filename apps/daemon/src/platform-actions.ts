@@ -12,7 +12,7 @@
  *   | `skill-draft`     | 沉淀起草者   | 沉淀页「开始起草」           |
  *   | `memory-tidy`     | 记忆整理者   | 聊天页「整理记忆」           |
  *   | `agent-commit`    | 智能体生成者 | 聊天页「确认生成智能体」     |
- *   | `workflow-commit` | 编排生成者   | 聊天页「确认采纳编排」       |
+ *   | `workflow-commit` | 编排生成者   | 聊天页「收进编排库」         |
  *
  * 写下来之前，这些事实**散在四个 handler 里**：谁读哪个目录、把产出写在哪、
  * 采纳那一步走哪条路由——每条都要靠人读代码才知道。加一个动作要改四处，
@@ -42,7 +42,7 @@
 
 import type { BuiltinKind } from './builtin-drafter.ts'
 import { AGENT_DRAFT_DIR, AGENT_DRAFT_FILE } from './agent-maker.ts'
-import { WORKFLOW_DRAFT_DIR, WORKFLOW_DRAFT_FILE } from './workflow-maker.ts'
+import { WORKFLOW_DRAFT_DIR } from './workflow-maker.ts'
 
 /* ══════════════════════════════════════════════════════════════════
  * 素材文件名（**定义处**，调用方从这里 import）
@@ -188,15 +188,17 @@ export const PLATFORM_ACTIONS: readonly PlatformAction[] = [
     id: 'workflow-commit',
     member: 'workflow-maker',
     startFrom: { page: 'chat', where: '「确认采纳编排」' },
-    material: [],
-    produce: { dir: WORKFLOW_DRAFT_DIR, file: WORKFLOW_DRAFT_FILE },
+    // ★ D255：素材 = 平台每次对话前覆盖写的「写法资料包」（`material/orchestration/`）
+    material: ['material/orchestration'],
+    // 产出 = 一个候选编排**目录**（`workflow-draft/<编排名>/`：workflow.json + main.js + agents/…）
+    produce: { dir: WORKFLOW_DRAFT_DIR },
     adopt: {
-      route: '/api/conversations/:id/workflow-commit',
+      route: '/api/conversations/:id/workflow-adopt',
       steps: [
-        '以请求里的最终版为准（人可能改过代码）',
-        '语法走 `validateWorkflowCode`（只构造不调用）',
-        "`agent('名字')` 必须是现存且可被编排引用的智能体",
-        '名字非空且 ≤100 字符',
+        '候选目录里的 workflow.json 能解析、`name` 非空 ≤100',
+        'main.js 语法通过（`AsyncFunction` 只构造不调用，与引擎同一条路）',
+        "`agent('名字')` 只认本候选 `agents/` 下有的名字；`gate/flow/parallel/loop/route` 之外不许出现别的标识符调用",
+        '每个内建智能体的 instructions.md 非空；同名编排先问人要不要覆盖',
       ],
     },
   },

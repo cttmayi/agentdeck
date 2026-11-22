@@ -43,7 +43,7 @@ route      // 按关键字路由：route({ 关键词: 人, … }, '{{task}}')
 
 `await` 任何原语都得到一个 Reply：
 
-```js
+```ts
 { result: 'done' | 'pass' | 'fail', message?: string | string[], guard?: Reply, … }
 ```
 
