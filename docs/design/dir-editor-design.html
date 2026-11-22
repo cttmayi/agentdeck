@@ -102,30 +102,47 @@ description: 周报的三段结构：结论 / 证据 / 下一步
         <b>原文面</b>：多「编辑」⇒ 变「还原 / 保存」；保存失败的原话留在浮层里。
       </p>
 
-      <h2>3. 屏 ①：同一根工具条上多两样东西（编辑态 / 保存失败）</h2>
-      <div class="mock-frame" style="height:20rem">
+      <h2>3. 屏 ①：同一个浮层，只是进了编辑态（原文面）</h2>
+      <p class="lead">
+        与第 2 节**同一个 <code>Modal size="wide"</code>、同一根 <code>.fv-bar</code>**——
+        右边那颗「编辑」换成「还原 / 保存」，正文换成一个可编辑的文本框；渲染面在编辑态下
+        不可选（它只读）。保存失败的原话就在浮层里、正文上方。
+      </p>
+      <div class="mock-frame" style="height:20rem;position:relative">
         <section class="pane detail-pane" style="height:100%">
-          <header class="detail-head">
-            <div class="detail-head-main"><h2>weekly-shape/SKILL.md</h2><p class="detail-sub"><span class="badge">可写 · 256 KB 上限</span></p></div>
-            <div class="detail-actions">
-              <button type="button" class="btn btn--ghost">还原</button>
-              <button type="button" class="btn btn--primary">保存</button>
+          <div class="pane-body" style="opacity:.3">
+            <div class="field"><label>目录</label><input value="workflows/…/agents/审稿员/" readonly /></div>
+            <ul class="list-stack"><li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">skills/</span></button></li></ul>
+          </div>
+        </section>
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+          <div style="width:80%;background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--radius);box-shadow:var(--shadow-2)">
+            <div style="display:flex;align-items:center;gap:var(--sp-2);padding:var(--pad-frame-head);border-bottom:1px solid var(--line)">
+              <span class="mono faint fs-xs">skills/weekly-shape/SKILL.md</span>
+              <span class="faint fs-xs">1.2 KB</span>
+              <span class="fv-toggle" role="group" style="display:inline-flex;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden">
+                <button type="button" disabled title="编辑态只有原文面" style="padding:0 var(--sp-2);height:24px;background:none;border:0;color:var(--text-faint);opacity:.5">渲染</button>
+                <button type="button" class="active" style="padding:0 var(--sp-2);height:24px;background:var(--surface-2);border:0;color:var(--accent)">原文</button>
+              </span>
+              <span style="flex:1"></span>
+              <button type="button" class="btn btn--ghost btn--sm">还原</button>
+              <button type="button" class="btn btn--primary btn--sm">保存</button>
+              <button type="button" class="btn btn--ghost btn--sm">关闭</button>
             </div>
-          </header>
-          <div class="pane-body detail-scroll">
-            <div class="notice bad">JSON 解析失败：第 4 行第 3 列期望 <code>,</code>——没有写入任何东西。</div>
-            <pre class="code-mock">{
+            <div style="padding:var(--pad-frame-body)">
+              <div class="notice bad" style="margin-bottom:var(--sp-2)">JSON 解析失败：第 4 行第 3 列期望 <code>,</code>——没有写入任何东西。</div>
+              <pre class="code-mock" style="margin:0;max-height:7rem">{
   "id": "01M80…",
   "name": "审稿员"
   "skillIds": []   ← 漏了逗号
 }</pre>
+            </div>
           </div>
-        </section>
+        </div>
       </div>
       <p class="lead">
-        工具条（<code>.fv-bar</code>）里多加一颗「编辑」；进编辑态之后变成「还原 / 保存」。
-        <b>渲染面（Markdown / 高亮 / HTML 预览 / 十六进制）一个都不动</b>——编辑态只是"文本面"，
-        保存失败的原话就留在浮层里（不关窗、不跳走）。
+        <b>关掉</b>（× / Esc / 关闭）在有未保存改动时先问一句——与「建任务」那一栏同一个守卫，
+        别让人一按 Esc 丢掉刚写的字。<b>保存失败不关窗</b>：原话在正文上方，改完再按保存。
       </p>
 
       <h2>5. 限制只有通用的几条（没有"这个文件不许改"的特例）</h2>
