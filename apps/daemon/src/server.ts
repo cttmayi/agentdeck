@@ -255,6 +255,7 @@ import {
   MEDIA_FILE_HEADERS,
   UnsafePathError,
   WORK_FILE_HEADERS,
+  contentTypeFor,
   listWorkDir,
   openWorkFile,
   parseByteRange,
@@ -2933,8 +2934,27 @@ async function injectedSkillsOf(
       }
       if (fsMatch[2] === 'file' && req.method === 'GET') {
         try {
-          const buf = await readScopeFile(dir, url.searchParams.get('path') ?? '')
-          sendJson(res, 200, { text: buf.toString('utf8'), bytes: buf.byteLength })
+          const rel = url.searchParams.get('path') ?? ''
+          const buf = await readScopeFile(dir, rel)
+          /*
+           * ★★ D254：**发原始字节，不发 JSON 信封**——与工作目录那条路由一个契约
+           *   （`sendWorkFile`：`content-type` + 原始 bytes + `WORK_FILE_HEADERS`）。
+           *
+           * 原来这里 `sendJson(res, {text, bytes})`，而查看器（`FileViewer`）是
+           * `res.arrayBuffer()` 之后按 UTF-8 解码——于是**每个文件打开都显示成
+           * `{"text":"…","bytes":204}`**。使用者的原话是"智能体存储的 instructions.md
+           * 不是真 md，而是 json"：磁盘上的文件没问题，是这条路由把信封当正文发了出去。
+           * ⚠️ 别改回 JSON：查看器的「原文」面要的就是磁盘上那串字节（`FileViewer`
+           *   顶上的规矩），信封会让"我看到的 ≠ 磁盘上那个文件"。
+           * ⚠️ `WORK_FILE_HEADERS` 里的那条 CSP（`sandbox allow-scripts`，**不加**
+           *   `allow-same-origin`）也必须带上：这些目录里的文件同样是 agent 写的。
+           */
+          res.writeHead(200, {
+            'content-type': contentTypeFor(rel),
+            'content-length': buf.byteLength,
+            ...WORK_FILE_HEADERS,
+          })
+          res.end(buf)
         } catch (err) {
           sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) })
         }

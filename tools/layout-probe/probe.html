@@ -4950,6 +4950,29 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           const ok = await until(() => !!d().querySelector('[data-wf-agent-back]'), 60)
           const pane = d().querySelector('.detail-pane')
           const entryInputs = [...(pane?.querySelectorAll('[data-agent-entries] input') ?? [])]
+          // ★ D254：展开「目录」→ 点开 instructions.md → 读查看器里的字（量完按 Esc 关掉）
+          let viewerText = ''
+          {
+            const dirHead = pane?.querySelector('[data-dir] .dir-head')
+            if (dirHead && dirHead.disabled === false) {
+              click(dirHead)
+              await until(() => !!pane?.querySelector('[data-dir] .wd'), 40)
+              const fileBtn = [...(pane?.querySelectorAll('[data-dir] .wd button') ?? [])].find(
+                (b) => (text(b) ?? '').trim() === 'instructions.md',
+              )
+              if (fileBtn) {
+                click(fileBtn)
+                await until(() => !!d().querySelector('.modal-body'), 60)
+                await wait(200)
+                viewerText = (text(d().querySelector('.modal-body')) ?? '').trim()
+                // 收尾：Esc 关掉查看器（后面还有判据要点「返回编排」）
+                f.contentWindow.dispatchEvent(
+                  new f.contentWindow.KeyboardEvent('keydown', { key: 'Escape' }),
+                )
+                await until(() => !d().querySelector('.modal-body'), 40)
+              }
+            }
+          }
           return {
             打开: ok,
             地址变了: f.contentWindow.location.hash !== hash0,
@@ -5016,6 +5039,15 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               const el = pane?.querySelector('.card.agent-card [data-dir] .cell-label')
               return el ? getComputedStyle(el).fontSize : null
             })(),
+            /*
+             * ★★★ D254（使用者："智能体存储的 `instructions.md` 不是真 md，而是 json"）：
+             *   **点开目录里的一个文件，看查看器里到底是什么**。
+             *   原来那条路由把 `{text,bytes}` 信封当正文发了出去，于是每个文件打开都是
+             *   `{"text":"…","bytes":204}`——磁盘上的文件是好的，错在传输那一层。
+             *   这里量的是**界面上的字**：要含有 fixture 的正文片段，且**不含信封字段**。
+             */
+            查看器里有正文: !!viewerText && viewerText.includes('探针夹具'),
+            查看器不是信封: !!viewerText && !viewerText.includes('"bytes"'),
             /*
              * ★ D247：「← 返回编排」与名字**同一行、名字在它右边**。原来那颗返回是网格的
              *   直接子项，抢掉第 1 行第 1 列，名字只能落到第 2 行（按钮下面）。
