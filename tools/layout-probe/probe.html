@@ -12347,6 +12347,14 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             摘要: (text(card?.querySelector('.wf-card-summary')) ?? '').trim(),
             元信息: (text(card?.querySelector('[data-wf-candidate-meta]')) ?? '').trim(),
             没有报错: card?.querySelectorAll('.wf-problem.bad').length === 0,
+            /*
+             * ★ D261：**提示级**问题也要看得见（`.faint` 那几条）——探针夹具的 main.js
+             * 里就有一句顶层 `return`（真机生成者也爱这么写），卡片上必须写着"返回值没人用"，
+             * 同时它**不能**被算成 error（`没有报错` 那条量的是 `.wf-problem.bad`）。
+             */
+            提示: [...(card?.querySelectorAll('.wf-problem.faint') ?? [])].map((n) =>
+              (text(n) ?? '').trim(),
+            ),
             收进可点: adoptBtn !== null && adoptBtn.disabled === false,
             有打开目录: !!card?.querySelector('[data-wf-open-dir]'),
             工作目录顶层: (files?.entries ?? []).map((e) => e.name ?? e.path),
@@ -13999,6 +14007,14 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             摘要: (text(card?.querySelector('.wf-card-summary')) ?? '').trim(),
             元信息: (text(card?.querySelector('[data-wf-candidate-meta]')) ?? '').trim(),
             没有报错: card?.querySelectorAll('.wf-problem.bad').length === 0,
+            /*
+             * ★ D261：**提示级**问题也要看得见（`.faint` 那几条）——探针夹具的 main.js
+             * 里就有一句顶层 `return`（真机生成者也爱这么写），卡片上必须写着"返回值没人用"，
+             * 同时它**不能**被算成 error（`没有报错` 那条量的是 `.wf-problem.bad`）。
+             */
+            提示: [...(card?.querySelectorAll('.wf-problem.faint') ?? [])].map((n) =>
+              (text(n) ?? '').trim(),
+            ),
             收进可点: adoptBtn !== null && adoptBtn.disabled === false,
             有打开目录: !!card?.querySelector('[data-wf-open-dir]'),
             工作目录顶层: (files?.entries ?? []).map((e) => e.name ?? e.path),

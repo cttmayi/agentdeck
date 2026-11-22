@@ -33,6 +33,10 @@ interface Handle {
 ```
 
 - **惰性**：构造器返回 Handle 不执行；`await` 才跑。
+- **编排代码的返回值没有去处**（D261）：引擎 `await fn(...)` 之后把返回值丢掉——产出只认
+  **每一步 run 的产出**（`WorkflowRun.steps`）。所以在 `main.js` 里 `return '…'` 拼一段话
+  什么也不会发生（写法合法、语义为空），这类"看起来在交付"的代码由候选校验提示出来
+  （`checkCandidateCode().topLevelReturns`，warn 级）。
 - **不展示/不调用的全闭包**：lastRunId（resume 锚点）、resume 开关、判定/
   解析函数、智能体名、gate 文案、循环逻辑——都在 `run` 闭包里。
 - **复合 Handle**（flow/parallel/loop/route 的返回值）：`run` 是复合执行

@@ -22,6 +22,54 @@ import { checkCandidateCode, readCandidate, readCandidates, AGENT_SOFT_LIMIT } f
 
 const wsDir = (dir: string) => join(dir, 'work')
 
+/**
+ * ★★ D261（使用者贴出生成结果的疑问："感觉有问题，记得没有返回值呢"）：
+ * `main.js` 的 `return` 是**死代码**——引擎 `await fn(...)` 之后把返回值丢了。
+ * 生成者却总用它来拼"最后给人看的一段话"（失败提示、汇总），于是那句话谁也没看到。
+ *
+ * 判据分两半：顶层的 `return` 要提示；**判定函数体里的 `return` 不要提示**
+ * （那是函数自己的返回值，正常写法）——两边都要钉，否则会误伤真机上那一整类编排。
+ */
+describe('顶层 return：提示"返回值没人用"（D261）', () => {
+  test('★★ 顶层 return 记成 warn（不拦入库），且不误伤判定函数里的 return', () => {
+    const code = [
+      "const 调研 = agent('AI调研者')",
+      "const 审校 = agent('稿件审校员', (意见) => ({",
+      "  result: /^通过/.test(String(意见).trim()) ? 'pass' : 'fail',",
+      '}))',
+      "const 结果 = await loop(调研, 审校, '{{task}}', { maxRounds: 2 })",
+      "if (结果.result === 'fail') {",
+      "  return '两轮未通过'",
+      '}',
+      'return 结果.message',
+    ].join('\n')
+    const check = checkCandidateCode(code, new Set(['AI调研者', '稿件审校员']))
+    assert.equal(check.syntaxError, null)
+    assert.equal(check.topLevelReturns, 2, '两处顶层 return')
+
+    // 判定函数体里的 return（带花括号那种）不算
+    const inner = checkCandidateCode(
+      "const 甲 = agent('甲', (意见) => { return { result: 'pass' } })",
+      new Set(['甲']),
+    )
+    assert.equal(inner.topLevelReturns, 0, '函数内部的 return 是正常的')
+  })
+
+  test('★ 候选卡片上确实带着这条提示（warn 级：能入库，但会写着）', async () => {
+    const { workDir } = await makeCandidate({
+      mainJs: "const 甲 = agent('甲')\nawait 甲\nreturn '一段没人看的话'\n",
+      agents: [{ name: '甲' }],
+    })
+    const candidate = await readCandidate(workDir, '周报流水线')
+    const warn = candidate.problems.find((p) => p.level === 'warn' && p.message.includes('return'))
+    assert.ok(warn, `要有一条"return 没用"的提示（现在：${JSON.stringify(candidate.problems)}）`)
+    assert.ok(
+      candidate.problems.every((p) => p.level !== 'error'),
+      '这是提示不是拦截：代码本身能跑',
+    )
+  })
+})
+
 describe('资料落盘（material）', () => {
   test('★★ 覆盖写：第二次落盘是新版，且只换这一包', async () => {
     const root = await makeTempDir('material-seed')

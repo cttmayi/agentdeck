@@ -1566,6 +1566,8 @@ const CHECKS = [
       v['有打开目录'] === true &&
       (v['工作目录顶层'] ?? []).includes('material') &&
       (v['工作目录顶层'] ?? []).includes('workflow-draft') &&
+      // ★ D261：夹具里那句顶层 `return` 必须被列成**提示**（不是 error）
+      (v['提示'] ?? []).some((t) => String(t).includes('return')) &&
       // ★ D259（使用者：「编排生成者不需要生成 Agent 的资料吗」）：它自己写内建智能体与技能，
       //   所以三包都要在——少 agent 那包，它只能从 api.md 目录树那两行猜"指令怎么写"
       (v['资料包'] ?? []).includes('orchestration') &&

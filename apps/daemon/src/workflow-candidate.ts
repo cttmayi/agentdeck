@@ -227,6 +227,13 @@ export async function readCandidate(workDir: string, dir: string): Promise<Workf
         message: `\`${bad}(…)\` 不是编排原语（作用域里只有：${WORKFLOW_PRIMITIVES.join(' / ')}）`,
       })
     }
+    if (check.topLevelReturns > 0) {
+      problems.push({
+        level: 'warn',
+        message:
+          `代码里有 ${check.topLevelReturns} 处 \`return\`：**返回值不会出现在任何地方**（平台执行完就丢掉，「main.js」不是一个"返回结果"的函数）——loop / flow 的结果都保留在**步骤里**。那段拼出来的字用不上就删掉，要用就让它成为某一步的产出（再挂一个人把结论写出来）。`,
+      })
+    }
     if (check.unverifiable > 0) {
       problems.push({
         level: 'warn',
@@ -266,6 +273,19 @@ export interface CandidateCodeCheck {
   unknownCalls: string[]
   /** `agent(变量)` 的处数（放行，只提示）。 */
   unverifiable: number
+  /**
+   * 顶层 `return` 的处数（★ 2026-11，D261）。
+   *
+   * 引擎执行用户代码是 `await fn(...)`——**返回值被丢掉**（`engine.ts`）。也就是说
+   * `main.js` 里 `return '…'` 拼出来的那段话**谁也不会看到**：编排的产出是每一步 run 的产出，
+   * 按步骤列在运行画面上。
+   *
+   * 踩到的真机例子（使用者贴出来的生成结果）：生成者把"两轮审校未通过 ⚠️ … 审校意见 …"
+   * 拼成一段字符串 `return` 出去 —— 两个分支都只是拼这段没人看的字，整段 `if` 是死代码。
+   * 这类"看起来在交付、其实什么也没发生"的写法必须提示出来，否则使用者只会觉得
+   * "编排跑完了，但我没看到它说的那句提醒"。
+   */
+  topLevelReturns: number
 }
 
 /** 作用域里合法的"全局"（JS 自带的那几个），除此之外的标识符调用都算可疑。 */
@@ -323,6 +343,54 @@ function stripStringsAndComments(code: string): string {
   return out
 }
 
+/**
+ * 顶层 `return` 的处数（D261）：**交给平台而平台不要的那几个**。
+ *
+ * 判据不是"花括号深度"——`if (…) { return … }` 的深度也是 1，可它仍然是编排函数体的
+ * 返回值（第一版就这么写，于是把使用者贴的那段代码数成了 1 处而不是 2 处）。
+ * 正确的口径是"**在不在嵌套函数里**"：函数体（`function (…) {` / `(…) => {`）里的
+ * `return` 归那个函数，正常；其余（顶层、`if` / `for` / `try` 块里）都归编排、
+ * 而引擎 `await fn(...)` 之后**把返回值丢掉**。
+ *
+ * `cleaned` 已经把字符串与注释换掉，所以这里只需要认 `=>` / `function` / `{` / `}`。
+ */
+function countTopLevelReturns(cleaned: string): number {
+  const fnDepth: boolean[] = []
+  let count = 0
+  let pendingArrow = false
+  let pendingFunction = false
+  for (let i = 0; i < cleaned.length; i++) {
+    const ch = cleaned[i]!
+    const prev = cleaned[i - 1] ?? ''
+    if (ch === '=' && cleaned[i + 1] === '>') {
+      pendingArrow = true
+      i += 1
+      continue
+    }
+    if (ch === '{') {
+      fnDepth.push(pendingArrow || pendingFunction)
+      pendingArrow = false
+      pendingFunction = false
+      continue
+    }
+    if (ch === '}') {
+      fnDepth.pop()
+      continue
+    }
+    if (/[\w$]/.test(prev)) continue
+    if (ch === 'r' && /^return\b/.test(cleaned.slice(i, i + 6))) {
+      if (!fnDepth.some(Boolean)) count += 1
+      i += 5
+      continue
+    }
+    if (ch === 'f' && /^function\b/.test(cleaned.slice(i, i + 8))) {
+      pendingFunction = true
+      i += 7
+    }
+  }
+  return count
+}
+
 /** 收集代码里"定义了"的名字：const/let/var/function/class + 解构 + 参数 + catch 参数。 */
 function declaredNames(code: string): Set<string> {
   const out = new Set<string>()
@@ -365,7 +433,13 @@ function declaredNames(code: string): Set<string> {
  * 所以"这里过了、跑起来炸"只可能剩下语义问题，不会是语法问题。
  */
 export function checkCandidateCode(code: string, inlineNames: ReadonlySet<string>): CandidateCodeCheck {
-  const out: CandidateCodeCheck = { syntaxError: null, unknownAgents: [], unknownCalls: [], unverifiable: 0 }
+  const out: CandidateCodeCheck = {
+    syntaxError: null,
+    unknownAgents: [],
+    unknownCalls: [],
+    unverifiable: 0,
+    topLevelReturns: 0,
+  }
   try {
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as new (
       ...args: string[]
@@ -407,5 +481,6 @@ export function checkCandidateCode(code: string, inlineNames: ReadonlySet<string
     calls.add(nm)
   }
   out.unknownCalls = [...calls].sort()
+  out.topLevelReturns = countTopLevelReturns(cleaned)
   return out
 }

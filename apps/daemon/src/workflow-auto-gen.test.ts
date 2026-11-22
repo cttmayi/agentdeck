@@ -32,7 +32,11 @@ async function writeCandidate(workDir: string, name: string): Promise<void> {
   )
   await writeFile(
     join(dir, 'main.js'),
-    "const 写作 = agent('写作员')\nconst r = await flow([写作], '{{task}}')\nreturn r.message\n",
+    /*
+     * ★ D261：**不写顶层 `return`**——它的返回值平台不展示（引擎 `await fn(...)` 之后丢掉）。
+     *   这一条钉"干净的候选没有 problems"，所以夹具本身要照资料里那条规矩写。
+     */
+    "const 写作 = agent('写作员')\nawait flow([写作], '{{task}}')\n",
     'utf8',
   )
   await writeFile(join(dir, 'agents', '写作员', 'agent.json'), JSON.stringify({ name: '写作员' }), 'utf8')
