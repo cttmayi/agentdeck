@@ -4738,6 +4738,20 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             有删除: !!pane?.querySelector('[data-agent-delete]'),
             独有技能框: !!pane?.querySelector('.skill-box'),
             复用了编辑页: !!pane?.querySelector('.agent-card') && !!pane?.querySelector('.agent-head'),
+            /*
+             * ★ D239：**几何也要与智能体页一致**。复用了组件 ≠ 长得一样——第一版把
+             *   `.pane.detail-pane` 直接挂在 `.main` 底下，页面留白（24/32）叠在面板
+             *   内距外面，整页往右缩一圈；`.pane` 也不拉伸（660 高 vs 视口 948）。
+             *   这三个数是智能体页那一份（app.css 定的），逐条比。
+             */
+            留白: getComputedStyle(d().querySelector('.main')).padding,
+            栏头内距: getComputedStyle(pane?.querySelector('.agent-head')).padding,
+            卡片内距: getComputedStyle(pane?.querySelector('.agent-card')).padding,
+            详情栏拉满: (() => {
+              const p = pane?.getBoundingClientRect()
+              const m = d().querySelector('.main')?.getBoundingClientRect()
+              return !!p && !!m && Math.abs(p.height - m.height) <= 1
+            })(),
           }
         })()
 

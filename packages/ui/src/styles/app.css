@@ -1005,6 +1005,40 @@ hr {
   padding: 0;
 }
 
+/**
+ * ★★ 2026-11（D239）：**整页的详情/面板页**（不在主从布局里的那种）同样不吃页面留白。
+ *
+ * 踩到的实例：编排内建智能体的编辑页复用 `MainArea`（它是 `.pane.detail-pane`），
+ * 直接挂在 `.main` 底下 ⇒ 页面留白（24/32）**叠在**面板自己的内距（16/24）外面：
+ * 实测 `.main` 多出 24/32、`.agent-head` 的内距看起来比智能体页多一圈，整页往右缩。
+ * 而智能体页里同一个组件住在 `.split-layout` 的详情列里，两条留白不会叠。
+ *
+ * 所以"整页只放一个 pane"与"整页是主从布局"按同一条规则办：留白与滚动**交给那个
+ * pane**（它自己 `.pane-body` 滚）。判据：探针 `workflows.agentsEditJump` 里的
+ * 「与智能体页同一套几何」（`.main` 内距为 0、栏头内距 16/24/12）。
+ */
+.main:has(> .pane.detail-pane) {
+  overflow: hidden;
+  padding: 0;
+  /*
+   * 内距交给那个 pane，**高度也要交给它**：`.pane` 自己只有 `min-height: 0`，
+   * 在块级父容器里它按内容长（实测 660 高，而视口 948）⇒ 正文不滚、页脚飘在中间。
+   * 在主从布局里它是网格子项，天然被拉伸；这里用 flex + `flex: 1` 补上同一件事。
+   */
+  display: flex;
+  flex-direction: column;
+}
+.main:has(> .pane.detail-pane) > .pane {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 同一件事的第三种写法：整页一个 `.main-panel`（新建那一屏，同样不在主从布局里）。 */
+.main:has(> .main-panel) {
+  overflow: hidden;
+  padding: 0;
+}
+
 /* ══════════════ 主从布局（列表 | 详情）══════════════
    任务与智能体两个视图共用；类名不带视图名，免得第二个视图去复制一套。 */
 
