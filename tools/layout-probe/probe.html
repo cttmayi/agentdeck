@@ -4793,6 +4793,29 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             主操作在底栏: !!create && (text(create) ?? '').trim() !== '',
             指令框: !!pane.querySelector('textarea'),
             技能格: !!pane.querySelector('.skill-picker'),
+            /*
+             * ★ D240：**卡片每一行都要占满**。少了 CLI 那一格之后（编排内建智能体
+             *   没有 runtimeKey），「名字」右边空着、「指令」被挤到第 2 列——整张卡错位
+             *   （使用者："看到的原因是 CLI 不见了，导致错位"）。所以量的是"每一行
+             *   的格子宽度加起来 == 卡片内容宽度"（±2px），与 `agents.cardNoHoles`
+             *   同一件事。
+             */
+            每行占满: (() => {
+              const card = pane.querySelector('.agent-card')
+              if (!card) return null
+              const inner = card.clientWidth - parseFloat(getComputedStyle(card).paddingLeft) - parseFloat(getComputedStyle(card).paddingRight)
+              const byY = new Map()
+              for (const c of [...card.children]) {
+                const r = c.getBoundingClientRect()
+                const key = Math.round(r.y)
+                byY.set(key, [...(byY.get(key) ?? []), r.width])
+              }
+              const rows = [...byY.values()].map((ws) => ws.reduce((a, b) => a + b, 0))
+              // 两列网格的 gap 也算在"占满"里：一行两格时 sum + gap == inner
+              const gap = parseFloat(getComputedStyle(card).columnGap) || 0
+              return rows.every((sum) => sum + (gap > 0 ? 0 : 0) >= inner - 2 * gap - 4)
+            })(),
+            格子数: pane.querySelectorAll('.agent-card > .cell').length,
           }
         })()
 

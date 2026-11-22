@@ -239,7 +239,14 @@
         "填名字"，所以整块删掉（不留一个只有一项的选择器）。
       -->
 
-      <label class="cell">
+      <!--
+        ★ D240：编排内建智能体没有「用哪个 CLI」那一格（见下面那条注释），而这一张
+        卡是**两列**网格（`.pair-field`）——少一格之后「名字」的右边空着、**「指令」
+        被挤到第 2 列**，整张卡错位（使用者："CLI 不见了，导致错位"）。
+        所以编排那条让「名字」**占整行**（与 `AgentDetail` 第 272 批同一条处置：
+        半行没人陪的格子自己吃满一行；探针 `agents.cardNoHoles` 钉的是同一件事）。
+      -->
+      <label class="cell" class:span-full={isWf}>
         {$t('agents.nameLabel')}
         <input bind:value={name} placeholder={$t('agents.namePlaceholder')} required autocomplete="off" />
       </label>
@@ -423,6 +430,12 @@
 
   /* 角色（新建）：在卡片第一行，占整行（与编辑态同款） */
   .cell.role-cell {
+    grid-column: 1 / -1;
+  }
+
+  /* ★ D240：编排内建智能体没有 CLI 那一格 ⇒「名字」占整行，否则后面的格子会掉到
+     第 2 列（与 `AgentDetail` 的 `.name-cell` 同一条处置）。 */
+  .cell.span-full {
     grid-column: 1 / -1;
   }
 
