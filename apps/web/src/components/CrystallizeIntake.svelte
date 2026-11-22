@@ -434,6 +434,11 @@
     display: flex; flex-direction: column; align-items: flex-start; gap: 0.125rem; text-align: left;
     border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
     padding: var(--sp-2) var(--sp-3); font-size: var(--fs-base);
+    /* ★ D246 的反向：基类那条 `button, .btn { white-space: nowrap }` 修的是"按钮里的字
+       被容器压成两行"，但选项这一族**本来就要折行**——名字一行、说明一行，说明还靠
+       `-webkit-line-clamp` 夹住省略。nowrap 一上，说明变成一条横向溢出、省略号也没了。
+       所以在这里显式写回：折行是设计的一部分，不是被挤压。 */
+    white-space: normal;
   }
   .intake-choice:hover { background: var(--surface-hover); border-color: var(--line-strong); }
   /* 「是哪一份？」那一屏的选项：名字与徽标一行、描述一行（分批第 235 批） */
