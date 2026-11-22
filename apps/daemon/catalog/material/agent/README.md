@@ -1,13 +1,14 @@
 # 智能体写法（material/agent）
 
-给「智能体生成者」。**先读本页，再读 `shape.md` 与 `norms.md`。**
+给「智能体生成者」，也给**自己写内建智能体的「编排生成者」**（编排里的 `agents/<名字>/` 是同一块形状）。
+**先读本页，再读 `shape.md` 与 `norms.md`。**
 
 | 文件 | 什么时候读 |
 |---|---|
 | `shape.md` | 动笔前：产物要写成**存储的形状**（`agent-draft/<岗位名>/` 与 `agents/<名字>/` 同构） |
 | `norms.md` | 写岗位卡时：五字段、边界清单（必含）、配套技能判定、指令一段组装 |
 | `examples/会议纪要助理/instructions.md` | 想不出该长什么样时照它改（一份合格的指令） |
-| `examples/会议纪要助理/skills/纪要格式/SKILL.md` | 一份合格的配套技能 |
+| `examples/会议纪要助理/skills/meeting-notes-format/SKILL.md` | 一份合格的配套技能 |
 
 版本：见 `api-version.json`（= 智能体与技能的形状版本）。**这一份是平台每次对话前覆盖写入
 工作目录的**，改的是仓库里的 `docs/material/agent/`——你手上这份永远是当前版本。

@@ -172,9 +172,10 @@ export async function submitChatTurn(
   // `Agent` 记录上没有 `slot`（它是**槽位表**算出来的，D154）⇒ 这里查一次表
   const slotTable = await loadSlotTable(store, conversation.workspaceId).catch(() => null)
   const slot = slotTable === null ? null : slotOfAgent(slotTable, agent.id as string)
-  const pack = materialPackForSlot(slot)
-  if (pack !== null) {
-    await seedMaterial({ workDir: dir, pack, now }).catch(() => false)
+  // ★ D259：一个生成者可能读**几包**（编排生成者也自己写内建智能体与技能）
+  const packs = materialPackForSlot(slot)
+  if (packs.length > 0) {
+    await seedMaterial({ workDir: dir, packs, now }).catch(() => false)
   }
 
   const seq = maxSeq(await store.listChatTurns(conversation.id)) + 1

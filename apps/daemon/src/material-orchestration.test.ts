@@ -100,3 +100,47 @@ describe('编排写法资料（docs/material/orchestration）与引擎一致', (
     assert.equal(typeof version.version, 'string')
   })
 })
+
+/**
+ * **「智能体 / 技能」资料里的例子必须是能入库的形状**（2026-11，D259）。
+ *
+ * 踩到的坑：`agent/examples/会议纪要助理/skills/纪要格式/SKILL.md` 的 frontmatter 写的是
+ * `name: 纪要格式`——中文名。而技能名（= 引用键）必须是 kebab-case（D236），
+ * `agent-candidate.ts` 与沉淀入库都会当场拒掉。**资料让人"照它改"，就得是能直接过闸的例子**：
+ * 照着一份一定被拒的例子写，比没有例子更费时间。
+ *
+ * 判据与引擎同一套：技能目录名 = frontmatter `name`，且都过 `^[a-z0-9][a-z0-9-]{0,62}$`。
+ */
+describe('资料里的技能例子：目录名与 name 都是 kebab-case 且一致', () => {
+  const AGENT_ROOT = fileURLToPath(new URL('../../../docs/material/agent/', import.meta.url))
+  const SKILLS_ROOT = fileURLToPath(new URL('../../../docs/material/skill/', import.meta.url))
+  const KEBAB = /^[a-z0-9][a-z0-9-]{0,62}$/
+
+  async function skillDirs(root: string): Promise<string[]> {
+    const out: string[] = []
+    const walk = async (dir: string): Promise<void> => {
+      for (const entry of await readdir(dir).catch(() => [] as string[])) {
+        if (entry.startsWith('.')) continue
+        const full = join(dir, entry)
+        const kids = await readdir(full, { withFileTypes: true }).catch(() => [])
+        if (kids.some((k) => k.name === 'SKILL.md')) out.push(full)
+        await walk(full)
+      }
+    }
+    await walk(root)
+    return out
+  }
+
+  test('★★ 每一份示例 SKILL.md：目录名与 frontmatter name 都是 kebab-case 且一致', async () => {
+    const dirs = [...(await skillDirs(AGENT_ROOT)), ...(await skillDirs(SKILLS_ROOT))]
+    assert.ok(dirs.length >= 2, `两个包里都要有例子（现在 ${String(dirs.length)} 份）`)
+    for (const dir of dirs) {
+      const dirName = dir.split('/').pop() ?? ''
+      const md = await readFile(join(dir, 'SKILL.md'), 'utf8')
+      const name = /^---\s*$[\s\S]*?^name:\s*(.+)$/m.exec(md)?.[1]?.trim() ?? ''
+      assert.match(dirName, KEBAB, `${dirName}：目录名必须是 kebab-case`)
+      assert.match(name, KEBAB, `${dirName}：frontmatter name 必须是 kebab-case（现在是「${name}」）`)
+      assert.equal(name, dirName, `${dirName}：目录名与 name 要一致`)
+    }
+  })
+})

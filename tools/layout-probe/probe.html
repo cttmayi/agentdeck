@@ -12169,8 +12169,28 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             生成可点: adoptBtn !== null && adoptBtn.disabled === false,
             有打开目录: !!card?.querySelector('[data-agent-open-dir]'),
             工作目录顶层: (files?.entries ?? []).map((e) => e.name ?? e.path),
+            /*
+             * ★ D259：资料按**它写什么**发。智能体生成者也写配套技能 ⇒
+             * `material/` 下要有 agent + skill 两包（原先只有 agent）。
+             */
+            资料包: await materialPacksOf(conv),
           }
         })()
+
+        /**
+         * 问接口：这个对话工作目录的 `material/` 里有哪些包（D259 判据用）。
+         *
+         * 写成**函数声明**（不是 `const` 箭头）：它在下面好几个事实里用，而第一个使用点
+         * 在定义处**之前**——`const` 会撞 TDZ。
+         */
+        async function materialPacksOf(conv) {
+          if (conv === null) return []
+          const res = await f.contentWindow
+            .fetch(`/api/conversations/${encodeURIComponent(conv.id)}/files?dir=material`)
+            .then((r) => r.json())
+            .catch(() => null)
+          return (res?.entries ?? []).map((e) => e.name ?? e.path)
+        }
 
         facts['chat.agentAdopt'] = await (async () => {
           const adoptBtn = d().querySelector('[data-agent-adopt="会议纪要助理"]')
@@ -12314,6 +12334,11 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             收进可点: adoptBtn !== null && adoptBtn.disabled === false,
             有打开目录: !!card?.querySelector('[data-wf-open-dir]'),
             工作目录顶层: (files?.entries ?? []).map((e) => e.name ?? e.path),
+            /*
+             * ★ D259（使用者问：「编排生成者不需要生成 Agent 的资料吗」）：它就写内建智能体
+             * 与技能 ⇒ `material/` 下要有 orchestration + agent + skill 三包。
+             */
+            资料包: await materialPacksOf(conv),
           }
         })()
 
@@ -13956,6 +13981,11 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             收进可点: adoptBtn !== null && adoptBtn.disabled === false,
             有打开目录: !!card?.querySelector('[data-wf-open-dir]'),
             工作目录顶层: (files?.entries ?? []).map((e) => e.name ?? e.path),
+            /*
+             * ★ D259（使用者问：「编排生成者不需要生成 Agent 的资料吗」）：它就写内建智能体
+             * 与技能 ⇒ `material/` 下要有 orchestration + agent + skill 三包。
+             */
+            资料包: await materialPacksOf(conv),
           }
         })()
 

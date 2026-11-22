@@ -46,32 +46,52 @@ const PACK_LABEL: Record<MaterialPack, string> = {
 export interface SeedMaterialOptions {
   /** 工作目录（对话的目录；`resolveWorkDir` 算出来的那个）。 */
   workDir: string
-  /** 这次要哪一包。 */
-  pack: MaterialPack
+  /**
+   * 这次要哪几包（★ D259：**一个生成者可以要多包**——见 `materialPackForSlot`）。
+   *
+   * 空数组 = 什么都不写（调用方本来就不该调）。
+   */
+  packs: MaterialPack[]
   /** 读 `api-version.json` 用的（只是写进索引，缺了也不影响）。 */
   now?: number
 }
 
 /**
- * 写（覆盖）一包资料到 `<workDir>/material/`，并更新顶层索引。
+ * 写（覆盖）每一包资料到 `<workDir>/material/<包>/`，并更新顶层索引。
  *
- * 返回 `true` = 落了；`false` = 打包坏了（读不到 `catalog/material`）——调用方只记一条告警。
+ * 返回 `true` = 全落了；`false` = 至少一包坏了（读不到 `catalog/material`）——调用方只记一条告警。
+ *
+ * ★ D259：**一个生成者不止一种写法要读**。「编排生成者」既写编排代码，也**自己写内建智能体**
+ *   （`agents/<名字>/{agent.json,instructions.md,skills/**}`）⇒ 它要 `orchestration` + `agent` +
+ *   `skill` 三包；「智能体生成者」也写配套技能 ⇒ `agent` + `skill`。原先一对一映射，于是编排
+ *   生成者只能从 `orchestration/api.md` 的目录树里那两行猜"指令怎么写"——资料是按**谁写**发的，
+ *   不是按**槽位**发的。
+ *
+ * 为什么按包各写各的（而不是合并成一份）：包在仓库里是**按读者**维护的（`docs/material/<包>/`），
+ * 合并会立刻出现"同一段话两处维护"。索引页承担"这次有哪些包、先读哪个"。
  */
 export async function seedMaterial(opts: SeedMaterialOptions): Promise<boolean> {
   const target = join(opts.workDir, MATERIAL_DIR)
-  const packDir = join(BUNDLED_ROOT, opts.pack)
+  let ok = true
+  const seeded: Array<{ pack: MaterialPack; version: string | null }> = []
   try {
     await mkdir(target, { recursive: true })
-    // 只换这一包：别的包（如果以后同一对话里用过两类生成者）留着
-    await rm(join(target, opts.pack), { recursive: true, force: true })
-    await cp(packDir, join(target, opts.pack), { recursive: true })
+    for (const pack of opts.packs) {
+      // 只换这一包：别的包（同一对话里换过生成者时留下的）留着
+      await rm(join(target, pack), { recursive: true, force: true })
+      await cp(join(BUNDLED_ROOT, pack), join(target, pack), { recursive: true })
+      seeded.push({
+        pack,
+        version: await readVersion(join(BUNDLED_ROOT, pack, 'api-version.json')).catch(() => null),
+      })
+    }
   } catch (err) {
     void err
-    return false
+    ok = false
   }
+  if (seeded.length === 0) return false
 
-  // 顶层索引：这次是哪一类、先读哪一份、什么时候落的
-  const version = await readVersion(join(packDir, 'api-version.json')).catch(() => null)
+  // 顶层索引：这次有哪几包、每包先读哪一份、什么时候落的
   const stamp = new Date(opts.now ?? Date.now()).toISOString()
   const lines = [
     '# 这次用到的资料（material）',
@@ -79,12 +99,12 @@ export async function seedMaterial(opts: SeedMaterialOptions): Promise<boolean> 
     '平台在每次对话开始时**覆盖写**这一份；它和仓库里的 `docs/material/` 是同一份资料',
     '（人读的和这里看到的一字不差）。',
     '',
-    `- 本次包：\`${opts.pack}/\` —— ${PACK_LABEL[opts.pack]}`,
-    `- 先读：\`${opts.pack}/README.md\``,
-    ...(version === null ? [] : [`- 版本：${version}（见 \`${opts.pack}/api-version.json\`）`]),
+    ...seeded.flatMap(({ pack, version }) => [
+      `- \`${pack}/\` —— ${PACK_LABEL[pack]}`,
+      `  - 先读：\`${pack}/README.md\``,
+      ...(version === null ? [] : [`  - 版本：${version}（见 \`${pack}/api-version.json\`）`]),
+    ]),
     `- 落盘时间：${stamp}`,
-    '',
-    '> 其它包只放说明（`agent/`、`skill/` 还没接，里面写的是"资料在仓库哪儿"）。',
     '',
   ]
   try {
@@ -103,22 +123,24 @@ async function readVersion(path: string): Promise<string> {
 }
 
 /**
- * **哪一类生成者该读哪一包**（`Agent.slot` → 包）。
+ * **哪一类生成者该读哪几包**（`Agent.slot` → 包列表）。
  *
- * 三种生成者共用同一个机制，只是包不同。没接的那两包（agent / skill）暂时也照发——
- * 里面写的是"资料在仓库哪儿"，agent 读了不会以为"漏了"。
- * ⚠️ 返回 `null` = 这个 agent 不是生成者，**什么都不写**（普通对话的工作目录不该多出 `material/`）。
+ * 三种生成者共用同一个机制，只是**要读的东西不同**——而"要读几包"由**它写什么**决定，
+ * 不由"它叫什么"决定（★ D259，见 `seedMaterial` 那段说明）：
+ *
+ *   · 编排生成者 → `orchestration`（代码与原语）+ `agent`（内建智能体怎么写）+ `skill`
+ *     （内建人自带技能的格式）。少后两包，它只能从 api.md 目录树里那两行猜。
+ *   · 智能体生成者 → `agent` + `skill`（它写的候选里就有配套技能）。
+ *   · 起草者（drafter）→ 空：它的素材与资料都由沉淀那条链写进**起草 run** 的
+ *     `material/`（素材 + `material/skill/`，D257），往聊天目录里再塞一份会让
+ *     "这次的依据在哪"出现两种答案。
+ *
+ * ⚠️ 返回空数组 = 这个 agent 不是生成者，**什么都不写**（普通对话的工作目录不该多出 `material/`）。
  */
-export function materialPackForSlot(slot: string | null | undefined): MaterialPack | null {
-  if (slot === 'workflow-maker') return 'orchestration'
-  if (slot === 'agent-maker') return 'agent'
-  /*
-   * ⚠️ 起草者（drafter）**不在这里发**：它的素材是沉淀那条链自己写进
-   *   起草 run 工作目录下的 `material/`（轮次记录、来源文件，`crystallize-material.ts`），
-   *   往聊天目录里再塞一个 `material/skill/` 会让"这次的依据在哪"出现两种答案。
-   *   等接「技能起草者」那一条时，按同一套约定接到沉淀那条链上。
-   */
-  return null
+export function materialPackForSlot(slot: string | null | undefined): MaterialPack[] {
+  if (slot === 'workflow-maker') return ['orchestration', 'agent', 'skill']
+  if (slot === 'agent-maker') return ['agent', 'skill']
+  return []
 }
 
 /**
@@ -145,5 +167,9 @@ export async function bundledMaterialVersion(pack: MaterialPack): Promise<string
  * 起 run 之前"，失败只告警（素材才是这一轮的依据，资料缺了最多写得糙一点）。
  */
 export async function seedDrafterMaterial(opts: { workDir: string; now?: number }): Promise<boolean> {
-  return seedMaterial({ workDir: opts.workDir, pack: 'skill', ...(opts.now === undefined ? {} : { now: opts.now }) })
+  return seedMaterial({
+    workDir: opts.workDir,
+    packs: ['skill'],
+    ...(opts.now === undefined ? {} : { now: opts.now }),
+  })
 }

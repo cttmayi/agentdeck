@@ -28,21 +28,21 @@ describe('资料落盘（material）', () => {
     const workDir = join(root, 'work')
     await mkdir(workDir, { recursive: true })
 
-    assert.equal(await seedMaterial({ workDir, pack: 'orchestration' }), true)
+    assert.equal(await seedMaterial({ workDir, packs: ['orchestration'] }), true)
     const target = join(workDir, MATERIAL_DIR)
     const api = await readFile(join(target, 'orchestration/api.md'), 'utf8')
     assert.ok(api.includes('agent'), '资料里要有原语说明')
     const index = await readFile(join(target, 'README.md'), 'utf8')
-    assert.ok(index.includes('orchestration'), '索引里要写清这次是哪一包')
+    assert.ok(index.includes('orchestration'), '索引里要写清这次是哪几包')
 
     // 覆盖写：把资料里的文件改花，再落一次 ⇒ 回到仓库那份（不是追加、不是"保留使用者改动"）
     await writeFile(join(target, 'orchestration/api.md'), '被改花了', 'utf8')
-    assert.equal(await seedMaterial({ workDir, pack: 'orchestration' }), true)
+    assert.equal(await seedMaterial({ workDir, packs: ['orchestration'] }), true)
     const again = await readFile(join(target, 'orchestration/api.md'), 'utf8')
     assert.equal(again, api, '第二批落盘把上一版整份换掉')
 
-    // 只换这一包：另一包的目录不受影响
-    await seedMaterial({ workDir, pack: 'agent' })
+    // 只换这几包：没点到的包不动（同一对话里换过生成者时留下的那份还在）
+    await seedMaterial({ workDir, packs: ['agent'] })
     assert.ok(existsSync(join(target, 'agent/README.md')), 'agent 包也在')
     assert.ok(existsSync(join(target, 'orchestration/api.md')), 'orchestration 包还在（没被删）')
     await cleanup(root)
@@ -68,13 +68,39 @@ describe('资料落盘（material）', () => {
     await cleanup(root)
   })
 
-  test('★ 哪一类生成者读哪一包；普通对话不落', () => {
-    assert.equal(materialPackForSlot('workflow-maker'), 'orchestration')
-    assert.equal(materialPackForSlot('agent-maker'), 'agent')
-    // 起草者的素材归沉淀那条链（`crystallize-material.ts`），不在这里发
-    assert.equal(materialPackForSlot('drafter'), null)
-    assert.equal(materialPackForSlot('memory-tidy'), null)
-    assert.equal(materialPackForSlot(null), null)
+  /**
+   * ★ D259（使用者问：「编排生成者不需要生成 Agent 的资料吗？为什么没有呢」）：
+   * 资料要按**它写什么**发，不是按它的名字发——编排生成者也自己写内建智能体与技能，
+   * 所以它要三包；智能体生成者也写配套技能，所以它要两包。
+   */
+  test('★★ 哪几类生成者读哪几包：按"它写什么"发（编排生成者三包）', () => {
+    assert.deepEqual(materialPackForSlot('workflow-maker'), ['orchestration', 'agent', 'skill'])
+    assert.deepEqual(materialPackForSlot('agent-maker'), ['agent', 'skill'])
+    // 起草者的素材归沉淀那条链（`crystallize-material.ts` + `seedDrafterMaterial`），不在这里发
+    assert.deepEqual(materialPackForSlot('drafter'), [])
+    assert.deepEqual(materialPackForSlot('memory-tidy'), [])
+    assert.deepEqual(materialPackForSlot(null), [])
+  })
+
+  test('★★ 编排生成者一轮落三包：内建智能体与技能的写法都在工作目录里', async () => {
+    const root = await makeTempDir('material-maker')
+    const workDir = join(root, 'work')
+    await mkdir(workDir, { recursive: true })
+    assert.equal(await seedMaterial({ workDir, packs: materialPackForSlot('workflow-maker') }), true)
+    const base = join(workDir, MATERIAL_DIR)
+    // 编排：代码与原语
+    assert.ok(existsSync(join(base, 'orchestration/api.md')))
+    // 智能体：内建人的形状与岗位卡写法（没有它只能从 api.md 目录树那两行猜）
+    assert.ok(existsSync(join(base, 'agent/shape.md')), 'agent 的形状要在')
+    assert.ok(existsSync(join(base, 'agent/norms.md')), '岗位卡写法要在')
+    // 技能：内建人自带技能的格式与体检项
+    assert.ok(existsSync(join(base, 'skill/format.md')))
+
+    const index = await readFile(join(base, 'README.md'), 'utf8')
+    for (const pack of ['orchestration', 'agent', 'skill']) {
+      assert.match(index, new RegExp(`\`${pack}/\``), `索引要列出 ${pack}`)
+    }
+    await cleanup(root)
   })
 })
 

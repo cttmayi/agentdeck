@@ -1526,7 +1526,10 @@ const CHECKS = [
       v['生成可点'] === true &&
       v['有打开目录'] === true &&
       (v['工作目录顶层'] ?? []).includes('material') &&
-      (v['工作目录顶层'] ?? []).includes('agent-draft'),
+      (v['工作目录顶层'] ?? []).includes('agent-draft') &&
+      // ★ D259：它也写配套技能 ⇒ material/ 下 agent + skill 两包都要在
+      (v['资料包'] ?? []).includes('agent') &&
+      (v['资料包'] ?? []).includes('skill'),
     show: (v) => JSON.stringify(v),
   },
   {
@@ -1559,7 +1562,12 @@ const CHECKS = [
       v['收进可点'] === true &&
       v['有打开目录'] === true &&
       (v['工作目录顶层'] ?? []).includes('material') &&
-      (v['工作目录顶层'] ?? []).includes('workflow-draft'),
+      (v['工作目录顶层'] ?? []).includes('workflow-draft') &&
+      // ★ D259（使用者：「编排生成者不需要生成 Agent 的资料吗」）：它自己写内建智能体与技能，
+      //   所以三包都要在——少 agent 那包，它只能从 api.md 目录树那两行猜"指令怎么写"
+      (v['资料包'] ?? []).includes('orchestration') &&
+      (v['资料包'] ?? []).includes('agent') &&
+      (v['资料包'] ?? []).includes('skill'),
     show: (v) => JSON.stringify(v),
   },
   {

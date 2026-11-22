@@ -1,5 +1,5 @@
 ---
-name: 纪要格式
+name: meeting-notes-format
 description: 会议纪要的固定形状：结论三句以内、待办必须带人+期限、未决问题单列
 ---
 

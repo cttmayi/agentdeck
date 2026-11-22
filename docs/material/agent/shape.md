@@ -18,6 +18,9 @@ agents/<名字>/
   skills/<技能名>/SKILL.md
 ```
 
+**编排里的内建智能体**就是上面那块原样形状（`workflow-draft/<编排名>/agents/<名字>/`），
+名字与目录一致、`id` 与时间戳同样不写。
+
 ## `agent.json` 写什么
 
 ```json
@@ -40,11 +43,12 @@ agents/<名字>/
 ## `skills/<技能名>/SKILL.md` 写什么
 
 配套技能是**这个岗位自己的**东西（落库后在 `agents/<名字>/skills/` 下，不进共享技能池）。
-格式与普通技能一致：frontmatter 两行 + 正文。
+格式与普通技能一致：frontmatter 两行 + 正文（完整要求见同一个 `material/` 下的
+`material/skill/format.md` 与 `checklist.md`）。
 
 ```markdown
 ---
-name: 纪要格式
+name: meeting-notes-format
 description: 会议纪要的固定形状：三段（结论 / 待办 / 未决），待办必须带人 + 期限
 ---
 
@@ -54,8 +58,8 @@ description: 会议纪要的固定形状：三段（结论 / 待办 / 未决）�
 先写结论三句以内，再列待办（每条：谁、做什么、什么时候），最后列未决问题。
 ```
 
-⚠️ `name` 必须是 **kebab-case**（小写字母/数字/连字符，≤64 字符）——它与目录名、引用键是同一个东西（D236）。
-中文写在 `description` 和正文里。
+⚠️ `name` 必须是 **kebab-case**（小写字母/数字/连字符，≤64 字符），**目录名与它一致**——
+它与引用键是同一个东西（D236）。中文写在 `description` 和正文里（`name: 纪要格式` 会被入库拒掉）。
 
 ## 名字的唯一性
 
