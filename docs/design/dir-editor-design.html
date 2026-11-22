@@ -51,21 +51,18 @@
         </tbody>
       </table></div>
 
-      <h2>2. 形态：就是今天那个 FileViewer，一条属性都不删</h2>
+      <h2>2. 形态：就是今天那个 FileViewer——**原文面直接就能编辑**，没有"编辑态"</h2>
       <p class="lead">
-        ⚠️ 两处更正（都是我看漏了现有实现）：
-        ① 文件是**弹出**的（<code>FileViewer</code> 内部就是 <code>Modal size="wide"</code>），
-        不是固定的两栏；② 它今天就有**两面切换**——<b>渲染</b> / <b>原文</b>
-        （<code>.fv-toggle</code> 里那两颗 <code>data-face-rendered</code> /
-        <code>data-face-raw</code>），另外还有「复制原文」。
+        两处更正：① 文件是**弹出**的（<code>FileViewer</code> 内部就是 <code>Modal size="wide"</code>），
+        不是固定两栏；② 它今天就有**两面**——<b>渲染</b> / <b>原文</b>，还有「复制原文」。
+        但编辑**不另开一个模式**：<b>原文面本身就是可编辑的文本框</b>，渲染面照旧只读。
+        ——没有「编辑」按钮、没有"编辑态"，就是那一面能改。
       </p>
       <p class="lead">
-        所以编辑**只挂在「原文」那一面**：<code>face === 'raw'</code> 时才出现「编辑」；
-        渲染面（Markdown / 高亮 / HTML 预览 / 图片）永远只读——它本来就不是给你改的地方，
-        而且 HTML 预览走 <code>sandbox allow-scripts</code>，编辑态更不能和它混在一个面上。
-        二进制与音视频没有「原文」面（<code>hasFace</code> 就是这么判的）⇒ 它们天然没有编辑。
+        于是工具条只多一颗「保存」（有改动才亮）：<code>路径 · 大小 · [渲染 | 原文] · 复制原文 · 保存 · 关闭</code>。
+        渲染面那一侧没有「保存」；二进制 / 音视频没有原文面 ⇒ 天然没有编辑与保存。
       </p>
-      <div class="mock-frame" style="height:17rem;position:relative">
+      <div class="mock-frame" style="height:19rem;position:relative">
         <section class="pane detail-pane" style="height:100%">
           <div class="pane-body" style="opacity:.3">
             <div class="field"><label>目录</label><input value="workflows/…/agents/审稿员/" readonly /></div>
@@ -74,7 +71,6 @@
         </section>
         <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
           <div style="width:80%;background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--radius);box-shadow:var(--shadow-2)">
-            <!-- 与真 FileViewer 的 .fv-bar 同一排：路径 · 大小 · 两面切换 · 复制原文 · 编辑 · 关闭 -->
             <div style="display:flex;align-items:center;gap:var(--sp-2);padding:var(--pad-frame-head);border-bottom:1px solid var(--line)">
               <span class="mono faint fs-xs">skills/weekly-shape/SKILL.md</span>
               <span class="faint fs-xs">1.2 KB</span>
@@ -84,54 +80,39 @@
               </span>
               <span style="flex:1"></span>
               <button type="button" class="btn btn--ghost btn--sm">复制原文</button>
-              <button type="button" class="btn btn--secondary btn--sm">编辑</button>
+              <button type="button" class="btn btn--primary btn--sm">保存</button>
               <button type="button" class="btn btn--ghost btn--sm">关闭</button>
             </div>
-            <pre class="code-mock" style="margin:0;border:0;border-radius:0;max-height:8rem">---
+            <!-- 原文面 = 可编辑的文本框（不是 <pre>，也没有"进入编辑"这一步） -->
+            <textarea style="width:100%;box-sizing:border-box;border:0;border-radius:0;margin:0;padding:var(--sp-3);background:var(--panel);font-family:var(--font-mono);font-size:var(--fs-xs);line-height:1.7;min-height:8rem;resize:none;color:var(--text)">---
 name: weekly-shape
 description: 周报的三段结构：结论 / 证据 / 下一步
 ---
 
 ## Procedure
-1. 先写结论一行。</pre>
+1. 先写结论一行。
+2. 每条结论下面挂一条证据。</textarea>
           </div>
         </div>
       </div>
-      <p class="lead">
-        <b>渲染面</b>：今天什么样还是什么样（只多一颗置灰的「编辑」，或干脆不画）。
-        <b>原文面</b>：多「编辑」⇒ 变「还原 / 保存」；保存失败的原话留在浮层里。
-      </p>
 
-      <h2>3. 屏 ①：同一个浮层，只是进了编辑态（原文面）</h2>
-      <p class="lead">
-        与第 2 节**同一个 <code>Modal size="wide"</code>、同一根 <code>.fv-bar</code>**——
-        右边那颗「编辑」换成「还原 / 保存」，正文换成一个可编辑的文本框；渲染面在编辑态下
-        不可选（它只读）。保存失败的原话就在浮层里、正文上方。
-      </p>
-      <div class="mock-frame" style="height:20rem;position:relative">
-        <section class="pane detail-pane" style="height:100%">
-          <div class="pane-body" style="opacity:.3">
-            <div class="field"><label>目录</label><input value="workflows/…/agents/审稿员/" readonly /></div>
-            <ul class="list-stack"><li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">skills/</span></button></li></ul>
-          </div>
-        </section>
+      <h2>3. 屏 ①：保存失败——原话就在浮层里，字不动</h2>
+      <div class="mock-frame" style="height:17rem;position:relative">
         <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
           <div style="width:80%;background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--radius);box-shadow:var(--shadow-2)">
             <div style="display:flex;align-items:center;gap:var(--sp-2);padding:var(--pad-frame-head);border-bottom:1px solid var(--line)">
-              <span class="mono faint fs-xs">skills/weekly-shape/SKILL.md</span>
-              <span class="faint fs-xs">1.2 KB</span>
+              <span class="mono faint fs-xs">agent.json</span>
               <span class="fv-toggle" role="group" style="display:inline-flex;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden">
-                <button type="button" disabled title="编辑态只有原文面" style="padding:0 var(--sp-2);height:24px;background:none;border:0;color:var(--text-faint);opacity:.5">渲染</button>
+                <button type="button" style="padding:0 var(--sp-2);height:24px;background:none;border:0;color:var(--text-faint)">渲染</button>
                 <button type="button" class="active" style="padding:0 var(--sp-2);height:24px;background:var(--surface-2);border:0;color:var(--accent)">原文</button>
               </span>
               <span style="flex:1"></span>
-              <button type="button" class="btn btn--ghost btn--sm">还原</button>
               <button type="button" class="btn btn--primary btn--sm">保存</button>
               <button type="button" class="btn btn--ghost btn--sm">关闭</button>
             </div>
             <div style="padding:var(--pad-frame-body)">
               <div class="notice bad" style="margin-bottom:var(--sp-2)">JSON 解析失败：第 4 行第 3 列期望 <code>,</code>——没有写入任何东西。</div>
-              <pre class="code-mock" style="margin:0;max-height:7rem">{
+              <pre class="code-mock" style="margin:0;max-height:6rem">{
   "id": "01M80…",
   "name": "审稿员"
   "skillIds": []   ← 漏了逗号
@@ -141,8 +122,8 @@ description: 周报的三段结构：结论 / 证据 / 下一步
         </div>
       </div>
       <p class="lead">
-        <b>关掉</b>（× / Esc / 关闭）在有未保存改动时先问一句——与「建任务」那一栏同一个守卫，
-        别让人一按 Esc 丢掉刚写的字。<b>保存失败不关窗</b>：原话在正文上方，改完再按保存。
+        <b>关闭</b>（× / Esc / 关闭）时有未保存改动先问一句，别让人一按 Esc 丢掉刚写的字；
+        <b>保存失败不关窗</b>——原话在正文上方，改完再按保存。
       </p>
 
       <h2>5. 限制只有通用的几条（没有"这个文件不许改"的特例）</h2>
