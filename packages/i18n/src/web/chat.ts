@@ -556,6 +556,10 @@ export const chatText = {
   },
   'chat.wfOpenDir': { zh: '打开目录', en: 'Open folder' },
   'chat.wfAdopt': { zh: '收进编排库', en: 'Add to workflows' },
+  'chat.wfAdoptDisabledHint': {
+    zh: '生成者写出可收的候选编排之后才能收进编排库',
+    en: 'Available once the generator has produced an adoptable draft',
+  },
   'chat.wfAdopted': { zh: '已收进编排库「{name}」', en: 'Added “{name}” to workflows' },
   'chat.wfOpenDirFailed': { zh: '打不开目录：{error}', en: 'Cannot open the folder: {error}' },
   'chat.wfOverwriteTitle': { zh: '同名编排已存在', en: 'A workflow with that name exists' },

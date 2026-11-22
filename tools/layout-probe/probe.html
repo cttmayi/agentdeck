@@ -11640,8 +11640,11 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
                   parseFloat(rowStyle.height) - parseFloat(topStyle.height),
                 ) <= 1,
               // 里面每一格高度：那排自己一致，且与顶栏格子一致
+              // ★ D260：这一排现在有四颗（整理记忆 / 收进编排库 / 沉淀 / 删除）——
+              //   判据的本意是"每格同高、与顶栏同高"，不是"恰好三颗"（数人头会把
+              //   一次正常的加按钮判成回归）。
               cellsSame:
-                heights.length === 3 &&
+                heights.length >= 3 &&
                 heights.every((h) => h === heights[0]) &&
                 topHeights.length > 0 &&
                 Math.abs(heights[0] - topHeights[0]) <= 1,
@@ -12174,10 +12177,8 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
              * 这个对话里只有候选**智能体**（没有候选编排）⇒ 顶栏那颗必须在、且禁用。
              */
             收进置灰: (() => {
-              const b = [...d().querySelectorAll('.page-actions button')].find(
-                (x) => text(x) === '收进编排库',
-              )
-              return b !== undefined && b.disabled === true
+              const b = d().querySelector('[data-wf-adopt-action]')
+              return b !== null && b.disabled === true
             })(),
             /*
              * ★ D259：资料按**它写什么**发。智能体生成者也写配套技能 ⇒
@@ -12261,11 +12262,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
          * 用函数声明（不是 `const` 箭头）：第一个使用点在它定义之前，`const` 会撞 TDZ。
          */
         function wfAdoptBtn() {
-          return (
-            [...d().querySelectorAll('.page-actions button')].find(
-              (b) => text(b) === '收进编排库',
-            ) ?? null
-          )
+          return d().querySelector('[data-wf-adopt-action]') ?? null
         }
 
         facts['chat.wfCandidateCard'] = await (async () => {
@@ -13917,11 +13914,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
          * 用函数声明（不是 `const` 箭头）：第一个使用点在它定义之前，`const` 会撞 TDZ。
          */
         function wfAdoptBtn() {
-          return (
-            [...d().querySelectorAll('.page-actions button')].find(
-              (b) => text(b) === '收进编排库',
-            ) ?? null
-          )
+          return d().querySelector('[data-wf-adopt-action]') ?? null
         }
 
         facts['chat.wfCandidateCard'] = await (async () => {

@@ -648,25 +648,6 @@
       onActivate: startDrafting,
     },
     /**
-     * ★ 2026-11（D260）：**「收进编排库」**。
-     *
-     * 它原来长在候选卡片上（消息流里的一段）——但入库是**这一页的一次完整动作**
-     * （牵着重拉 + 整页跳转），而且卡片会随后续对话被挤上去。顶栏那一排才是它的层级。
-     *
-     * 默认置灰、有候选且体检通过才可点；正文与同名确认都在这条登记的闭包里。
-     */
-    {
-      id: 'adopt-workflow',
-      label: $t('chat.wfAdopt'),
-      // ⚠️ **secondary**：ui-style §2.1.1「一屏里只该有一处实心色块」——这一页的主线动作
-      //   是「新对话」，再给第二颗 primary 就把那条规矩破了。
-      kind: 'secondary' as const,
-      disabled: wfAdoptTarget === null || wfAdopting !== '',
-      onActivate: () => {
-        if (wfAdoptTarget !== null) void adoptWorkflow(wfAdoptTarget)
-      },
-    },
-    /**
      * ★ 分批第 262 批（使用者："把『整理成记忆』的按钮移动到『沉淀技能』的左侧"）：
      *   「整理成记忆…」**从顶栏挪到对话头那一排**（`.pane-actions`），紧挨在
      *   「沉淀技能&智能体」左边——两件事都是"拿这段对话做点什么"，本来就该在一处。
@@ -1355,6 +1336,24 @@
             onclick={openTidy}
           >
             {$t('chat.tidyAction')}
+          </button>
+          <!--
+            ★ 2026-11（D260）：**「收进编排库」**——与「整理成记忆」并排（使用者："放在
+            『整理记忆』的旁边"）。它原来长在消息流里的候选卡片上：卡片会被后一轮对话挤上去，
+            而这颗是"拿这段对话做点什么"的动作，与旁边两颗同一层——**不是整页那一排**
+            （整页那排是新建对话 / 设置，说的是"这一页还能做什么"）。
+            默认置灰、有可收的候选才点亮；同名覆盖的确认在 `adoptWorkflow()` 里。
+          -->
+          <button
+            class="btn btn--ghost"
+            data-wf-adopt-action
+            disabled={wfAdoptTarget === null || wfAdopting !== ''}
+            title={wfAdoptTarget === null ? $t('chat.wfAdoptDisabledHint') : ''}
+            onclick={() => {
+              if (wfAdoptTarget !== null) void adoptWorkflow(wfAdoptTarget)
+            }}
+          >
+            {wfAdopting !== '' ? $t('common.saving') : $t('chat.wfAdopt')}
           </button>
           <!-- D80：会话级「沉淀技能&智能体」——至少有一轮已结束才可用。
                它与任务页那一格读**同一个词条**（`crystallize.title` / `crystallize.optimize`
