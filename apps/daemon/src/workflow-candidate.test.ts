@@ -70,6 +70,37 @@ describe('顶层 return：提示"返回值没人用"（D261）', () => {
   })
 })
 
+/**
+ * ★★ D262（使用者："编排生成者需要一些原则来保证编排的生成"）：
+ * 六条原则的第一条是**交付物必须落成工作目录里的文件**。静态看代码猜不出"哪一步会写文件"，
+ * 所以定了一个**写明的约定**：交付那一步那个人的 instructions 里单独一行 `落盘：<文件名>`。
+ * 没有这一行 ⇒ 卡片上标"没有交付物落盘"（warn：不拦入库，但收的人知道自己在收什么）。
+ */
+describe('交付物落盘约定（原则 1 / D262）', () => {
+  test('★ 没有人写 `落盘：` ⇒ warn；写了就没有这条', async () => {
+    const { workDir: wd1 } = await makeCandidate({
+      mainJs: "const 甲 = agent('甲')\nawait 甲\n",
+      agents: [{ name: '甲', instructions: '你是甲，负责写稿。' }],
+    })
+    const noDeliverable = await readCandidate(wd1, '周报流水线')
+    const warn = noDeliverable.problems.find(
+      (p) => p.level === 'warn' && p.message.includes('落成文件'),
+    )
+    assert.ok(warn, `要提示"没有交付物落盘"（现在：${JSON.stringify(noDeliverable.problems)}）`)
+
+    const { workDir: wd2 } = await makeCandidate({
+      mainJs: "const 甲 = agent('甲')\nawait 甲\n",
+      agents: [{ name: '甲', instructions: '你是甲，负责写稿。\n\n落盘：终稿-2026-11-23.md\n' }],
+    })
+    const withDeliverable = await readCandidate(wd2, '周报流水线')
+    assert.equal(
+      withDeliverable.problems.filter((p) => p.message.includes('落成文件')).length,
+      0,
+      '写了落盘约定就不该再提示',
+    )
+  })
+})
+
 describe('资料落盘（material）', () => {
   test('★★ 覆盖写：第二次落盘是新版，且只换这一包', async () => {
     const root = await makeTempDir('material-seed')

@@ -40,7 +40,15 @@ async function writeCandidate(workDir: string, name: string): Promise<void> {
     'utf8',
   )
   await writeFile(join(dir, 'agents', '写作员', 'agent.json'), JSON.stringify({ name: '写作员' }), 'utf8')
-  await writeFile(join(dir, 'agents', '写作员', 'instructions.md'), '你是写作员：按要点写周报。', 'utf8')
+  /*
+   * ★ D262：交付那一步的人要**写明落盘文件**（`落盘：<文件名>` 这一行是平台会检查的约定）。
+   *   夹具照资料里的规矩写——"干净的候选"那条断言（problems 为空）才有意义。
+   */
+  await writeFile(
+    join(dir, 'agents', '写作员', 'instructions.md'),
+    '你是写作员：按要点写周报。\n\n落盘：终稿-2026-11-23.md\n',
+    'utf8',
+  )
 }
 
 interface Json {

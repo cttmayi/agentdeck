@@ -111,6 +111,28 @@ describe('编排写法资料（docs/material/orchestration）与引擎一致', (
  *
  * 判据与引擎同一套：技能目录名 = frontmatter `name`，且都过 `^[a-z0-9][a-z0-9-]{0,62}$`。
  */
+/**
+ * ★ D262：**六条原则必须在资料里**（生成者读的是它旁边的 `principles.md`）。
+ *
+ * 用字面钉子而不是"文件存在"：这几条是防复发的，被人删掉一条时这条测试要红。
+ */
+describe('生成编排的六条原则（principles.md）', () => {
+  const PRINCIPLES = fileURLToPath(
+    new URL('../../../docs/material/orchestration/principles.md', import.meta.url),
+  )
+  test('★★ 六条原则一条不少，且带自检六问', async () => {
+    const md = await readFile(PRINCIPLES, 'utf8')
+    const headings = [...md.matchAll(/^## 原则 (\d)｜/gm)].map((m) => m[1])
+    assert.deepEqual(headings, ['1', '2', '3', '4', '5', '6'], '六条原则按序编号')
+    for (const kw of ['落盘', 'return', '失败', '跨次', '事实', '过程说明']) {
+      assert.ok(md.includes(kw), `原则里要谈到「${kw}」`)
+    }
+    assert.match(md, /写完自检/, '要有自检清单（生成者自己过一遍）')
+    // 交付物落盘的约定要写出来（校验就是按它认的）
+    assert.match(md, /落盘[:：]\s*终稿/, '要写出 `落盘：终稿-<日期>.md` 这个约定')
+  })
+})
+
 describe('资料里的技能例子：目录名与 name 都是 kebab-case 且一致', () => {
   const AGENT_ROOT = fileURLToPath(new URL('../../../docs/material/agent/', import.meta.url))
   const SKILLS_ROOT = fileURLToPath(new URL('../../../docs/material/skill/', import.meta.url))

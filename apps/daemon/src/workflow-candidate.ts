@@ -138,6 +138,14 @@ export async function readCandidate(workDir: string, dir: string): Promise<Workf
   } catch {
     agentDirs = [] // 一个内建人都没有也合法（纯 gate 的编排）
   }
+  /**
+   * ★ 2026-11（D262）：**有没有人负责交付**（原则 1，`material/orchestration/principles.md`）。
+   *
+   * 判据是一个**写明的约定**：那个人 `instructions.md` 里单独一行 `落盘：<文件名>`。
+   * 为什么用约定而不是猜代码：静态看代码猜不出"哪一步的产出会写成文件"，而"有没有人写文件"
+   * 恰是这次翻车的根（文章只活在 run 日志里）。
+   */
+  let hasDeliverable = false
   for (const agentDir of agentDirs) {
     const base = join(absDir, 'agents', agentDir)
     try {
@@ -148,6 +156,7 @@ export async function readCandidate(workDir: string, dir: string): Promise<Workf
     let instructions = ''
     try {
       instructions = await readFile(join(base, 'instructions.md'), 'utf8')
+      if (/^\s*落盘[:：]\s*\S/m.test(instructions)) hasDeliverable = true
     } catch {
       problems.push({ level: 'error', message: `内建智能体「${agentDir}」缺 instructions.md` })
     }
@@ -205,6 +214,19 @@ export async function readCandidate(workDir: string, dir: string): Promise<Workf
     problems.push({
       level: 'warn',
       message: `这条编排有 ${agents.length} 个人（超过 ${AGENT_SOFT_LIMIT} 个）：考虑拆成两条编排，一条流程里的人太多时不好排查`,
+    })
+  }
+
+  /**
+   * ⚠️ 只作 **warn**：一条纯研究的编排可能真的不需要文件（人只想看一段话），拒掉会误伤；
+   *   但卡片上必须写着"这条编排没有交付物落盘"，让收的人知道自己在收什么。
+   */
+  if (agents.length > 0 && !hasDeliverable) {
+    problems.push({
+      level: 'warn',
+      message:
+        '这条编排没有任何人负责**把产出落成文件**：`agents/` 里没有一份 instructions 写了 `落盘：<文件名>`。' +
+        '运行完之后正文只会停在 run 日志里，工作目录里不会有文件（原则 1，见 `material/orchestration/principles.md`）。',
     })
   }
 
