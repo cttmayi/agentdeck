@@ -79,7 +79,8 @@
           workspaceId: '',
           name: inline.name,
           instructions: inline.instructions ?? '',
-          runtimeKey: 'default',
+          // ★ D241：内建智能体自己的 CLI（落在 agent.json；老数据没有 ⇒ 'default'）
+          runtimeKey: inline.runtimeKey ?? 'default',
           workDir: null,
           skillIds: [...(inline.skillIds ?? [])],
           env: {},

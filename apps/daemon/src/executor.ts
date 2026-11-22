@@ -131,6 +131,15 @@ export interface ExecutorDeps {
    * 缺省 = daemon 自己那条 backend（它就是启动时探测/选中的那个）。
    */
   defaultRuntimeKey?: string
+  /**
+   * ★ D241：**编排内建智能体**（`inline:<编排id>/<id>`）的配置查询。
+   *
+   * 它们不在智能体库里（`store.getAgentById` 查不到），所以执行器原来对它们一律
+   * 回落 daemon 默认 CLI——界面上那块「用哪个 CLI」也就只能是假的，只能藏掉。
+   * 现在由 daemon 注入这张"内建智能体 → 它的 runtimeKey"的查询：
+   * 先查库（账号智能体），查不到再看这里（内建智能体），两者都没有才回落。
+   */
+  inlineAgentOf?: (agentId: string) => { name: string; runtimeKey: string } | null
   registry: RunRegistry
   backend: AgentBackend
   descriptor: RuntimeDescriptor
@@ -555,15 +564,21 @@ export class RunExecutor {
     if (!this.#deps.resolveRuntime) return fallback
 
     const agent = await this.#deps.store.getAgentById(run.agentId as never)
-    if (!agent) return fallback
+    /*
+     * ★ D241：库里查不到 ⇒ 可能是**编排内建智能体**（`inline:<编排id>/<id>`）。
+     *   它有自己的 `runtimeKey`（落在 `workflows/<id>/agents/<名字>/agent.json`），
+     *   所以这里问一下 daemon 注入的那张表；两者都没有才是真的没有（回落 daemon 默认）。
+     */
+    const inline = agent === null ? (this.#deps.inlineAgentOf?.(String(run.agentId)) ?? null) : null
+    if (!agent && !inline) return fallback
 
     // ★ `'default'` = **跟随全局默认**（2026-10）。三级解析：
     //   agent 的值 ⇒ workspace.defaultRuntimeKey ⇒ 启动时侦测到的那个（`#deps` 里带的）。
     //   ⚠️ workspace 那层**每次现读**（不缓存）：它是使用者随时能改的设定，缓存住的
     //      表现是"改了不生效、重启才生效"，而界面上看不出来。
-    let key = agent.runtimeKey
+    let key = agent !== null ? agent.runtimeKey : (inline?.runtimeKey ?? 'default')
     if (key === 'default') {
-      const ws = await this.#deps.store.getWorkspace(agent.workspaceId)
+      const ws = await this.#deps.store.getWorkspace(run.workspaceId as never)
       const configured = ws?.defaultRuntimeKey?.trim() ?? ''
       key = configured !== '' ? configured : (this.#deps.defaultRuntimeKey ?? this.#deps.descriptor.key)
     }
@@ -572,7 +587,7 @@ export class RunExecutor {
       return this.#deps.resolveRuntime(key)
     } catch (err) {
       this.#deps.onWarn?.(
-        `agent ${agent.name} 的 runtimeKey（${key}）无法解析，` +
+        `agent ${agent?.name ?? inline?.name ?? '（未知）'} 的 runtimeKey（${key}）无法解析，` +
           `本次回退到 ${this.#deps.descriptor.key}：${err instanceof Error ? err.message : String(err)}`,
       )
       return fallback

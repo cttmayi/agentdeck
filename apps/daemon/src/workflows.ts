@@ -89,6 +89,18 @@ export interface WorkflowInlineAgent {
   instructions: string
   /** 引用技能库里的哪几份（与账号智能体的 `skillIds` 同一个语义）。 */
   skillIds: string[]
+  /**
+   * ★ D241：**用哪个 CLI**——与账号智能体的 `Agent.runtimeKey` 同一个语义
+   * （`'default'` = 跟随工作区默认，其余是 runtime 描述表的键）。
+   *
+   * 使用者："内建智能体当然要加 agent.json，它本质就是一个智能体，只是在外面看不到
+   * 而已。如果还有差异，也都补上。" 之前没有这个字段，所以新建/编辑页只能把「用哪个
+   * CLI」那一格藏掉——而藏掉之后两列网格就塌了（D240 的错位）。
+   *
+   * 缺省 `'default'`：老数据（D234 之前写入的 agent.json 没有这个键）读出来就是
+   * 跟随工作区默认，与它们一直以来的行为一致。
+   */
+  runtimeKey?: string
   createdAt: number
   updatedAt: number
 }

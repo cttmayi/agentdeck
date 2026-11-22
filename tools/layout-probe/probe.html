@@ -4729,7 +4729,28 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             名字: (text(pane?.querySelector('.agent-head h2')) ?? '').trim(),
             指令: (pane?.querySelector('textarea')?.value ?? '').slice(0, 4),
             入口数: entryInputs.length,
-            入口全是编排: entryInputs.length === 1 && entryInputs[0].checked && entryInputs[0].disabled,
+            /*
+             * ★ D241（使用者："不需要的字段尽量用置灰不能改，而不是删除"）：入口**三项
+             *   都画出来**、都禁用，只有「编排」勾着——不再缩成一项。
+             */
+            入口三项: entryInputs.length === 3,
+            入口都禁用: entryInputs.every((i) => i.disabled),
+            只勾编排: entryInputs.filter((i) => i.checked).length === 1,
+            勾的是编排: (() => {
+              const labels = [...(pane?.querySelectorAll('[data-agent-entries] .entry-option') ?? [])]
+              const hit = labels.find((l) => l.querySelector('input')?.checked)
+              return (text(hit) ?? '').trim() === '编排'
+            })(),
+            // CLI 那一格回来了（D241：它是真字段，落在 agent.json）
+            有CLI那一格: !!pane?.querySelector('#agent-runtime'),
+            设为默认禁用: (() => {
+              const b = pane?.querySelector('[data-agent-set-default]')
+              return b === null || b === undefined ? null : b.disabled
+            })(),
+            复制禁用: (() => {
+              const b = pane?.querySelector('[data-agent-copy]')
+              return b === null || b === undefined ? null : b.disabled
+            })(),
             入口文案: [...(pane?.querySelectorAll('[data-agent-entries] span') ?? [])]
               .map((x) => (text(x) ?? '').trim())
               .filter((x) => x !== '')
@@ -4780,16 +4801,18 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           const ok = await until(() => !!d().querySelector('.main-panel[data-settings-panel]'), 60)
           if (!ok) return { 打开: false }
           const pane = d().querySelector('.main-panel[data-settings-panel]')
-          const entryInputs = [...pane.querySelectorAll('[data-wf-agent-entries] input')]
+          const entryInputs = [...pane.querySelectorAll('[data-agent-entries] input')]
           const create = pane.querySelector('.main-panel-foot .btn--primary')
           return {
             打开: true,
             地址: f.contentWindow.location.hash,
             是设置面板: !!pane,
             有返回: !!pane.querySelector('[data-settings-back]'),
-            没有CLI那一格: !pane.querySelector('#agent-runtime') && !pane.querySelector('.runtime-cell'),
+            // ★ D241：CLI 那一格**在**（它是真字段，不再删格子）
+            有CLI那一格: !!pane.querySelector('.agent-card select'),
             入口数: entryInputs.length,
-            入口锁着编排: entryInputs.length === 1 && entryInputs[0].checked && entryInputs[0].disabled,
+            入口都禁用: entryInputs.length === 3 && entryInputs.every((i) => i.disabled),
+            只勾编排: entryInputs.filter((i) => i.checked).length === 1,
             主操作在底栏: !!create && (text(create) ?? '').trim() !== '',
             指令框: !!pane.querySelector('textarea'),
             技能格: !!pane.querySelector('.skill-picker'),

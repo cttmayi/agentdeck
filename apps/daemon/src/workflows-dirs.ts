@@ -165,6 +165,8 @@ async function listWorkflowAgentEntries(
         name: typeof json['name'] === 'string' && json['name'] !== '' ? json['name'] : dirName,
         instructions,
         skillIds: Array.isArray(json['skillIds']) ? (json['skillIds'] as string[]) : [],
+        // ★ D241：老 agent.json 没有这个键 ⇒ `'default'`（跟随工作区默认，与改之前一致）
+        runtimeKey: typeof json['runtimeKey'] === 'string' && json['runtimeKey'] !== '' ? json['runtimeKey'] : 'default',
         createdAt: typeof json['createdAt'] === 'number' ? json['createdAt'] : 0,
         updatedAt: typeof json['updatedAt'] === 'number' ? json['updatedAt'] : 0,
       },

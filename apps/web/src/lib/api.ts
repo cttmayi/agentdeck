@@ -218,6 +218,8 @@ export interface WorkflowInlineAgent {
   name: string
   instructions?: string
   skillIds?: string[]
+  /** ★ D241：用哪个 CLI（`'default'` = 跟随工作区默认）。与账号智能体的语义一致。 */
+  runtimeKey?: string
   createdAt?: number
   updatedAt?: number
   /** @deprecated 审核时代的遗留键，D234 起不再有；留着是为了老响应不炸。 */

@@ -706,7 +706,8 @@
       const changed =
         draft.name.trim() !== agent.name ||
         draft.instructions !== agent.instructions ||
-        !sameIdSet(draft.skillIds, agent.skillIds)
+        !sameIdSet(draft.skillIds, agent.skillIds) ||
+        draft.runtimeKey !== ((agent as { runtimeKey?: string }).runtimeKey ?? 'default')
       if (!changed) return
       if (draft.name.trim() === '') {
         error = $t('workflows.agentsNameRequired')
@@ -723,6 +724,8 @@
               name: draft.name.trim(),
               instructions: draft.instructions,
               skillIds: draft.skillIds,
+              // ★ D241：CLI 也是它的真字段（执行器按它解析 backend）
+              runtimeKey: draft.runtimeKey,
             }),
           },
         )
@@ -1225,7 +1228,15 @@
         ⚠️ 写成功后界面跟着数据走：`setDefaultAgent()` 内部会重拉列表，
           列表上那枚「默认」徽章随之移动（这里不手动改任何状态）。
       -->
-      {#if !isWf && hasEntry(agent, 'task') && hasEntry(agent, 'chat') && agent.id !== $effectiveDefaultAgentId}
+      {#if isWf}
+        <button
+          type="button"
+          class="btn btn--secondary"
+          disabled
+          data-agent-set-default
+          title={$t('workflows.agentsSetDefaultLockedHint')}
+        >{$t('agents.setDefault')}</button>
+      {:else if hasEntry(agent, 'task') && hasEntry(agent, 'chat') && agent.id !== $effectiveDefaultAgentId}
         <button
           type="button"
           class="btn btn--secondary"
@@ -1236,16 +1247,14 @@
         >{$t('agents.setDefault')}</button>
       {/if}
       <!-- ★ 2026-11（D160）：**复制**（平台成员与自建都能用；想改内置就改副本）。 -->
-      {#if !isWf}
-        <button
-          type="button"
-          class="btn btn--secondary"
-          data-agent-copy
-          disabled={busy}
-          title={$t('agents.copyTitle')}
-          onclick={() => void copyAgent()}
-        >{$t('agents.copy')}</button>
-      {/if}
+      <button
+        type="button"
+        class="btn btn--secondary"
+        data-agent-copy
+        disabled={busy || isWf}
+        title={isWf ? $t('workflows.agentsCopyLockedHint') : $t('agents.copyTitle')}
+        onclick={() => void copyAgent()}
+      >{$t('agents.copy')}</button>
       <button type="button" class="btn btn--ghost" data-agent-cancel onclick={cancelEdit}
         >{readOnly ? $t('common.close') : $t('common.cancel')}</button
       >
@@ -1289,7 +1298,6 @@
           每一行都是满的（探针 `agents.cardNoHoles` 钉着这件事）。
           ⚠️ 2026-11（D123）：「行动权限」那一行随动作能力退场删了。
         -->
-        {#if !isWf}
         <label class="cell runtime-cell" class:locked={readOnly}>
           {$t('agents.runtimeRowLabel')}
           <!-- 服务端连 CLI 都不许改（内置整份只读），界面就别让它看起来能改。 -->
@@ -1326,7 +1334,6 @@
             <p class="row-hint warn">{evidenceWarnings[draft.runtimeKey]}</p>
           {/if}
         </label>
-        {/if}
 
         <label class="cell instructions-cell">
           {$t('agents.instructionsLabel')}
@@ -1528,16 +1535,7 @@
         -->
         <section class="cell entry-cell" data-agent-entries>
           <span class="cell-label">{$t('agents.entriesLabel')}</span>
-          {#if isWf}
-            <!-- 入口固定只有「编排」（使用者："只是入口是固定的，只能有编排"）：同一个控件、锁着 -->
-            <div class="entry-picker locked">
-              <label class="entry-option">
-                <input type="checkbox" checked disabled />
-                <span>{$t('workflows.agentsEntryWorkflow')}</span>
-              </label>
-            </div>
-          {:else}
-          <div class="entry-picker" class:locked={readOnly}>
+          <div class="entry-picker" class:locked={readOnly || isWf}>
             {#each USER_ENTRY_CHOICES as entry (entry)}
               <label class="entry-option">
                 <input
@@ -1545,8 +1543,8 @@
                   value={entry}
                   data-entry={entry}
                   bind:group={draft.entries}
-                  disabled={readOnly}
-                  title={readOnly ? $t('agents.builtinReadOnly') : ''}
+                  disabled={readOnly || isWf}
+                  title={isWf ? $t('workflows.agentsEntryLockedHint') : readOnly ? $t('agents.builtinReadOnly') : ''}
                 />
                 <span>{$t(USER_ENTRY_LABEL_KEYS[entry])}</span>
               </label>
@@ -1568,9 +1566,8 @@
               {/each}
             </div>
           {/if}
-          {#if !readOnly && !hasAnyEntry(draft.entries ?? [])}
+          {#if !readOnly && !isWf && !hasAnyEntry(draft.entries ?? [])}
             <p class="hint entry-warning" data-entries-empty>{$t('agents.entriesEmpty')}</p>
-          {/if}
           {/if}
         </section>
 
@@ -1584,8 +1581,8 @@
             最后才裁）。**没有"停用/退役"**：久不用的靠注入顺序自然沉底。
           ★ 与「指令」一起随页面底部那个「保存」提交，提交的是**差量**。
         -->
-        {#if !isWf}
-        <section class="cell memory-cell" data-agent-memory>
+        <fieldset class="cell memory-cell" disabled={isWf} data-agent-memory>
+          {#if isWf}<span class="lockmark" title={$t('workflows.agentsMemoryLockedHint')}>{$t('agents.lockReadOnly')}</span>{/if}
           <!--
             ★ 分批第 257 批（使用者："又发现了居中的选择框，比如『启用记忆』的选择框布局很奇怪"）：
             这一行原来是**一堆 inline 元素挤在一个普通 `<span>` 里**（`记忆` / `条数` / 说明 /
@@ -1779,8 +1776,7 @@
           {#if memError !== ''}
             <p class="row-hint warn" data-memory-error>{memError}</p>
           {/if}
-        </section>
-        {/if}
+        </fieldset>
 
         <!--
           ⚠️ 2026-10 / 2026-11（D123）：这里原来是「行动权限」那一节（`ActionPicker`），
@@ -2245,6 +2241,14 @@
      会以为那一格还在。 */
 
   /* ══════════ 记忆（分批第 240 批）══════════ */
+  /* ★ D241：记忆那一格改成 `<fieldset>`（用原生的 `disabled` 一次禁掉里面所有控件，
+     而不是逐个改）——fieldset 自带边框与内距，这里清掉，让它和 `.cell` 的其它格子一样。 */
+  fieldset.memory-cell {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
+  }
   .memory-cell {
     border-top: 1px solid var(--line);
     padding-top: var(--sp-3);

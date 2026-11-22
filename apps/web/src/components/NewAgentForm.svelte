@@ -129,9 +129,14 @@
    * 默认**三项全勾**：与 `entriesOf()` 对用户记录的回退、以及服务端不传 `entries` 时的
    * 落库值完全一致——所以这一格加进来**不改变任何默认行为**，只是把它变成可改。
    */
+  /*
+   * ⚠️ 用 `scope.kind` 直接判，不要用 `$: isWf`：legacy 模式下 `$:` 在本行**之后**才跑，
+   *    初始化时 `isWf` 还是 undefined ⇒ 编排那条的入口会先被填成三项（D241 实测到过：
+   *    "三项都勾着、都禁用"，看起来像它同时接对话和任务）。
+   */
   let selectedEntries: string[] = prefill?.entries?.length
     ? [...prefill.entries]
-    : isWf
+    : scope.kind === 'workflow'
       ? ['workflow']
       : [...USER_ENTRY_CHOICES]
   /**
@@ -154,7 +159,12 @@
         // 编排内建智能体：没有 runtime / 入口（固定「编排」）/ 审核标准，只有名字+指令+技能
         await api(`/api/workflows/${encodeURIComponent(scope.workflowId)}/agents`, {
           method: 'POST',
-          body: JSON.stringify({ name: name.trim(), instructions, skillIds: selectedSkills }),
+          body: JSON.stringify({
+            name: name.trim(),
+            instructions,
+            skillIds: selectedSkills,
+            runtimeKey,
+          }),
         })
         const out = await api<{ items: Workflow[] }>('/api/workflows')
         workflows.set(out.items ?? [])
@@ -246,28 +256,30 @@
         所以编排那条让「名字」**占整行**（与 `AgentDetail` 第 272 批同一条处置：
         半行没人陪的格子自己吃满一行；探针 `agents.cardNoHoles` 钉的是同一件事）。
       -->
-      <label class="cell" class:span-full={isWf}>
+      <label class="cell">
         {$t('agents.nameLabel')}
         <input bind:value={name} placeholder={$t('agents.namePlaceholder')} required autocomplete="off" />
       </label>
 
-      {#if !isWf}
-        <!-- 编排内建智能体没有 `runtimeKey`（跑的时候跟工作区默认）——不给一个选不动的下拉 -->
-        <label class="cell">
-          {$t('agents.runtimeFieldLabel')}
-          <select bind:value={runtimeKey}>
-            {#each runtimeOptions as key (key)}
-              {@const r = $identity?.runtimes.find((x) => x.key === key)}
-              <option value={key}>
-                {key}{r && r.evidence !== 'verified' ? $t('agents.runtimeUnverified') : ''}
-              </option>
-            {/each}
-            {#if !runtimeOptions.includes(runtimeKey)}
-              <option value={runtimeKey}>{$t('agents.runtimeCurrent', { key: runtimeKey })}</option>
-            {/if}
-          </select>
-        </label>
-      {/if}
+      <!--
+        ★ D241：**「用哪个 CLI」对编排内建智能体也是真字段**（落在 `agent.json` 的
+        `runtimeKey`，执行器按它解析 backend——`/api/workflows/:id/agents` 与智能体页
+        同一关校验）。所以这一格两边都在、都不删：删格子会把两列网格挤塌。
+      -->
+      <label class="cell">
+        {$t('agents.runtimeFieldLabel')}
+        <select bind:value={runtimeKey}>
+          {#each runtimeOptions as key (key)}
+            {@const r = $identity?.runtimes.find((x) => x.key === key)}
+            <option value={key}>
+              {key}{r && r.evidence !== 'verified' ? $t('agents.runtimeUnverified') : ''}
+            </option>
+          {/each}
+          {#if !runtimeOptions.includes(runtimeKey)}
+            <option value={runtimeKey}>{$t('agents.runtimeCurrent', { key: runtimeKey })}</option>
+          {/if}
+        </select>
+      </label>
 
       <label class="cell">
         <!-- ★ 分批第 53 批：点明「指令」= 第一句话的 ② 身份。
@@ -318,29 +330,29 @@
         ★ 三个勾选框，默认全勾；**一个都不勾**时下方的「创建」按钮置灰并给一句原因
           （那样造出来的智能体在每一个入口里都叫不出来——服务端同样会拒）。
       -->
-      <div class="cell entry-cell" data-wf-agent-entries>
+      <div class="cell entry-cell" data-agent-entries>
         <span class="cell-label">{$t('agents.entriesLabel')}</span>
-        {#if isWf}
-          <!-- 入口**固定只有「编排」**（使用者："只是入口是固定的，只能有编排"）：
-               同一个控件、勾着且禁用——不另造一个"只读徽标"，免得两边长得不一样 -->
-          <div class="entry-picker locked">
+        <!--
+          ★ D241（使用者："不需要的字段尽量用**置灰不能改**，而不是删除，这样避免布局问题"）：
+          编排内建智能体的入口**三项都画出来、都置灰**，只有「编排」勾着——它确实只能被
+          编排调用，但那三个位置该长什么样与智能体页一致，不缩成一项。
+        -->
+        <div class="entry-picker" class:locked={isWf}>
+          {#each USER_ENTRY_CHOICES as entry (entry)}
             <label class="entry-option">
-              <input type="checkbox" checked disabled />
-              <span>{$t('workflows.agentsEntryWorkflow')}</span>
+              <input
+                type="checkbox"
+                value={entry}
+                bind:group={selectedEntries}
+                disabled={isWf}
+                title={isWf ? $t('workflows.agentsEntryLockedHint') : ''}
+              />
+              <span>{$t(USER_ENTRY_LABEL_KEYS[entry])}</span>
             </label>
-          </div>
-        {:else}
-          <div class="entry-picker">
-            {#each USER_ENTRY_CHOICES as entry (entry)}
-              <label class="entry-option">
-                <input type="checkbox" value={entry} bind:group={selectedEntries} />
-                <span>{$t(USER_ENTRY_LABEL_KEYS[entry])}</span>
-              </label>
-            {/each}
-          </div>
-          {#if !hasAnyEntry(selectedEntries)}
-            <p class="hint entry-warning" data-entries-empty>{$t('agents.entriesEmpty')}</p>
-          {/if}
+          {/each}
+        </div>
+        {#if !isWf && !hasAnyEntry(selectedEntries)}
+          <p class="hint entry-warning" data-entries-empty>{$t('agents.entriesEmpty')}</p>
         {/if}
       </div>
 

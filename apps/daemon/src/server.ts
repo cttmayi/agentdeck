@@ -1639,6 +1639,19 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     //   行为上所有 agent 都跑同一个 CLI。那正是"接口接受了、行为上不存在"。
     // 启动时**侦测到的**那个（= daemon 自己选中的 backend）：`'default'` 的最后一级兜底
     defaultRuntimeKey: runtimeKey,
+    /*
+     * ★ D241：编排内建智能体不在库里 ⇒ 执行器的 `getAgentById` 查不到它们。
+     *   这张表让「用哪个 CLI」对它们也**真的生效**（否则界面上那一格只能是假的）。
+     *   现读内存里的 workflows（与路由同一份），不做缓存。
+     */
+    inlineAgentOf: (id: string) => {
+      const m = /^inline:(.+)\/(.+)$/.exec(id)
+      if (!m) return null
+      const wf = workflows.find((w) => w.id === m[1])
+      const hit = (wf?.inlineAgents ?? []).find((a) => a.id === m[2])
+      if (!hit) return null
+      return { name: hit.name, runtimeKey: hit.runtimeKey ?? 'default' }
+    },
     resolveRuntime: (key) => {
       const adapter = knownRuntimeAdapters()[key]
       if (!adapter) {
@@ -5403,12 +5416,19 @@ async function injectedSkillsOf(
         sendJson(res, 409, { error: `本编排里已经有叫「${name}」的内建智能体了`, code: 'wf_agent_name_dup' })
         return
       }
+      // ★ D241：`runtimeKey` 与智能体页**同一关**校验（未知的 runtime 当场 400）
+      const runtimeCheck = await resolveRuntimeKey(body['runtimeKey'])
+      if (!runtimeCheck.ok) {
+        sendJson(res, 400, { error: runtimeCheck.error })
+        return
+      }
       const now = Date.now()
       const agent: WorkflowInlineAgent = {
         id: ulid() as string,
         name,
         instructions: typeof body.instructions === 'string' ? body.instructions : '',
         skillIds: Array.isArray(body.skillIds) ? (body.skillIds as string[]).map(String) : [],
+        runtimeKey: runtimeCheck.runtimeKey,
         createdAt: now,
         updatedAt: now,
       }
@@ -5479,6 +5499,11 @@ async function injectedSkillsOf(
         sendJson(res, 409, { error: `本编排里已经有叫「${name}」的内建智能体了`, code: 'wf_agent_name_dup' })
         return
       }
+      const runtimeCheck = await resolveRuntimeKey(body['runtimeKey'] ?? target.runtimeKey ?? 'default')
+      if (!runtimeCheck.ok) {
+        sendJson(res, 400, { error: runtimeCheck.error })
+        return
+      }
       const next: WorkflowInlineAgent = {
         ...target,
         name,
@@ -5487,6 +5512,7 @@ async function injectedSkillsOf(
         skillIds: Array.isArray(body.skillIds)
           ? (body.skillIds as string[]).map(String)
           : target.skillIds,
+        runtimeKey: runtimeCheck.runtimeKey,
         updatedAt: Date.now(),
       }
       // 改名 ⇒ 目录跟着搬（`writeWorkflowAgent` 里做，与账号智能体同一套）

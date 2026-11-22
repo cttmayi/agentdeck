@@ -106,7 +106,22 @@ export const workflowsText = {
   'workflows.agentsNew': { zh: '新建智能体', en: 'New agent' },
   'workflows.agentsBack': { zh: '← 返回编排', en: '← Back to workflow' },
   'workflows.agentsOfWorkflow': { zh: '属于「{name}」', en: 'In “{name}”' },
-  'workflows.agentsEntryWorkflow': { zh: '编排', en: 'Workflows' },
+  'workflows.agentsEntryLockedHint': {
+    zh: '编排内建智能体只能被编排调用（对话 / 任务那两个入口对它不生效）',
+    en: 'A workflow agent can only be called by workflows (chat/task do not apply)',
+  },
+  'workflows.agentsMemoryLockedHint': {
+    zh: '编排内建智能体的记忆还没有接（它的记忆要落在编排目录里，二期做）',
+    en: 'Memory is not wired for workflow agents yet (it would live in the workflow folder; later)',
+  },
+  'workflows.agentsSetDefaultLockedHint': {
+    zh: '它不是智能体页里的一条，不能当默认执行者',
+    en: 'It is not an entry on the Agents page, so it cannot be the default executor',
+  },
+  'workflows.agentsCopyLockedHint': {
+    zh: '从编排内建智能体复制还没接（二期做）',
+    en: 'Copying a workflow agent is not wired yet (later)',
+  },
   'workflows.agentsSaved': { zh: '已保存', en: 'Saved' },
   'workflows.agentsDeleted': { zh: '已删除', en: 'Deleted' },
   'workflows.agentsDelete': { zh: '删除', en: 'Delete' },
