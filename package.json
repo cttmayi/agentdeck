@@ -17,6 +17,7 @@
     "remote": "node scripts/node-entry.mjs apps/remote/src/cli.ts",
     "mcp": "node scripts/node-entry.mjs apps/mcp/src/cli.ts",
     "cli": "node scripts/node-entry.mjs apps/cli/src/cli.ts",
+    "sync:material": "node tools/material/sync.mjs",
     "sync-skills": "node scripts/node-entry.mjs tools/skill-catalog-sync/src/cli.ts",
     "build:web": "pnpm --filter @agentdeck/web run build && pnpm --filter @agentdeck/remote-web run build",
     "dev:web": "pnpm --filter @agentdeck/web run dev",
