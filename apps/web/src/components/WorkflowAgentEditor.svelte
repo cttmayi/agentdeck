@@ -23,6 +23,8 @@
   import AgentDetail from './AgentDetail.svelte'
   import NewAgentForm from './NewAgentForm.svelte'
   import MainArea from './MainArea.svelte'
+  import WorkDirTree from './WorkDirTree.svelte'
+  import { Modal } from '@agentdeck/ui/components'
 
   export let workflowId: string
   /** `'new'` = 新建；否则是内建智能体的 id。 */
@@ -34,6 +36,9 @@
   let inline: WorkflowInlineAgent | null = null
   let loadError = ''
   let loading = true
+  /** D245：目录浮层（tree + 可编辑的 FileViewer）。只对已有的一条开（新建时没有目录）。 */
+  let dirOpen = false
+  let dirCount = 0
   $: isNew = agentId === 'new'
   $: wf = $workflows.find((w) => w.id === workflowId) ?? null
 
@@ -106,6 +111,12 @@
         oncreated={ondone}
       />
     {:else if asAgent}
+      <div class="field-row" style="margin-bottom:var(--sp-2)">
+        <button type="button" class="btn btn--secondary btn--sm" data-dir-open onclick={() => (dirOpen = true)}>
+          {$t('workflows.agentsOpenDir')}
+        </button>
+        <span class="faint fs-xs">{$t('workflows.agentsOpenDirHint')}</span>
+      </div>
       <AgentDetail
         agent={asAgent}
         scope={{ kind: 'workflow', workflowId, workflowName: wf?.name ?? '' }}
@@ -115,3 +126,23 @@
     {/if}
   {/snippet}
 </MainArea>
+
+<!--
+  ★ D245：这个内建智能体的**目录**——树 + FileViewer（原文面可编辑、保存走
+  `PUT /api/fs/wf-agent:<wid>/<aid>/file`）。独有技能就是 `skills/<名字>/SKILL.md`，
+  所以这里就是"独有技能写入口"的落点，不再单造一个面板。
+-->
+<Modal
+  open={dirOpen}
+  size="wide"
+  ariaLabel={$t('workflows.agentsOpenDir')}
+  title={$t('workflows.agentsOpenDir')}
+  closeLabel={$t('common.close')}
+  onclose={() => (dirOpen = false)}
+>
+  <WorkDirTree
+    base={`/api/fs/wf-agent:${workflowId}/${agentId}`}
+    reloadKey={`${workflowId}/${agentId}/${dirOpen}`}
+    bind:count={dirCount}
+  />
+</Modal>
