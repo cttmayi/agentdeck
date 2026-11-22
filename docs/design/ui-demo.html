@@ -4309,7 +4309,7 @@ a > button { width: 100%; }
                 <tr><td>智能体</td><td><code>#/agents</code></td><td>① 列表页</td><td>栏头（选中态）</td><td>✅ 一致</td></tr>
                 <tr><td>新建智能体</td><td><code>#/agents</code>（新建态）</td><td>④ 新建视图</td><td>栏头 <code>[data-agent-create]</code></td><td>✅ 一致（D243 从 ⑤ 挪回）</td></tr>
                 <tr><td>技能（列表）</td><td><code>#/skills</code></td><td>② 表格页</td><td>栏头</td><td>✅ 一致</td></tr>
-                <tr><td><b>安装技能</b></td><td><code>#/skills</code>（面板态）</td><td><b>④ 新建视图</b></td><td>应 → 栏头</td><td>⏳ <b>待迁移</b>：今天仍是 ⑤ 设置面板形态（<code>.main-panel</code> + 底栏主操作）</td></tr>
+                <tr><td><b>安装技能</b></td><td><code>#/skills</code>（面板态）</td><td><b>④ 新建视图</b></td><td>栏头 <code>[data-skills-install-submit]</code></td><td>✅ 一致（D244 从 ⑤ 迁过来）</td></tr>
                 <tr><td>沉淀</td><td><code>#/crystallize</code></td><td>① 列表页 + 流程页</td><td>流程页栏头</td><td>✅ 一致</td></tr>
                 <tr><td>定时任务</td><td><code>#/schedules</code></td><td>① 列表页</td><td>栏头（新建态）</td><td>✅ 一致</td></tr>
                 <tr><td>编排</td><td><code>#/workflows</code></td><td>① 列表页</td><td>栏头（选中 / 新建态）</td><td>✅ 一致</td></tr>
@@ -4322,8 +4322,8 @@ a > button { width: 100%; }
             </table>
           </div>
           <p class="demo-rule-note">
-            <b>两条待办</b>（这张表就是它们的清单）：① <b>安装技能</b>要从 ⑤ 迁到 ④（面板头 → 栏头、
-            主操作从左下角挪到右上角）；迁完把 ④ 那一格示范补上它。
+            <b>这一版没有待办</b>：16 行全部一致（安装技能 D244 迁完）。以后新增页面/入口，
+            往这张表里加一行、并指到 ①–⑤ 里的一类——**归不到任何一类，就说明骨架还没定义**。
           </p>
         </section>
       </div>

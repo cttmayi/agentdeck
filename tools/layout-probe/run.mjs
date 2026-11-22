@@ -1937,8 +1937,8 @@ const CHECKS = [
   {
     view: '技能',
     key: 'skills.panelClass',
-    label: '打开的是主区就地面板（`.main-panel`，不是 `.drawer`）',
-    ok: (v) => String(v).includes('main-panel') && !String(v).includes('drawer'),
+    label: '打开的是主区里的新建视图（`.detail-pane`，不是 `.drawer`；D244 从面板改过来）',
+    ok: (v) => String(v).includes('detail-pane') && !String(v).includes('drawer'),
   },
   {
     view: '技能',
@@ -1991,13 +1991,12 @@ const CHECKS = [
      * 量"位置"而不是"有没有那个按钮"：主操作跑到栏头去，按钮照样在、照样能点，
      * 但那一屏的读法就变了（栏头是"我在哪 / 怎么回去"，底栏才是"这一步做完了"）。
      */
-    label: '★★ 技能安装面板：**主操作在底栏**（唯一那颗 primary），**栏头只有 ghost**（返回）',
+    label: '★★ 技能安装是**新建视图**：主操作在**栏头**（「检查并安装」），没有底栏（D244 从面板改过来）',
     ok: (v) =>
       !!v &&
-      v.headAllGhost === true &&
-      v.headPrimary === 0 &&
-      v.footExists === true &&
-      v.footPrimary === 1,
+      // 栏头里那颗 primary 就是主操作；底栏已经不在了
+      v.headPrimary === 1 &&
+      v.footExists === false,
   },
   {
     view: '技能',

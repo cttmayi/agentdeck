@@ -564,18 +564,46 @@
      · 唯一的"怎么回去"是头部那个**一直可见**的「← 返回技能列表」
        （`.back-to-list` 那个全局 class 只在窄屏才显示，这里不能用它）。
 -->
+<!--
+  ★★ D244（使用者："『安装技能』也算『新建视图』"）：这一块原来是 ⑤ 设置面板
+  （`.main-panel` + 底栏主操作），现在是 **④ 新建视图** 的骨架——与新建任务 /
+  新建智能体 / 新建编排同款：
+    `detail-head`（标题 + **栏头右侧的主操作**）＋ `pane-body`（页签与表单）。
+  「← 返回技能列表」挪进标题块里（`panel-back` 那个类仍然用：它**一直可见**，
+  `.back-to-list` 只在窄屏显示，这一块把列表换掉了，不能用它）。
+-->
 {#if panelOpen}
-  <section class="main-panel" aria-label={$t('skills.install')}>
-    <header class="main-panel-head">
-      <button
-        type="button"
-        class="btn btn--ghost btn--sm panel-back"
-        onclick={closePanel}>{$t('skills.backToList')}</button
-      >
-      <h2>{$t('skills.install')}</h2>
+  <section class="pane detail-pane" aria-label={$t('skills.install')} data-skills-install>
+    <header class="detail-head">
+      <div class="detail-head-main">
+        <p class="detail-sub" style="margin:0 0 var(--sp-1)">
+          <button type="button" class="btn btn--ghost btn--sm panel-back" onclick={closePanel}
+            >{$t('skills.backToList')}</button
+          >
+        </p>
+        <h2>{$t('skills.install')}</h2>
+      </div>
+      <div class="detail-actions">
+        <!--
+          主操作在**栏头右侧**（D244）：只有「从路径 / GitHub」那一档有那颗按钮；
+          其余三档（目录 / 远端 / 清单）都是"逐条装"，主操作在每行上，栏头不放东西。
+        -->
+        {#if tab === 'path'}
+          <button
+            type="button"
+            class="btn btn--primary"
+            data-skills-install-submit
+            disabled={busy}
+            onclick={submitPath}
+          >{busy ? $t('skills.installing') : $t('skills.installCheck')}</button>
+        {/if}
+        <button type="button" class="btn btn--ghost" onclick={closePanel}>
+          {$t('common.cancel')}
+        </button>
+      </div>
     </header>
 
-    <div class="main-panel-body">
+    <div class="pane-body detail-scroll">
     <div class="tabs">
       <button
         type="button"
@@ -1060,30 +1088,20 @@
     </div>
 
     <!--
-      主操作在**面板自己的底部**（`.main-panel-foot`）。
-      ⚠️ 它原来贴住视口底部（`.drawer-foot` 是 flex 列的固定一截）——那是弹框才有的
-         手感。就地面板里它是"表单的最后一步"，跟着内容走；而反馈（上面两个 notice）
-         依然紧挨在它上面，按下就能看见。
+      ★ D244：底栏删掉了——主操作在**栏头**。这一栏里原来只剩下"这一档怎么做"的一句
+      说明（其余三档没有主操作），它挪到正文末尾，与反馈挨着。
     -->
-    <div class="main-panel-foot">
-      {#if tab === 'path'}
-        <button type="button" class="btn btn--primary" disabled={busy} onclick={submitPath}>
-          {busy ? $t('skills.installing') : $t('skills.installCheck')}
-        </button>
-      {:else if tab === 'dirs'}
-        <span class="faint fs-xs">
+    {#if tab !== 'path'}
+      <p class="faint fs-xs" style="margin-top:var(--sp-3)">
+        {#if tab === 'dirs'}
           {$t('skills.dirsFootNote')}
-        </span>
-      {:else if tab === 'remote'}
-        <span class="faint fs-xs">
+        {:else if tab === 'remote'}
           {$t('skills.remoteFootNote')}
-        </span>
-      {:else}
-        <span class="faint fs-xs">
+        {:else}
           {$t('skills.listFootNote')}
-        </span>
-      {/if}
-    </div>
+        {/if}
+      </p>
+    {/if}
   </section>
 {:else}
 

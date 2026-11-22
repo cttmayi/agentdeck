@@ -110,7 +110,8 @@
        */
       function panelActionPlace(panel) {
         if (!panel) return null
-        const head = panel.querySelector('.main-panel-head')
+        // ★ D244：技能安装改成 ④ 新建视图 ⇒ 它的「栏头」是 `.detail-head`
+        const head = panel.querySelector('.main-panel-head') ?? panel.querySelector('.detail-head')
         const foot = panel.querySelector('.main-panel-foot')
         const headButtons = [...(head?.querySelectorAll('button') ?? [])]
         const footButtons = [...(foot?.querySelectorAll('button') ?? [])]
@@ -3293,11 +3294,12 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           errors.push('找不到「安装技能」按钮')
         } else {
           click(openBtn)
-          const opened = await until(() => d().querySelector('.main-panel'))
-          if (!opened) errors.push('点了「安装技能」之后主区没有出现 .main-panel')
+          // ★ D244：安装技能从 ⑤ 设置面板改成 ④ 新建视图（`.detail-pane` + 栏头主操作）
+          const opened = await until(() => d().querySelector('[data-skills-install]'))
+          if (!opened) errors.push('点了「安装技能」之后主区没有出现新建视图（[data-skills-install]）')
         }
 
-        const panel = d().querySelector('.main-panel')
+        const panel = d().querySelector('[data-skills-install]')
         if (panel) {
           // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
           publish(false)
@@ -3341,8 +3343,9 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             //    `display:none`，抄错一个 class 就会得到一个"看着有、其实不可见"的返回
             return back.getBoundingClientRect().width > 0
           })
-          facts['skills.footButtonText'] = need('面板底部按钮', () =>
-            text(panel.querySelector('.main-panel-foot button')),
+          // ★ D244：主操作在**栏头**（`[data-skills-install-submit]`），底栏已删
+          facts['skills.footButtonText'] = need('主操作（栏头）', () =>
+            text(panel.querySelector('[data-skills-install-submit]')),
           )
           /**
            * ★★ D177（B 案）：技能安装面板是族 1（`.main-panel` + 底栏）。
@@ -3421,7 +3424,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
            *   `aria-label="安装技能"`。⚠️ 必须定义在下面 `if` 之外——Esc 那一段在块外
            *   也要用它（第一版定义在 `if` 里 ⇒ 块外 `ReferenceError`）。
            */
-          const installPanel = () => d().querySelector('.main-panel[aria-label="安装技能"]')
+          const installPanel = () => d().querySelector('[data-skills-install]')
           // 返回入口回到列表（列表被换掉了，所以这一步是**唯一**的路）
           const backBtn = panel.querySelector('.panel-back')
           if (backBtn) {
@@ -3476,7 +3479,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           f.contentWindow.location.hash = '#/skills'
           await until(() => text(d().querySelector('.page-name')) === '技能', 60)
           await wait(300)
-          // ⚠️ 「从本地安装」这几个页签住在**安装面板里**（`.main-panel .tabs`），不是
+          // ⚠️ 「从本地安装」这几个页签住在**安装面板里**（`[data-skills-install] .tabs`），不是
           //    技能页列表上的页签——要先把面板打开（顶栏主操作「安装技能」）。第一版
           //    直接找 `.tabs .tab`，量到 0 个，整段空过（教训：选择器要照着界面上
           //    的真实结构写，别照着自己想象的页面结构写）。
@@ -3486,15 +3489,15 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           facts['skills.localPanelButtonFound'] = !!localInstallBtn
           if (localInstallBtn) {
             click(localInstallBtn)
-            await until(() => !!d().querySelector('.main-panel'), 40)
+            await until(() => !!d().querySelector('[data-skills-install]'), 40)
             await wait(300)
           }
-          facts['skills.tabTexts'] = [...d().querySelectorAll('.main-panel .tabs .tab')].map(
+          facts['skills.tabTexts'] = [...d().querySelectorAll('[data-skills-install] .tabs .tab')].map(
             (b) => text(b),
           )
           // ⚠️ 用 **includes** 比，不用等号：页签里除了词条还可能带计数/角标，等号比
           //    会在"文字对了但多一个角标"时判成"没找到"（第一版就是这么空过的）。
-          const localTab = [...d().querySelectorAll('.main-panel .tabs .tab')].find((b) =>
+          const localTab = [...d().querySelectorAll('[data-skills-install] .tabs .tab')].find((b) =>
             (text(b) ?? '').includes('从本地安装'),
           )
           facts['skills.localTabFound'] = !!localTab
@@ -3504,18 +3507,18 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             click(localTab)
             facts['skills.localTabActive'] = await until(
               () =>
-                [...d().querySelectorAll('.main-panel .tabs .tab')].some(
+                [...d().querySelectorAll('[data-skills-install] .tabs .tab')].some(
                   (b) => (text(b) ?? '').includes('从本地安装') && b.classList.contains('active'),
                 ),
               40,
             )
             // 扫的是**本机**目录，要等接口回来（`$localSkillScan`）
             await until(
-              () => d().querySelectorAll('.main-panel table tr.cat-row').length > 0,
+              () => d().querySelectorAll('[data-skills-install] table tr.cat-row').length > 0,
               60,
             )
             await wait(300)
-            const localGroups = () => [...d().querySelectorAll('.main-panel table tr.cat-row')]
+            const localGroups = () => [...d().querySelectorAll('[data-skills-install] table tr.cat-row')]
             facts['skills.localGroupCount'] = localGroups().length
             facts['skills.localGroupLabels'] = localGroups().map(
               (r) => text(r.querySelector('.cat-label')),
@@ -3533,11 +3536,11 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             //    （它管"同名要不要覆盖"，与"勾上目录就自动对账"无关）。第一版数了整
             //    个面板 ⇒ 把覆盖开关也算进来 ⇒ 判据变红，而红的理由与 D73 无关。
             facts['skills.localTabNoCheckbox'] =
-              d().querySelectorAll('.main-panel table input[type=checkbox]').length === 0
+              d().querySelectorAll('[data-skills-install] table input[type=checkbox]').length === 0
             facts['skills.localTabNoCheckboxCount'] =
-              d().querySelectorAll('.main-panel table input[type=checkbox]').length
+              d().querySelectorAll('[data-skills-install] table input[type=checkbox]').length
             facts['skills.localPanelCheckboxCount'] =
-              d().querySelectorAll('.main-panel input[type=checkbox]').length
+              d().querySelectorAll('[data-skills-install] input[type=checkbox]').length
             // ★ 目录行上要有「安装」/「已安装」的分寸：折叠着的时候先说"里面几个"，
             //   展开之后逐条给按钮（不是整目录一键装——那会把使用者没看过的也装进来）
             facts['skills.localGroupCounts'] = localGroups().map((r) =>
@@ -3559,7 +3562,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             }
             facts['skills.localGroupExpands'] = !!expanded
             const localSkillRows = () =>
-              [...d().querySelectorAll('.main-panel table tbody tr')].filter(
+              [...d().querySelectorAll('[data-skills-install] table tbody tr')].filter(
                 (r) =>
                   !!r.querySelector('code') &&
                   !!r.querySelector('button') &&
@@ -3572,7 +3575,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               ),
             )
             // ★ 真的装一条：挑第一条**还没装**的技能（已经装过的按钮是禁用的）
-            const firstInstall = [...d().querySelectorAll('.main-panel table tbody tr')]
+            const firstInstall = [...d().querySelectorAll('[data-skills-install] table tbody tr')]
               .filter((r) => !!r.querySelector('code'))
               .map((r) => ({
                 slug: text(r.querySelector('code')),
@@ -3624,7 +3627,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
                 : null
               // ★ 关掉面板回到列表，再看那一条：装进来的东西**必须在那张表里出现**，
               //   而且来源徽标要带着**它的来源目录**（不是笼统的「本机自建」）。
-              const backToList = d().querySelector('.main-panel .panel-back')
+              const backToList = d().querySelector('[data-skills-install] .panel-back')
               if (backToList) {
                 click(backToList)
               } else {
@@ -3633,7 +3636,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
                 )
               }
               const listBack = await until(
-                () => !d().querySelector('.main-panel') && !!d().querySelector('.main table'),
+                () => !d().querySelector('[data-skills-install]') && !!d().querySelector('.main table'),
                 40,
               )
               facts['skills.listBackAfterLocalInstall'] = listBack
@@ -3657,11 +3660,11 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             // ★ 跳过的东西要说清理由（没有 SKILL.md / 太深 / 解析不了…）——一直挂在
             //   组里，不藏在折叠里。机器上没有被跳过的东西时如实记 null。
             facts['skills.dirsSkipNote'] = need('「跳过」那一行', () => {
-              const note = d().querySelector('.main-panel .dir-skip')
+              const note = d().querySelector('[data-skills-install] .dir-skip')
               return note ? (text(note) ?? '').includes('跳过') : null
             })
             // ★ 目录读不了要说读不了（不是一张空表）
-            facts['skills.dirReadErrorShown'] = !!d().querySelector('.main-panel .notice.warn')
+            facts['skills.dirReadErrorShown'] = !!d().querySelector('[data-skills-install] .notice.warn')
             // ★ 空目录要**如实说**「里面没有技能」（不是一行空白，也不是干脆不列这个目录）。
             //   ⚠️ 这条得**展开每一组**才看得到，所以是异步的（`need()` 是同步的，量不了）。
             const emptyGroupResults = []
