@@ -846,7 +846,7 @@ const CHECKS = [
      * 另一半量自建：只量前者的话，"整页都只读"这种更糟的坏法也是绿的。
      */
     label:
-      '★★★ 内置智能体**只读但不缩水**：没有「保存」/「改名」（有「恢复成默认值」+「关闭」），' +
+      '★★★ 内置智能体**只读但不缩水**：没有「保存」（有「复制」+「关闭」），名字格在但**置灰**（D248），' +
       '「入口」那一格在、三项勾选框**锁着**、并且**平台动作徽标**摆出来（`action:` 那一半' +
       '以前界面上一个字都没有），CLI 与指令锁着并带「只读」标，' +
       '技能的勾选框、记忆的开关/写入口/行内改删都还在原位只是锁住；而**自建仍然能改**',
@@ -857,7 +857,8 @@ const CHECKS = [
       v.hasSave === false &&
       v.hasRestore === true &&
       v.hasLeave === true &&
-      v.rename === false &&
+      v.nameCell === true &&
+      v.nameCellDisabled === true &&
       /**
        * ★ 2026-11（D153）：「类型 / 岗位」那一格删了 ⇒ 这一段的证据换成**「入口」那一格**：
        *   三项勾选框都在但**锁着**，并且**平台动作徽标**摆出来了（`action:` 那一半以前
@@ -902,7 +903,7 @@ const CHECKS = [
         ? 'null'
         : `找到 ${String(v.found)}　按钮 ${JSON.stringify(v.headLabels ?? [])}　` +
           `保存 ${String(v.hasSave)}　恢复 ${String(v.hasRestore)}　关闭 ${String(v.hasLeave)}　` +
-          `改名入口 ${String(v.rename)}　入口格 ${String(v.entriesCell)}（${String(v.entryBoxes)} 个勾选全锁 ${String(v.entryBoxesDisabled)}）　` +
+          `名字格 ${String(v.nameCell)}（置灰 ${String(v.nameCellDisabled)}）　入口格 ${String(v.entriesCell)}（${String(v.entryBoxes)} 个勾选全锁 ${String(v.entryBoxesDisabled)}）　` +
           `平台动作 ${JSON.stringify((v.actionEntries ?? []).map((a) => a.label))}　CLI 锁 ${String(v.cliDisabled)}　指令锁 ${String(v.instructionsReadonly)}　` +
           `「只读」标 ${String(v.lockMarks)} 处　记忆开关 ${String(v.memorySwitch)}（开着 ${String(v.memoryOn)} / 锁 ${String(v.memorySwitchDisabled)}）　` +
           `写入口 ${String(v.memoryAdd)}（锁 ${String(v.memoryAddDisabled)}）　记忆 ${String(v.memRows)} 条　` +
@@ -940,37 +941,37 @@ const CHECKS = [
   },
   {
     view: '智能体',
-    key: 'agents.renameOnSwitch',
+    key: 'agents.switchResetsDraft',
     /**
-     * ★★★ 2026-11（D158）：使用者报的真 bug——「点改名后，我选中其他智能体，
-     *   还保持在改名状态」。
+     * ★★★ 2026-11（D158 → D248 改写）：这条原来叫 `renameOnSwitch`，量"改名态属于某一个人"
+     *   （使用者报的 bug：改上一个人的名字、改着改着底下换人了）。
      *
-     * `renaming` 是组件自己的状态，`agent` 换了它不变 ⇒ 标题栏挂着**上一个人的
-     * 改名输入框**（里面是上一个人的名字），底下却是新的人。
-     *
-     * 判据量的是**界面**（不是"某个变量是 false"）：换人之后
-     *   ① 改名输入框没了；② 标题显示的是**新那条**的名字；③ 没有残留「（未保存）」。
-     * 另外先确认「改名态真的进去过」——不然一个"点了没反应"的入口也能让上面三条全绿。
+     * D248 把名字放回卡片第一格、**改名态整个删掉** ⇒ 那个入口不存在了，但**意图**还在：
+     *   换人之后这一屏的临时草稿必须作废。现在量的是名字格里的草稿：
+     *   ① 在名字格里改一个字 ⇒「保存」变可用（草稿真的进来了，不然下面几条都是空过）；
+     *   ② 换到另一条 ⇒ 名字格的值变成**新那条**的、标题也是它；
+     *   ③ 保存重新置灰（草稿没被带过去）+ 没有残留「（未保存）」。
      */
     label:
-      '★★★ 改名态**属于某一个人**：点「改名」再选中另一条智能体 ⇒ 输入框消失、标题是**新那条**的名字、' +
-      '没有残留「（未保存）」——使用者报的 bug（改上一个人的名字，改着改着底下换人了）',
+      '★★★ 换人时**名字格里的草稿作废**：改一个字 ⇒ 保存变可用；换到另一条 ⇒ 名字格是新那条的、' +
+      '标题也是、保存重新置灰、没有残留「（未保存）」（D158 那个 bug 的 D248 形态）',
     ok: (v) =>
       !!v &&
       (v.skipped !== undefined ||
         (v.entered === true &&
+          v.dirty === true &&
           v.switched === true &&
-          v.renameGone === true &&
-          v.pendingGone === true &&
-          v.shownIsSecond === true)),
+          v.nameIsSecond === true &&
+          v.resetClean === true &&
+          v.pendingGone === true)),
     show: (v) =>
       v === null
         ? 'null'
         : v.skipped !== undefined
           ? `跳过：${String(v.skipped)}`
-          : `进过改名态 ${String(v.entered)}（${String(v.first)}）　换人 ${String(v.switched)}　` +
-            `输入框消失 ${String(v.renameGone)}　未保存提示消失 ${String(v.pendingGone)}　` +
-            `标题是新的 ${String(v.shownIsSecond)}（显示「${String(v.shown)}」／应为「${String(v.second)}」）`,
+          : `名字格对上（${String(v.entered)}）　改出草稿 ${String(v.dirty)}　换人 ${String(v.switched)}　` +
+            `名字格是新的 ${String(v.nameIsSecond)}　保存重新置灰 ${String(v.resetClean)}　` +
+            `未保存提示消失 ${String(v.pendingGone)}（${String(v.first)} → ${String(v.second)}）`,
   },
   {
     view: '智能体',
@@ -2451,15 +2452,21 @@ const CHECKS = [
       v['详情栏拉满'] === true &&
       // ★ D247：「← 返回编排」与名字**同一行**、名字在按钮右边
       v['返回在名字左边']?.在右边 === true &&
-      v['返回在名字左边']?.同一行 === true,
+      v['返回在名字左边']?.同一行 === true &&
+      // ★ D248：名字回到卡片第一格（且值就是标题那个名字）、栏头没有「改名」入口、目录一节可用
+      v['有名字格'] === true &&
+      v['名字格值'] === v['标题'] &&
+      v['没有改名入口'] === true &&
+      v['有目录一节'] === true &&
+      v['目录可用'] === true,
     show: (v) => JSON.stringify(v),
   },
   {
     view: '编排',
     key: 'workflows.agentsNewMatchesAgentForm',
     label:
-      '★★★ 点「新建智能体」⇒ 就是智能体页那张新建表单（`SettingsPanel` 外壳 + 底栏主操作），'
-      + '不是另画一个；没有「用哪个 CLI」那一格、入口**锁死只有「编排」**',
+      '★★★ 点「新建智能体」⇒ 与智能体编辑页**同一张卡**（6 格：名字/CLI/指令/技能/入口/记忆）＋'
+      + '入口**锁死只有「编排」**；记忆、独有技能、目录一节**置灰保留**（D248：不可用置灰不删）',
     ok: (v) =>
       !!v &&
       v['打开'] === true &&
@@ -2476,8 +2483,16 @@ const CHECKS = [
       v['技能格'] === true &&
       // ★ D240：少一格不许把后面的格子挤到第 2 列（每一行都要占满）
       v['每行占满'] === true &&
-      // ★ D241：与智能体页同一个格子数（名字 / CLI / 指令 / 技能 + 入口）
-      v['格子数'] === 5 &&
+      // ★ D241/D248：与智能体页同一个格子数（名字 / CLI / 指令 / 技能 / 入口 / 记忆）
+      v['格子数'] === 6 &&
+      // ★ D248：名字格在（名字只有这一个输入点）＋ 记忆格/独有技能/目录一节都**置灰保留**
+      v['有名字格'] === true &&
+      v['记忆格在'] === true &&
+      v['记忆整体禁用'] === true &&
+      v['独有技能在'] === true &&
+      v['独有技能锁定'] === true &&
+      v['有目录一节'] === true &&
+      v['目录一节禁用'] === true &&
       // ★ D242：CLI 下拉有「跟随全局默认」且默认就选它；技能框与指令框底边对齐、同高（22rem）
       Array.isArray(v['CLI选项']) &&
       v['CLI选项'].includes('default') &&

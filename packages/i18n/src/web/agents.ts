@@ -32,7 +32,6 @@ export const agentsText = {
     zh: '平台内置：只读。要回到平台默认用「恢复成默认值」。',
     en: 'Shipped with the platform: read-only. Use "Restore default" to go back to the platform version.',
   },
-  'agents.renamePending': { zh: '（未保存）', en: '(unsaved)' },
   /**
    * ★ 分批第 274 批（使用者定方案 A："内置和自建在呈现方式上行为不同一" ⇒ 同一套骨架、
    *   只读的就锁住）。只读控件右上角那枚小字与其余只读文案都从这里来。
@@ -100,6 +99,18 @@ export const agentsText = {
    * 「类型」两种情形都读得通，也不会与「指令 = 第一句话的 ② 身份」撞词。
    */
   'agents.nameLabel': { zh: '名称', en: 'Name' },
+  // ── 「目录」一节（D248：新建页与编辑页共用；新建时置灰不展开）──
+  'agents.dirTitle': { zh: '目录', en: 'Folder' },
+  'agents.dirHint': {
+    zh: '这个智能体的文件（agent.json / 指令 / 独有技能）——点文件名就能改，保存写回磁盘',
+    en: 'Its files (agent.json · instructions · own skills); open one to edit and save',
+  },
+  'agents.dirAfterCreate': { zh: '创建后才能编辑这里面的文件', en: 'Editable after the agent is created' },
+  'agents.memoryAfterCreate': { zh: '创建后才能开记忆', en: 'Memory can be enabled after creation' },
+  'agents.exclusiveSkillsAfterCreate': {
+    zh: '创建后才能写独有技能（在这个智能体的目录里）',
+    en: 'Own skills can be written after creation (in this agent’s folder)',
+  },
   // ── 记忆（分批第 240 批）──
   // ★ 位置在「指令」下面：人设是人定的、记忆是长出来的，两者挨着放才分得清。
   /**

@@ -1266,7 +1266,13 @@
             // 三槽位纪律（274 批）：主=写（这里是"恢复成默认值"）、次=离开、危险=删
             hasLeave: labels.some((l) => l.includes('取消') || l.includes('关闭')),
             hasDelete: labels.some((l) => l.includes('删除')),
-            rename: d().querySelector('[data-agent-rename]') !== null,
+            /*
+             * ★ D248：名字回到卡片第一格。只读智能体同样**保留**这一格（置灰不删）——
+             *   原来量的是"有没有「改名」入口"，改名态删掉之后那个判据就没有意义了。
+             */
+            nameCell: d().querySelector('.card.agent-card [data-agent-name]') !== null,
+            nameCellDisabled:
+              d().querySelector('.card.agent-card [data-agent-name]')?.disabled !== false,
             /**
              * ③ ★ 2026-11（D153）：「类型 / 岗位」那一格**整格删掉**了（使用者："感觉不需要
              *   显示『类型』，把『入口』、把 entries：Action 显示出来"）。现在这一段的证据换成
@@ -1370,6 +1376,10 @@
                * ⚠️ 勾选框**数量**不能比：内置那三个锁着，自建那三个能勾，数量都是 3 但
                *   状态不同（状态在 `agents.builtinReadOnly` 那条里分开量）。
                */
+              // ★ D248：名字回到卡片第一格 ⇒ 它也是"两边都该有"的骨架之一
+              nameCell: d().querySelector('.card.agent-card [data-agent-name]') !== null,
+              // ★ D248：「目录」一节也在两边（同一个 `AgentDirSection`）
+              dirSection: d().querySelector('[data-agent-dir]') !== null,
               entriesCell: entriesBox !== null,
               cli: d().querySelector('#agent-runtime') !== null,
               instructions: d().querySelector('#agent-instructions') !== null,
@@ -1406,59 +1416,78 @@
          *   ③ 没有残留「（未保存）」提示（改名只落在草稿里，换人后草稿作废）。
          * ⚠️ 最后要把选中项恢复到进来时那个人：后面还有判据要量它的详情。
          */
-        facts['agents.renameOnSwitch'] = await (async () => {
+        facts['agents.switchResetsDraft'] = await (async () => {
+          /**
+           * ★★★ D158 → D248 改写。原来这条叫 `renameOnSwitch`，量的是"改名态属于某一个人"
+           *   （点「改名」→ 换人 ⇒ 输入框消失、标题是新人、没有残留「（未保存）」）。
+           *   D248 把名字放回卡片第一格、整条改名态删掉 ⇒ **改名态这个概念没有了**，
+           *   但那次 bug 的**意图**还在：换人之后，这一屏的临时草稿必须作废。
+           *   所以判据改成量**名字格里的草稿**：
+           *     ① 换人前后名字格的值跟着换（不是上一个人的）；
+           *     ② 换人之后「保存」是置灰的（草稿没被带过去）；
+           *     ③ 没有残留「（未保存）」标记。
+           *   ⚠️ 与旧版同一条教训：`until()` 返回布尔，不是元素；元素要重新 `querySelector`。
+           */
           const rows = () => [...d().querySelectorAll('.agent-list .agent-row')]
           const nameOf = (row) => (text(row.querySelector('.agent-line strong')) ?? '').trim()
-          const headName = () =>
-            (text(d().querySelector('[data-agent-head-name]')) ?? '').trim()
-          const renameBtn = () => d().querySelector('[data-agent-rename]')
-          // 找两条**能改名**的（自建）行
-          const editable = rows().filter((r) => (text(r) ?? '').includes(''))
+          const headName = () => (text(d().querySelector('[data-agent-head-name]')) ?? '').trim()
+          const nameInput = () => d().querySelector('.card.agent-card [data-agent-name]')
+          const saveBtn = () => d().querySelector('[data-agent-save]')
+          if (!nameInput()) return { skipped: '名字格不在（D248 之前的老形态？）' }
           const prev = headName()
           // ★ 2026-11（D161）：自建 = `data-slot="user"`
-          const ownRows = rows().filter(
-            (r) => (r.getAttribute('data-slot') ?? 'user') === 'user',
-          )
+          const ownRows = rows().filter((r) => (r.getAttribute('data-slot') ?? 'user') === 'user')
           if (ownRows.length < 2) return { skipped: '自建的智能体不足两条' }
-          const first = ownRows[0]
+          // 只留**不在只读态**的（平台内置那几条根本没有「保存」）
+          const editableRows = []
+          for (const r of ownRows) {
+            click(r.querySelector('.list-row-main') ?? r)
+            // 点完要等详情挂上（骨架期 `[data-agent-save]` 还不存在）
+            await until(() => d().querySelector('.card.agent-card') !== null, 40)
+            if (d().querySelector('[data-agent-save]') !== null) editableRows.push(r)
+          }
+          if (editableRows.length < 2) return { skipped: '可编辑的智能体不足两条' }
+          const first = editableRows[0]
+          const second = editableRows[1]
           click(first.querySelector('.list-row-main') ?? first)
           await until(() => headName() === nameOf(first), 60)
-          const btn = renameBtn()
-          if (!btn) return { skipped: '这一条没有「改名」入口' }
-          click(btn)
-          /*
-           * ⚠️ `until()` 返回的是**布尔**（不是它等的那个元素）——第一版写成
-           * `const input = await until(...)` 再读 `input.value`，于是 `entered` 恒为 false，
-           * 判据红在一个"量法错"上，而不是界面上。
-           */
-          const enteredOk = await until(() => !!d().querySelector('.agent-rename-input'), 40)
-          const input = d().querySelector('.agent-rename-input')
-          const entered = enteredOk && !!input && (input.value ?? '') === nameOf(first)
+          const input0 = nameInput()
+          const entered = !!input0 && input0.value === nameOf(first)
 
-          // 换到另一条（**不提交改名**）
-          const second = ownRows[1]
+          // 在名字格里改一个字（走原生 setter，防 Svelte 的 `bind:value` 收不到 change）
+          const el = nameInput()
+          const setter = Object.getOwnPropertyDescriptor(
+            el.constructor.prototype,
+            'value',
+          )?.set
+          setter?.call(el, nameOf(first) + '草稿')
+          el.dispatchEvent(new Event('input', { bubbles: true }))
+          await new Promise((r) => setTimeout(r, 40))
+          const dirty = saveBtn()?.disabled === false
+
+          // 换到另一条（**不提交**这次改动）
           click(second.querySelector('.list-row-main') ?? second)
           const switched = await until(() => headName() === nameOf(second), 60)
-          const renameGone = !d().querySelector('.agent-rename-input')
+          const input1 = nameInput()
+          const nameIsSecond = !!input1 && input1.value === nameOf(second)
+          const resetClean = saveBtn()?.disabled !== false
           const pendingGone = !d().querySelector('[data-agent-rename-pending]')
-          const shown = headName()
 
           // 恢复到进来时那个人（后面的判据要量它的详情）
-          const back = rows().find((r) => nameOf(r) === prev)
-          if (back) {
-            click(back.querySelector('.list-row-main') ?? back)
+          const backRow = rows().find((r) => nameOf(r) === prev)
+          if (backRow) {
+            click(backRow.querySelector('.list-row-main') ?? backRow)
             await until(() => headName() === prev, 60)
           }
-          void editable
           return {
             entered,
+            dirty,
             switched,
-            renameGone,
+            nameIsSecond,
+            resetClean,
             pendingGone,
-            shownIsSecond: shown === nameOf(second),
             first: nameOf(first),
             second: nameOf(second),
-            shown,
           }
         })()
 
@@ -4771,6 +4800,22 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             // CLI 那一格回来了（D241：它是真字段，落在 agent.json）
             有CLI那一格: !!pane?.querySelector('#agent-runtime'),
             /*
+             * ★ D248（新建与编辑统一化）：名字回到**卡片第一格**、栏头只剩显示。
+             *   三个数一起量——格子在、值是它、栏头那颗「改名」入口没了。
+             */
+            有名字格: !!pane?.querySelector('.agent-card [data-agent-name]'),
+            名字格值: pane?.querySelector('.agent-card [data-agent-name]')?.value ?? '',
+            没有改名入口: pane?.querySelector('[data-agent-rename]') === null,
+            /*
+             * ★ D248：「目录」一节两页都在（编辑页可用、新建页置灰），
+             *   由共用的 `AgentDirSection` 渲染 ⇒ 两页 `[data-agent-dir]` 各一份。
+             */
+            有目录一节: !!pane?.querySelector('[data-agent-dir]'),
+            目录可用: (() => {
+              const b = pane?.querySelector('[data-agent-dir] button')
+              return b === null || b === undefined ? null : b.disabled !== true
+            })(),
+            /*
              * ★ D247：「← 返回编排」与名字**同一行、名字在它右边**。原来那颗返回是网格的
              *   直接子项，抢掉第 1 行第 1 列，名字只能落到第 2 行（按钮下面）。
              */
@@ -4896,6 +4941,26 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               return rows.every((sum) => sum + (gap > 0 ? 0 : 0) >= inner - 2 * gap - 4)
             })(),
             格子数: pane.querySelectorAll('.agent-card > .cell').length,
+            // ★ D248：新建页也要有名字格（名字只有这一个输入点）
+            有名字格: !!pane.querySelector('.agent-card [data-agent-name]'),
+            /*
+             * ★ D248（"不可用的部分置灰"）：记忆格的**外壳**在、整体禁用
+             *   （`<fieldset disabled>` 一次禁掉里面所有控件）。
+             */
+            记忆格在: !!pane.querySelector('.agent-card [data-agent-memory]'),
+            记忆整体禁用: (() => {
+              const f = pane.querySelector('.agent-card [data-agent-memory]')
+              return f === null ? null : f.disabled === true
+            })(),
+            // 独有技能：编辑页那一段（`.exclusive-cell`）在这里也在，只是锁定说明
+            独有技能在: !!pane.querySelector('.agent-card [data-exclusive-skills]'),
+            独有技能锁定: !!pane.querySelector('.agent-card [data-exclusive-locked]'),
+            // 目录一节：整节置灰（标题在、点不开）
+            有目录一节: !!pane.querySelector('[data-agent-dir]'),
+            目录一节禁用: (() => {
+              const b = pane.querySelector('[data-agent-dir] button')
+              return b === null ? null : b.disabled === true
+            })(),
           }
         })()
 
@@ -4921,16 +4986,11 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           click([...row.querySelectorAll('button')].find((b) => (text(b) ?? '').trim() === '编辑'))
           await until(() => !!d().querySelector('[data-wf-agent-back]'), 60)
           /*
-           * 名字走**智能体编辑页同一条改名流程**（h2 旁的「改名字」→ 输入框 → Enter）：
-           * 这本身就是"一致"的一部分——编排内建智能体的名字不是另造一个输入框。
+           * ★ D248：名字现在就在**卡片第一格**里改（与智能体编辑页同一个输入点；
+           *   栏头那颗「改名」连同改名态一起删掉了）。这一段因此从"点改名、进输入框、
+           *   敲 Enter"变成"写进名字格"。
            */
-          const rename = d().querySelector('[data-agent-rename]')
-          if (!rename) return null
-          click(rename)
-          // ⚠️ `until()` 返回**布尔**，不是元素——元素要再取一次（第一版直接当元素用，
-          //    于是 `input.constructor.prototype` 是 Boolean 的，`.set` undefined）
-          const opened = await until(() => !!d().querySelector('input.agent-rename-input'), 40)
-          const input = opened ? d().querySelector('input.agent-rename-input') : null
+          const input = d().querySelector('.card.agent-card [data-agent-name]')
           if (!input) return null
           /*
            * ⚠️ 用**元素自己那个 realm** 的 setter（`input.constructor.prototype`）：
@@ -4941,8 +5001,6 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           const setter = Object.getOwnPropertyDescriptor(input.constructor.prototype, 'value').set
           setter.call(input, '短名')
           input.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
-          await wait(120)
-          input.dispatchEvent(new f.contentWindow.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
           await wait(200)
           const save = d().querySelector('[data-agent-save]')
           if (save) click(save)

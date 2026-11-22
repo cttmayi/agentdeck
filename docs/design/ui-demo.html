@@ -1710,6 +1710,55 @@ hr {
   min-width: 0;
 }
 
+/**
+ * ★ D248：**「记忆」那一格是共用的一块**（智能体编辑页 + 新建页都画它——新建页置灰）。
+ * 这几条原来在 `AgentDetail.svelte` 的 scoped 样式里，新建页要用就只能是"抄一份"。
+ * 现在收进 app.css：格子外壳、标签行、开关、计数。
+ * ⚠️ 记忆条目的行（`.mem-list` / `.mem-row` / `.mem-add` …）仍然留在组件里——那些是
+ *    编辑页特有的交互，新建页没有。
+ */
+fieldset.memory-cell {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.cell.memory-cell {
+  border-top: 1px solid var(--line);
+  padding-top: var(--sp-3);
+  /* 整行宽：一行一条记忆 + 它下面的出处，半列宽会折成三行 */
+  grid-column: 1 / -1;
+}
+
+.cell.memory-cell .cell-label.mem-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  /* 窄屏时允许折行，但折的是整块控件，不会让勾选框飘进句子中间 */
+  flex-wrap: wrap;
+}
+
+.cell.memory-cell .cell-label.mem-head .spacer {
+  flex: 1;
+}
+
+.mem-count {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+
+.mem-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 .detail-head .head-nav > .head-text {
   display: flex;
   flex-direction: column;

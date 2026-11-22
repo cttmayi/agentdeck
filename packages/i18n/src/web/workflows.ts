@@ -122,11 +122,6 @@ export const workflowsText = {
     zh: '从编排内建智能体复制还没接（二期做）',
     en: 'Copying a workflow agent is not wired yet (later)',
   },
-  'workflows.agentsOpenDir': { zh: '打开目录', en: 'Open folder' },
-  'workflows.agentsOpenDirHint': {
-    zh: '它自己的文件（独有技能在 skills/ 下）——点文件名就能改、保存写回磁盘',
-    en: 'Its own files (own skills live under skills/); open one to edit and save',
-  },
   'workflows.agentsSaved': { zh: '已保存', en: 'Saved' },
   'workflows.agentsDeleted': { zh: '已删除', en: 'Deleted' },
   'workflows.agentsDelete': { zh: '删除', en: 'Delete' },

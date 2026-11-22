@@ -23,7 +23,6 @@
   import AgentDetail from './AgentDetail.svelte'
   import NewAgentForm from './NewAgentForm.svelte'
   import MainArea from './MainArea.svelte'
-  import WorkDirTree from './WorkDirTree.svelte'
 
   export let workflowId: string
   /** `'new'` = 新建；否则是内建智能体的 id。 */
@@ -35,9 +34,6 @@
   let inline: WorkflowInlineAgent | null = null
   let loadError = ''
   let loading = true
-  /** D245：目录浮层（tree + 可编辑的 FileViewer）。只对已有的一条开（新建时没有目录）。 */
-  let dirOpen = false
-  let dirCount = 0
   $: isNew = agentId === 'new'
   $: wf = $workflows.find((w) => w.id === workflowId) ?? null
 
@@ -123,32 +119,13 @@
         onclose={ondone}
         onchanged={() => {}}
       />
-      {#if !isNew}
-      <div class="fold-section" data-wf-agent-dir>
-        <button type="button" class="fold-head" aria-expanded={dirOpen} onclick={() => (dirOpen = !dirOpen)}>
-          <span class="chevron" aria-hidden="true">{dirOpen ? '▾' : '▸'}</span>
-          <span class="fold-title">{$t('workflows.agentsOpenDir')}</span>
-          <span class="fold-summary">{$t('workflows.agentsOpenDirHint')}</span>
-        </button>
-        {#if dirOpen}
-          <div class="fold-body">
-            <WorkDirTree
-              base={`/api/fs/wf-agent:${workflowId}/${agentId}`}
-              reloadKey={`${workflowId}/${agentId}/${dirOpen}`}
-              bind:count={dirCount}
-            />
-          </div>
-        {/if}
-      </div>
-      {/if}
-
+      <!--
+        ★ D248：「目录」一节已经搬进 `AgentDetail` / `NewAgentForm` 自己（同一个
+        `AgentDirSection`，编辑页可用、新建页置灰）——这一页不再自己画，否则新建页
+        与编辑页的结构又会分叉（使用者这次要求的就是两页统一）。
+      -->
     {/if}
   {/snippet}
 </MainArea>
 
-<!--
-  ★ D245：这个内建智能体的**目录**——树 + FileViewer（原文面可编辑、保存走
-  `PUT /api/fs/wf-agent:<wid>/<aid>/file`）。独有技能就是 `skills/<名字>/SKILL.md`，
-  所以这里就是"独有技能写入口"的落点，不再单造一个面板。
--->
 

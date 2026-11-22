@@ -3,6 +3,7 @@
   import { api, type ReviewStandard, type Workflow } from '../lib/api.ts'
   import { showToast } from '../lib/view.ts'
   import PromptField from './PromptField.svelte'
+  import AgentDirSection from './AgentDirSection.svelte'
   import { USER_ENTRY_CHOICES, USER_ENTRY_LABEL_KEYS, hasAnyEntry } from '../lib/members.ts'
   import { t, tx } from '../lib/i18n.ts'
 
@@ -285,7 +286,14 @@
       -->
       <label class="cell">
         {$t('agents.nameLabel')}
-        <input bind:value={name} placeholder={$t('agents.namePlaceholder')} required autocomplete="off" />
+        <!-- ★ D248：`data-agent-name` 与编辑页同一个钩子（探针按它量"名字格在不在"） -->
+        <input
+          bind:value={name}
+          data-agent-name
+          placeholder={$t('agents.namePlaceholder')}
+          required
+          autocomplete="off"
+        />
       </label>
 
       <!--
@@ -360,6 +368,15 @@
             </div>
           {/if}
           <span class="hint">{$t('agents.executorSkillsHint')}</span>
+          <!--
+            ★ D248（使用者："智能体的新建和编辑，我想统一化……原则还是一样，不可用的
+            部分置灰"）：编辑页在技能框里有一段「独有技能」（`.exclusive-cell`，
+            用一条横线隔开）。新建时它还不存在（目录要创建后才生成）——**画出来、置灰**，
+            不删：删了之后两页的技能框高度与结构就不一样。
+          -->
+          <section class="exclusive-cell" data-exclusive-skills data-exclusive-locked>
+            <p class="empty-value hint">{$t('agents.exclusiveSkillsAfterCreate')}</p>
+          </section>
         </div>
       </div>
 
@@ -397,6 +414,25 @@
       </div>
 
       <!--
+        ★ D248：**「记忆」这一格在新建页也画**（置灰不可用）——编辑页有它，两页格子
+        同序：名字 / CLI / 指令 / 技能 / 入口 / 记忆。新建时还没有实体，记忆无处可存，
+        所以整格 `disabled` + 一句"创建后才能开"（先置灰、不删，见使用者那条原则）。
+        共用样式在 `app.css`（`.memory-cell` / `.mem-head` / `.mem-switch`）。
+      -->
+      <fieldset class="cell memory-cell" disabled data-agent-memory>
+        <span class="cell-label mem-head">
+          <span title={$t('agents.memoryHint')}>{$t('agents.memoryLabel')}</span>
+          <span class="mem-count" data-memory-count>{$t('agents.memoryCount', { n: '0' })}</span>
+          <span class="spacer"></span>
+          <label class="mem-switch locked" title={$t('agents.memoryAfterCreate')}>
+            <input type="checkbox" disabled />
+            <span>{$t('agents.memoryEnabled')}</span>
+          </label>
+        </span>
+        <p class="hint">{$t('agents.memoryAfterCreate')}</p>
+      </fieldset>
+
+      <!--
         ⚠️ 2026-11（S4，D127）：那一格「标准已并进指令」原来只在**审核者**形态下出现
         （`{#if role === 'reviewer'}`）。角色退场 ⇒ 新建表单里不再有那一格；老数据的
         `reviewStandard` 仍然在详情页可见、可搬进「指令」。
@@ -404,6 +440,13 @@
     </section>
 
 </form>
+
+<!--
+  ★ D248：**「目录」一节在新建页也画**（置灰：标题在、点不开，一句话说明"创建后才能编辑"）
+  ——与编辑页同一个组件 `AgentDirSection`，所以位置/长相/判据都只有一份。
+  位置照 `ui-style.md` §2.4：整行宽的辅助块放在主内容之后（表单卡片之后）。
+-->
+<AgentDirSection base={null} disabled />
 
 <style>
   .agent-form {

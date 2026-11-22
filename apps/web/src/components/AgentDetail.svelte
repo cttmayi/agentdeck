@@ -25,6 +25,7 @@
   import { showToast } from '../lib/view.ts'
   import { workflows } from '../lib/stores.ts'
   import PromptField from './PromptField.svelte'
+  import AgentDirSection from './AgentDirSection.svelte'
   import ChatMemoryTidy from './ChatMemoryTidy.svelte'
   import {
     USER_ENTRY_CHOICES,
@@ -100,6 +101,17 @@
   // ── 独有技能（2026-11，D111）──
   // 只属于这个智能体的技能文件（agents/<id>/skills/<name>/SKILL.md）。与上面那格
   // 「挂载的技能」（技能库引用）两码事：不进技能库、不进技能页、不可卸载。
+  /**
+   * ★ D248：这一页底部的「目录」一节该打开哪个目录——
+   *   编排内建智能体是 `workflows/<编排>/agents/<名字>/`（接口按 id 找，用 `wf-agent:` scope），
+   *   工作区智能体是 `agents/<名字>/`（`agent:` scope）。**两个 scope 后端都有**（D245 的
+   *   `fs-scope.ts`），所以这一节对两页是同一条路，不再各写一份。
+   */
+  $: dirBase =
+    scope?.kind === 'workflow'
+      ? `/api/fs/wf-agent:${scope.workflowId}/${agent.id}`
+      : `/api/fs/agent:${agent.id}`
+
   let exclusiveSkills: AgentExclusiveSkill[] = []
   let exclusiveLoading = false
   /** 编辑器状态：false = 关；true = 正在编辑已有的一条（name 锁定不可改名）。 */
@@ -298,26 +310,18 @@
   let memPreviewStats: { used: number; chars: number; pinned: number } | null = null
   let memPreviewBusy = false
   /**
-   * ★ 分批第 269 批（使用者："只是先要有类似任务和聊天那页的 Title 顶栏"）：
-   *   名字移到**标题栏**，改名就在那儿就地改（与聊天页的「改名」同一个做法）。
+   * ★ D248（使用者："智能体的新建和编辑，我想统一化，现在主要差异是智能体的名字和打开目录；
+   *   原则还是一样，不可用的部分置灰"）：**名字回到卡片第一格，改名态整个删掉**。
    *
-   * ⚠️ 卡片里那个「名称」输入框删掉了：同一个值有两个输入点，迟早出现"标题写一个、
-   *   卡片里是另一个"，而没人能说清哪个才算数。
+   * 来龙去脉（读代码时的防复发说明）：分批第 269 批把名字搬上标题栏、删掉卡片里的输入框，
+   * 理由是"同一个值有两个输入点，迟早出现标题写一个、卡片里是另一个"。那个理由今天仍然
+   * 成立——但**两个输入点并不是唯一的解法**：现在名字只在卡片里改（一个输入点），
+   * 标题栏只**显示**它（`draft.name`，打字时标题同步跟着变），于是两页（新建 / 编辑）
+   * 的卡片格子完全同序：名字 / CLI / 指令 / 技能 / 入口 / 记忆。
+   *
+   * ⚠️ 别再往标题栏加第二套改名 UI（`renaming` / `renameValue` 已删）：那是把这次的
+   *   统一又拆回去，探针 `agents.noRenameEntry` 钉着"没有改名入口"。
    */
-  let renaming = false
-  /** 改名的草稿（点「改名」时从库里那份起，**不是**从 draft 起——draft 可能已经有别的改动）。 */
-  let renameValue = ''
-
-  function startRename(): void {
-    renameValue = draft.name
-    renaming = true
-  }
-  /** 提交：只落进草稿，**不写库**（与卡片里其它字段一致：点「保存」才生效）。 */
-  function commitRename(): void {
-    const next = renameValue.trim()
-    if (next !== '') draft.name = next
-    renaming = false
-  }
   /** ★ 第 260 批：「合并同类」对话框（读它的全部记忆，同义的并成一条）。 */
   let consolidateOpen = false
   let memPreviewError = ''
@@ -511,7 +515,6 @@
      * 自己的状态，`agent` 换了它不变 ⇒ 标题栏还挂着**上一个人的改名输入框**（里面是
      * 上一个人的名字），底下却是新的人。同类的还有几处，一起按"属于某一个人"清掉：
      *
-     *   · `renaming` / `renameValue`——改名态（报的那个）；
      *   · `consolidateOpen`——「合并同类」对话框里装的是**上一个人的全部记忆**，
      *     留着它再点确认会把那一份合并结果用到新的人身上；
      *   · `editorOpen` / `editingName` / `editingBody`——独有技能的编辑器同理
@@ -521,8 +524,6 @@
      * 判据落在"换人之后标题栏显示的是**新那条**的名字"上（探针 `agents.renameOnSwitch`），
      * 而不是"某个变量是 false"——变量改了但界面没跟上的情况一样要红。
      */
-    renaming = false
-    renameValue = ''
     consolidateOpen = false
     editorOpen = false
     editingName = ''
@@ -1137,23 +1138,11 @@
         >{$t('workflows.agentsBack')}</button>
       {/if}
       <div class="head-text">
-    {#if renaming}
-      <input
-        class="agent-rename-input"
-        bind:value={renameValue}
-        aria-label={$t('agents.nameLabel')}
-        autocomplete="off"
-        onkeydown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            commitRename()
-          } else if (e.key === 'Escape') {
-            renaming = false
-          }
-        }}
-        onblur={commitRename}
-      />
-    {:else}
+      <!--
+        ★ D248：标题只**显示**名字（`draft.name`，卡片里改，打字时这里跟着变）。
+        原来这里还有一个「改名」入口 + 就地输入框（分批第 269 批的形态）——两页统一之后
+        名字只有卡片里一个输入点，标题栏不再需要第二套编辑态。
+      -->
       <h2>
         <span class="agent-head-name ellipsis" data-agent-head-name>{draft.name}</span>
         <!--
@@ -1182,16 +1171,7 @@
               : $t('agents.builtinBadge')}</span
           >
         {/if}
-        {#if draft.name !== agent.name}
-          <span class="faint fs-xs" data-agent-rename-pending>{$t('agents.renamePending')}</span>
-        {/if}
-        {#if !readOnly}
-          <button type="button" class="btn btn--link" data-agent-rename onclick={startRename}
-            >{$t('agents.rename')}</button
-          >
-        {/if}
       </h2>
-    {/if}
     <p
       class="detail-sub"
       data-agent-head-sub
@@ -1290,6 +1270,25 @@
   {/if}
 
   <section class="card agent-card pair-field">
+    <!--
+      ★ D248（使用者："智能体的新建和编辑，我想统一化，现在主要差异是智能体的名字和打开目录"）：
+      **名字回到卡片第一格**，与新建页（`NewAgentForm`）同一位置、同一样子。
+      两个页面从此格子同序：名字 / CLI / 指令 / 技能 / 入口 / 记忆。
+      ⚠️ 标题栏那颗「改名」已删（D248）——名字只有一个输入点，就是这里。
+      只读智能体（平台内置）同样**置灰保留**这一格（不可用时置灰，不删格子）。
+    -->
+    <label class="cell name-cell" class:locked={readOnly}>
+      {$t('agents.nameLabel')}
+      <input
+        bind:value={draft.name}
+        aria-label={$t('agents.nameLabel')}
+        data-agent-name
+        autocomplete="off"
+        disabled={readOnly}
+        required
+        title={readOnly ? $t('agents.builtinReadOnly') : ''}
+      />
+    </label>
     <!-- ★ 第 269 批：内置徽标移到**标题栏**（名字旁边），卡片里不再画一遍 -->
     <!--
       ★ 2026-11（D153）：**「类型 / 岗位」那一格整格删掉了**。
@@ -1803,6 +1802,15 @@
 </form>
 
 <!--
+  ★ D248：**「目录」一节**（默认收起，与新建页同一个组件）。位置照 `ui-style.md` §2.4：
+  整行宽的辅助块只在主内容**之后**——正文第一块永远是这一页要你回答的东西。
+  独有技能就是 `<智能体目录>/skills/<名字>/SKILL.md`，所以这里也是"独有技能写入口"的落点。
+-->
+{#if dirBase}
+  <AgentDirSection base={dirBase} />
+{/if}
+
+<!--
   ★ 分批第 240 批：「预览第一句话」抽屉（**只读**）。
   ★ 为什么只读：它要回答的是"它这一轮到底会收到什么"——能在这里改就会变成第二个
     编辑入口，而"改"的地方只有「记忆」那一节（与「指令」一起保存）。
@@ -2050,20 +2058,6 @@
   /* D191：截断三条收进全局 `.ellipsis`（markup 已带） */
     min-width: 0;
   }
-  .agent-rename-input {
-    /* 它在 `.detail-head-main` 里（不再是网格的直接子项），`grid-column` 不再适用 */
-    display: block;
-    font: inherit;
-    font-size: var(--fs-lg);
-    font-weight: 600;
-    padding: var(--sp-1) var(--sp-2);
-    background: var(--bg);
-    color: var(--text);
-    border: 1px solid var(--line-strong);
-    border-radius: var(--radius-sm);
-    max-width: 24rem;
-  }
-
   /* ── 卡片 + 网格（2026-10：对齐组里「新建私有」的 `.grid-form`）── */
 
 
@@ -2124,9 +2118,13 @@
    * ⚠️ 2026-11（D123）：`.cell.actions-cell` 与它的两条样式（「行动权限占整行」、
    *    展开/收起分段轨）随动作能力退场删掉了。
    */
-  .cell.runtime-cell {
-    grid-column: 1 / -1;
-  }
+  /**
+   * ★ D248：**CLI 那一格回到「名字」右边**（半列），与新建页同一排法。
+   *   原来它是整行宽（D241 加这一格时的临时处置：那一格里有锁定标记与下拉，怕挤）。
+   *   但两页要"统一化"——新建页是「名字 | CLI」一行，这里若是「名字」「CLI」两行，
+   *   同一张卡片的两页就是两种排法。实测半列放得下（下拉 317px，选项最长
+   *   「跟随全局默认」），锁定标记仍贴在格子右上角（`.field-lock` 是绝对定位）。
+   */
 
 
   /* ── 值的呈现 ── */
@@ -2257,18 +2255,6 @@
   /* ══════════ 记忆（分批第 240 批）══════════ */
   /* ★ D241：记忆那一格改成 `<fieldset>`（用原生的 `disabled` 一次禁掉里面所有控件，
      而不是逐个改）——fieldset 自带边框与内距，这里清掉，让它和 `.cell` 的其它格子一样。 */
-  fieldset.memory-cell {
-    border: 0;
-    padding: 0;
-    margin: 0;
-    min-width: 0;
-  }
-  .memory-cell {
-    border-top: 1px solid var(--line);
-    padding-top: var(--sp-3);
-    /* 整行宽：一行一条记忆 + 它下面的出处，半列宽会折成三行（见上面那段说明） */
-    grid-column: 1 / -1;
-  }
 
   /* ══════════ 独有技能（2026-11，D111）══════════
      2026-11（使用者："独有技能被放在了挂载的技能的外面，不好，还是放里面比较
@@ -2332,35 +2318,11 @@
    * 在这里是对的——标题行里**只有单行短内容**（说明挪进了 title）。
    * 判据永远问同一句：**行里有没有会换行的子元素**？没有 ⇒ 居中安全；有 ⇒ 用栅格 + 顶部对齐。
    */
-  .memory-cell .cell-label.mem-head {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    /* 窄屏时允许折行，但折的是整块控件，不会让勾选框飘进句子中间 */
-    flex-wrap: wrap;
-  }
-  .memory-cell .cell-label.mem-head .spacer {
-    flex: 1;
-  }
-  .mem-count {
-    color: var(--text-faint);
-    font-size: var(--fs-xs);
-  }
   /**
    * ★ 分批第 257 批：`<label class="mem-switch">` 原来**没有样式**，于是继承了全局的
    *   `label { display: block; margin-bottom: var(--sp-3) }`——勾选框自成一块、上下各顶
    *   一行，看着像"布局坏了"。这里把它收成行内的小开关。
    */
-  .mem-switch {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    margin: 0;
-    font-size: var(--fs-xs);
-    color: var(--text-dim);
-    cursor: pointer;
-    white-space: nowrap;
-  }
   .mem-switch input {
     margin: 0;
   }
