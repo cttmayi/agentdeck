@@ -70,6 +70,7 @@
     type FileKind,
   } from '../lib/file-view.ts'
   import type { WorkDirFile } from '../lib/api.ts'
+  import { askConfirm } from '../lib/confirm.ts'
 
   /** 接口前缀：`/api/runs/<id>` 或 `/api/conversations/<id>`。 */
   export let base: string
@@ -78,6 +79,15 @@
   export let onclose: () => void = () => {}
 
   let loading = false
+  /**
+   * ★ D245：**只有 `/api/fs/<scope>` 这类 base 才可写**（`/api/runs/:id` 那一类没有 PUT）。
+   * 原文面本身就是可编辑文本框——没有"编辑态"，渲染面照旧只读。
+   */
+  $: canEdit = base.startsWith('/api/fs/')
+  let edited = ''
+  let saving = false
+  let saveError = ''
+  $: dirty = canEdit && edited !== text
   let error = ''
   /** 原始字节——二进制那一面要用它（十六进制）。 */
   let raw = new Uint8Array()
@@ -327,6 +337,45 @@
       ? renderMarkdown(stripFrontmatter(text), { resolveAsset, html: $markdownHtmlMode })
       : ''
 
+  /**
+   * 关窗守卫（D245）：原文面有未保存改动时先问一句——别让人一按 Esc 丢掉刚写的字。
+   * 弹的是平台自己的居中确认框（`askConfirm`），不是 `window.confirm`。
+   */
+  async function requestClose(): Promise<void> {
+    if (dirty && !(await askConfirm({
+      title: $t('common.save'),
+      message: $t('files.unsavedConfirm'),
+      confirmLabel: $t('files.discardChanges'),
+      danger: true,
+    }))) {
+      return
+    }
+    onclose()
+  }
+
+  /** 保存原文面的改动（D245）。失败的原话留在浮层里，字不动、不关窗。 */
+  async function saveText(): Promise<void> {
+    if (entry === null || !dirty) return
+    saving = true
+    saveError = ''
+    try {
+      const res = await fetch(`${base}/file`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path: entry.path, text: edited }),
+      })
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string }
+        throw new Error(body.error ?? `HTTP ${res.status}`)
+      }
+      text = edited
+    } catch (err) {
+      saveError = err instanceof Error ? err.message : String(err)
+    } finally {
+      saving = false
+    }
+  }
+
   async function copyRaw(): Promise<void> {
     try {
       await navigator.clipboard.writeText(text)
@@ -346,7 +395,7 @@
   open={entry !== null}
   size="wide"
   ariaLabel={entry?.name ?? ''}
-  {onclose}
+  onclose={() => void requestClose()}
   title={parts.name}
   closeLabel={$t('common.close')}
 >
@@ -386,6 +435,15 @@
         ⚠️ 「复制原文」只在**真有原文**时才画（`raw` 非空）。音视频那一档一个字节都
            没下载（见文件顶上那一段）⇒ 画出来点一下只会复制到一个空串，那比不画更坏。
       -->
+      {#if canEdit && face === 'raw' && !rawFaceIsHex(kind, entry.path)}
+        <button
+          type="button"
+          class="btn btn--primary"
+          data-fv-save
+          disabled={!dirty || saving}
+          onclick={() => void saveText()}
+        >{saving ? $t('common.saving') : $t('common.save')}</button>
+      {/if}
       {#if raw.length > 0}
         <button type="button" class="btn btn--ghost" onclick={() => void copyRaw()} data-copy-raw>
           {copied === '' ? $t('files.copyRaw') : copied}
@@ -420,7 +478,20 @@
         原文：解出来的文本原样显示。不加行号、不着色、不重排——这一面存在的
         全部意义就是"没有任何平台加工"。
       -->
-      <pre class="fv-pre" data-raw-text>{text}</pre>
+      {#if canEdit}
+        <!-- ★ D245：原文面**直接可编辑**（没有"编辑态"），保存走 `PUT ${base}/file` -->
+        <textarea
+          class="fv-pre fv-edit"
+          data-raw-editor
+          bind:value={edited}
+          spellcheck="false"
+        ></textarea>
+        {#if saveError}
+          <div class="notice bad" data-fv-save-error>{saveError}</div>
+        {/if}
+      {:else}
+        <pre class="fv-pre" data-raw-text>{text}</pre>
+      {/if}
     {:else if kind === 'markdown'}
       <article class="fv-md markdown">{@html renderedMarkdown}</article>
     {:else if kind === 'html' || kind === 'pdf'}
@@ -588,6 +659,19 @@
 
   .fv-toggle button.active {
     background: var(--bg);
+    color: var(--text);
+  }
+
+  /* ★ D245：原文面的可编辑版——与只读 `.fv-pre` 同一套度量（等宽/行高/内距），
+     只是换成 textarea（不写 height，让它跟着浮层走） */
+  .fv-edit {
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    min-height: 12rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel);
     color: var(--text);
   }
 

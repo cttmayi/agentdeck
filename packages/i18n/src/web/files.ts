@@ -7,6 +7,11 @@
  *    得去 `tasks.ts` 里找，正是这份结构想避免的事。
  */
 export const filesText = {
+  'files.unsavedConfirm': {
+    zh: '这里有还没保存的改动，关掉就丢了。',
+    en: 'There are unsaved changes; closing will discard them.',
+  },
+  'files.discardChanges': { zh: '丢弃并关闭', en: 'Discard & close' },
   'files.heading': { zh: '工作目录的文件', en: 'Files in the work directory' },
   /**
    * ★ 分批第 206 批：「工作目录的文件」标题行那颗「刷新」——聊天页与沉淀页**同一颗**
