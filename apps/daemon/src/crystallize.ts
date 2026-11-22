@@ -424,7 +424,7 @@ export function buildDraftPrompt(opts: {
   const { materialDir, outputDir, skillNames, revised = false, continuing = false } = opts
   // 空 = 调用方漏了注入（门禁应当先拦下来）；那时不写括号，只说"你挂着的技能"。
   const listedNames = skillNames.map((s) => `\`${s}\``).join('、')
-  return `素材在 \`${materialDir}/\`（先读 \`${materialDir}/00-README.md\`），产出写到 \`${outputDir}/\` 下——\`SKILL.md\` 是主产出，**写法与产物格式照你挂着的技能${listedNames === '' ? '' : `（${listedNames}）`}**，只把它自己那份 \`./skills/…\` 换成这里的 \`${outputDir}/\`。
+  return `素材在 \`${materialDir}/\`（先读 \`${materialDir}/00-README.md\`），产出写到 \`${outputDir}/<技能名>/\` 下（目录名 = 技能名，和 \`skills/<名字>/\` 一个形状）——\`SKILL.md\` 是主产出，**写法与产物格式照你挂着的技能${listedNames === '' ? '' : `（${listedNames}）`}**，只把它自己那份 \`./skills/…\` 换成这里的 \`${outputDir}/<技能名>/\`。
 
 交不出东西就用说的：要问就问、不值得做就直说——别自己编答案，也别硬凑一条 skill。
 ${

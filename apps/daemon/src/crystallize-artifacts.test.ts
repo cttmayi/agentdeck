@@ -12,6 +12,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   assembleArtifacts,
+  filesAtSkillRoot,
   findSkillMd,
   hashDraftFiles,
   isSafeDraftRelPath,
@@ -203,6 +204,51 @@ describe('validateArtifactFiles', () => {
       '../evil.md': 'x',
     })
     assert.ok(traversal.problems.some((p) => p.file === '../evil.md' && /路径不合法/.test(p.message)))
+  })
+})
+
+/**
+ * ★ 2026-11（D258）：**入库那一刻把树重挂到技能根**。
+ *
+ * 磁盘形状（`skill/<技能名>/{SKILL.md, references/…}`）就是入库之后的形状
+ * （`skills/<技能名>/{SKILL.md, references/…}`），而装出来的技能根是 SKILL.md 所在那层。
+ *
+ * 为什么值得单钉一条：D257 之前这里是把整棵树原样塞进支持文件——子目录落点的技能装出来
+ * 会变成 `skills/x/x/references/…`（多套一层同名目录），而正文里写的是
+ * `见 references/…` ⇒ 一装出来引用就全断。真机上没人量过它。
+ */
+describe('filesAtSkillRoot：入库时重挂到技能根', () => {
+  test('★★ 子目录落点 ⇒ 支持文件去前缀、SKILL.md 不进支持文件、目录外的文件不带上', () => {
+    const files = {
+      'colleague-flow/SKILL.md': GOOD_SKILL_MD,
+      'colleague-flow/references/format.md': '# 格式\n',
+      'colleague-flow/templates/a.md': '# 模版\n',
+      'notes.md': '它顺手写的笔记（不是这个技能的一部分）',
+    }
+    const spot = findSkillMd(files)
+    assert.equal(spot.path, 'colleague-flow/SKILL.md')
+    // 返回完整的一棵树（含 SKILL.md——机械定检要读它本尊）
+    assert.deepEqual(filesAtSkillRoot(files, spot), {
+      'SKILL.md': GOOD_SKILL_MD,
+      'references/format.md': '# 格式\n',
+      'templates/a.md': '# 模版\n',
+    })
+  })
+
+  test('根上的 SKILL.md ⇒ 原样（不重挂，也不丢同级文件）', () => {
+    const files = {
+      'SKILL.md': GOOD_SKILL_MD,
+      'references/format.md': '# 格式\n',
+    }
+    assert.deepEqual(filesAtSkillRoot(files, findSkillMd(files)), {
+      'SKILL.md': GOOD_SKILL_MD,
+      'references/format.md': '# 格式\n',
+    })
+  })
+
+  test('没认出 SKILL.md ⇒ 空（不猜，什么都不装）', () => {
+    const files = { 'nope/a.md': '# x\n' }
+    assert.deepEqual(filesAtSkillRoot(files, findSkillMd(files)), {})
   })
 })
 

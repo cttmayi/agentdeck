@@ -686,7 +686,9 @@ describe('buildDraftPrompt：起草指令（210/211/218 批：只说索引页没
       skillNames: DRAFTER_SKILLS,
     })
     assert.match(prompt, /material\/00-README\.md/, '先读索引')
-    assert.match(prompt, /产出写到 `skill\/`/, '产出写到哪')
+    // ★ 2026-11（D258）：落点是**存储形状**（`skill/<技能名>/` = 将来 `skills/<技能名>/`）
+    assert.match(prompt, /产出写到 `skill\/<技能名>\/`/, '产出写到哪（存储形状）')
+    assert.match(prompt, /`skills\/<名字>\/` 一个形状/, '说清它和入库后的形状是同一个')
     // ★ 分批第 220 批（使用者："SKILL.md 是它生成的，应该不需要细节描述才对"）：
     //   **frontmatter 的字段要求从 prompt 里删了**——真机核过：distilly 的写入器产出的
     //   `SKILL.md` 自带 name/description，直接通过我们的体检。prompt 只留"主产出叫什么"。

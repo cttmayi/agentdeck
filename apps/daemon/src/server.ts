@@ -212,6 +212,7 @@ import {
 import {
   assembleArtifacts,
   draftVersionSkillDir,
+  filesAtSkillRoot,
   findSkillMd,
   parseSkillMd,
   readDraftVersions,
@@ -7178,6 +7179,22 @@ async function injectedSkillsOf(
         return
       }
 
+      /**
+       * ★ 2026-11（D258）：**入库这一刻把产出树重挂到技能根**。
+       *
+       * 磁盘上的形状是 `skill/<技能名>/{SKILL.md, references/…}`（= 入库之后的
+       * `skills/<技能名>/…`），而装出来的技能根就是 **SKILL.md 所在那一层**。
+       * 少这一步，子目录落点的技能会把支持文件再套一层同名目录
+       * （`skills/x/x/references/…`），正文里的 `见 references/…` 全断。
+       *
+       * 只改**提交上去的映射**：磁盘、编辑器、保存、版本快照仍按原样路径走
+       * （`filesAtSkillRoot` 那段说明）。
+       */
+      const filesAtRoot = filesAtSkillRoot(normalizedFiles, spot)
+      // 支持文件 = 那棵树去掉正文（正文单独传给 `resolvePayloadEntry`，再放一份就是重复）。
+      const supportFiles = Object.fromEntries(
+        Object.entries(filesAtRoot).filter(([rel]) => rel !== 'SKILL.md'),
+      )
       // 校验（与安装同一关：`resolvePayloadEntry` 做规范化与限额检查）。
       let validated
       try {
@@ -7185,9 +7202,7 @@ async function injectedSkillsOf(
           name,
           body: skillMdRaw,
           // 正文那一份不进支持文件：装出来的技能里再放一份 SKILL.md 就是重复。
-          files: Object.fromEntries(
-            Object.entries(normalizedFiles).filter(([rel]) => rel !== spot.path),
-          ),
+          files: supportFiles,
           sourceRef: `mine:${name}`,
         })
       } catch (err) {
@@ -7218,26 +7233,14 @@ async function injectedSkillsOf(
       /**
        * ⚠️ 查的必须是**这个技能自己的目录**，不是"提交上来的那棵树"。
        *
-       * 起草者可能把 SKILL.md 写在子目录里（`skill/<dir>/SKILL.md`，第 217 批：认位
-       * 置、不搬家），而入库把支持文件按**原样相对路径**保留。于是：
+       * 起草者把 SKILL.md 写在技能目录里（`skill/<技能名>/SKILL.md`，D258 起这是规范落点；
+       * 第 217 批起也认它自己的写入器落点）。于是：
        *   · 直接把整棵树交给定检 ⇒ 根上没有 `SKILL.md` ⇒ `skeleton` 判 fail
        *     ⇒ 一份**完全正常**的技能被拦下来（`crystallize-e2e` 那条"子目录里的
        *     SKILL.md"当场就红了）；
-       *   · 所以先按 `spot.path` 的父目录把文件**重挂到技能根**，再查——这与"装出来
-       *     之后它长什么样"是同一个形状。
+       *   · 所以一律交给重挂到技能根的那份（与入库装出来的形状同一份，`filesAtSkillRoot`）。
        */
-      const skillRootPrefix = spot.path.includes('/')
-        ? `${spot.path.slice(0, spot.path.lastIndexOf('/'))}/`
-        : ''
-      const filesForCheck =
-        skillRootPrefix === ''
-          ? normalizedFiles
-          : Object.fromEntries(
-              Object.entries(normalizedFiles)
-                .filter(([rel]) => rel.startsWith(skillRootPrefix))
-                .map(([rel, text]) => [rel.slice(skillRootPrefix.length), text]),
-            )
-      const execCheck = await runSkillExecCheckOnFiles(filesForCheck, {
+      const execCheck = await runSkillExecCheckOnFiles(filesAtRoot, {
         scratchDir: join(options.dataDir, 'tmp'),
       })
       const blocking = execCheckFailures(execCheck)

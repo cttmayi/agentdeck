@@ -395,6 +395,10 @@ export async function readDraftSkillDir(dir: string): Promise<Record<string, str
  *    人在编辑器里保存时写回的就是同一份文件，不会凭空多出一份根上的 `SKILL.md`。
  *
  * 只认**一层**：再深（`a/b/SKILL.md`）不猜（那是它自己的私有结构）。多份也不猜。
+ *
+ * ★ 2026-11（D258）：那一层子目录**现在就是规范的落点**（`skill/<技能名>/`）——它就是
+ *    将来 `skills/<技能名>/` 的形状。所以"认一层"不再是"兼容它自己的怪落点"，而是认
+ *    存储形状本身；根上的 `SKILL.md`（老草稿、简写）照样认。
  */
 export interface SkillMdSpot {
   /** 认出来的 SKILL.md 相对路径（`SKILL.md` 或 `<dir>/SKILL.md`）；`''` = 没认出来。 */
@@ -415,6 +419,52 @@ export function findSkillMd(files: Record<string, string>): SkillMdSpot {
   nested.sort()
   if (nested.length === 1) return { path: nested[0]!, others: [] }
   return { path: '', others: nested }
+}
+
+/**
+ * 把一份产出树**重挂到技能根**（2026-11，D258）。
+ *
+ * 磁盘上的形状（`skill/<技能名>/{SKILL.md, references/…}`）就是入库之后的形状
+ * （`skills/<技能名>/{SKILL.md, references/…}`）：SKILL.md 在技能目录的根上，
+ * 支持文件在它旁边。入库装出来的技能根 = **SKILL.md 所在那一层**。
+ *
+ * 于是入库时要把路径映射过去：
+ *   · `colleague-flow/SKILL.md`    → `SKILL.md`（正文；支持文件那份映射里要剔掉它）
+ *   · `colleague-flow/references/x.md` → `references/x.md`
+ *   · `colleague-flow/SKILL.md` 目录**之外**的文件（它顺手写的笔记、`REFUSED.md`）→ 不带
+ *
+ * ⚠️ **返回的是完整的一棵树（含 `SKILL.md`）**，不是"支持文件清单"：机械定检要看
+ *    `SKILL.md` 本尊（`skeleton` 项读不到它就判 fail）。要支持文件的地方自己剔
+ *    `SKILL.md`（`resolvePayloadEntry` 的正文是单独传的）。
+ *
+ * 少这一步的毛病（D258 之前一直在，只是没人量过）：子目录落点的技能装出来会把支持文件
+ * 再套一层同名目录（`skills/colleague-flow/colleague-flow/references/x.md`），而正文
+ * 在技能根上 ⇒ 正文里写的 `见 references/x.md` 一装就断。
+ *
+ * ⚠️ 只改**提交上去的那份映射**，磁盘一个字不动：审阅、编辑、保存、版本快照读写的
+ *    仍然是它真正写在磁盘上的路径（"编辑它产生的那个文件"这条不变）。
+ */
+export function filesAtSkillRoot(
+  files: Record<string, string>,
+  spot: SkillMdSpot,
+): Record<string, string> {
+  if (spot.path === '') return {}
+  const cut = spot.path.lastIndexOf('/')
+  const prefix = cut === -1 ? '' : spot.path.slice(0, cut + 1)
+  const out: Record<string, string> = {}
+  for (const [rel, text] of Object.entries(files)) {
+    if (rel === spot.path) {
+      out['SKILL.md'] = text
+      continue
+    }
+    if (prefix === '') {
+      out[rel] = text
+      continue
+    }
+    if (!rel.startsWith(prefix)) continue
+    out[rel.slice(prefix.length)] = text
+  }
+  return out
 }
 
 /**

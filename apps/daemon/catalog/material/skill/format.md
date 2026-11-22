@@ -9,6 +9,8 @@
   templates/…         可选：模版/骨架文件
 ```
 
+起草 run 里的落点就是这块形状：`skill/<技能名>/`——写它等于写完了入库后的形状。
+
 ## `SKILL.md` 的 frontmatter
 
 ```markdown

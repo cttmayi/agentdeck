@@ -1139,6 +1139,23 @@ describe('四轮：素材落盘 + 产出读目录', () => {
       null,
       '装出来的技能里不该再多一份 SKILL.md（正文那一份不进支持文件）',
     )
+    /**
+     * ★ 2026-11（D258）：支持文件**去前缀挂到技能根**——装出来的形状必须与磁盘上
+     * 那份存储形状同一个（`skills/<名字>/{SKILL.md, work.md}`）。原样保留 `colleague-flow/`
+     * 前缀的话，正文里写的 `见 work.md` 一装出来就断了。
+     */
+    assert.equal(
+      await readFile(join(mineRoot, 'colleague-flow', 'work.md'), 'utf8'),
+      '# Work\n',
+      '★★ 支持文件在技能根上（与入库后的存储形状一致）',
+    )
+    assert.equal(
+      await readFile(join(mineRoot, 'colleague-flow', 'colleague-flow', 'work.md'), 'utf8').catch(
+        () => null,
+      ),
+      null,
+      '不再多套一层同名目录（D257 之前的形状）',
+    )
   })
 
   test('★ 没交 SKILL.md ⇒ artifacts 是 none；它写过的东西仍然带着', async () => {
