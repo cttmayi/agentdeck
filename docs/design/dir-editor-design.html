@@ -51,45 +51,56 @@
         </tbody>
       </table></div>
 
-      <h2>2. 形态：沿用已有的「浮层」，不是固定栏</h2>
+      <h2>2. 形态：就是今天那个 FileViewer，一条属性都不删</h2>
       <p class="lead">
-        ⚠️ 更正一版草稿：我先前画成"左树 + 右固定的编辑栏"，那是**新造一种形态**。
-        实际已有的做法是——点文件 ⇒ <code>FileViewer</code> **弹出来**（它内部就是
-        <code>Modal size="wide"</code>）。所以这里不改形态，只扩内容：
-        <b>目录树照旧在页面上（或一个浮层里），点一个文件 ⇒ 还是那个 FileViewer 浮层</b>，
-        只是它多一个「编辑 / 保存」态。
+        ⚠️ 两处更正（都是我看漏了现有实现）：
+        ① 文件是**弹出**的（<code>FileViewer</code> 内部就是 <code>Modal size="wide"</code>），
+        不是固定的两栏；② 它今天就有**两面切换**——<b>渲染</b> / <b>原文</b>
+        （<code>.fv-toggle</code> 里那两颗 <code>data-face-rendered</code> /
+        <code>data-face-raw</code>），另外还有「复制原文」。
       </p>
-      <div class="mock-frame" style="height:16rem;position:relative">
+      <p class="lead">
+        所以编辑**只挂在「原文」那一面**：<code>face === 'raw'</code> 时才出现「编辑」；
+        渲染面（Markdown / 高亮 / HTML 预览 / 图片）永远只读——它本来就不是给你改的地方，
+        而且 HTML 预览走 <code>sandbox allow-scripts</code>，编辑态更不能和它混在一个面上。
+        二进制与音视频没有「原文」面（<code>hasFace</code> 就是这么判的）⇒ 它们天然没有编辑。
+      </p>
+      <div class="mock-frame" style="height:17rem;position:relative">
         <section class="pane detail-pane" style="height:100%">
-          <div class="pane-body" style="opacity:.35">
-            <div class="field"><label>目录（浮层背后的那一页）</label><input value="workflows/…/agents/审稿员/" readonly /></div>
-            <ul class="list-stack">
-              <li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">skills/</span></button></li>
-              <li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">instructions.md</span></button></li>
-            </ul>
+          <div class="pane-body" style="opacity:.3">
+            <div class="field"><label>目录</label><input value="workflows/…/agents/审稿员/" readonly /></div>
+            <ul class="list-stack"><li class="list-row"><button class="list-row-main" type="button"><span class="mono fs-sm">skills/</span></button></li></ul>
           </div>
         </section>
-        <!-- 浮层：与 FileViewer 同一个 Modal（wide）+ 同一根工具条 -->
         <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
-          <div style="width:78%;background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--radius);box-shadow:var(--shadow-2)">
+          <div style="width:80%;background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--radius);box-shadow:var(--shadow-2)">
+            <!-- 与真 FileViewer 的 .fv-bar 同一排：路径 · 大小 · 两面切换 · 复制原文 · 编辑 · 关闭 -->
             <div style="display:flex;align-items:center;gap:var(--sp-2);padding:var(--pad-frame-head);border-bottom:1px solid var(--line)">
               <span class="mono faint fs-xs">skills/weekly-shape/SKILL.md</span>
-              <span class="badge">可写</span>
+              <span class="faint fs-xs">1.2 KB</span>
+              <span class="fv-toggle" role="group" style="display:inline-flex;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden">
+                <button type="button" style="padding:0 var(--sp-2);height:24px;background:none;border:0;color:var(--text-faint)">渲染</button>
+                <button type="button" class="active" style="padding:0 var(--sp-2);height:24px;background:var(--surface-2);border:0;color:var(--accent)">原文</button>
+              </span>
               <span style="flex:1"></span>
+              <button type="button" class="btn btn--ghost btn--sm">复制原文</button>
               <button type="button" class="btn btn--secondary btn--sm">编辑</button>
               <button type="button" class="btn btn--ghost btn--sm">关闭</button>
             </div>
-            <pre class="code-mock" style="margin:0;border:0;border-radius:0;max-height:9rem">---
+            <pre class="code-mock" style="margin:0;border:0;border-radius:0;max-height:8rem">---
 name: weekly-shape
 description: 周报的三段结构：结论 / 证据 / 下一步
 ---
 
 ## Procedure
-1. 先写结论一行。
-2. 每条结论下面挂一条证据。</pre>
+1. 先写结论一行。</pre>
           </div>
         </div>
       </div>
+      <p class="lead">
+        <b>渲染面</b>：今天什么样还是什么样（只多一颗置灰的「编辑」，或干脆不画）。
+        <b>原文面</b>：多「编辑」⇒ 变「还原 / 保存」；保存失败的原话留在浮层里。
+      </p>
 
       <h2>3. 屏 ①：同一根工具条上多两样东西（编辑态 / 保存失败）</h2>
       <div class="mock-frame" style="height:20rem">
