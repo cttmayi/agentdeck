@@ -158,6 +158,22 @@ import ListRow from '../components/ListRow.svelte'
   let mode: 'list' | 'board' = localStorage.getItem(VIEW_KEY) === 'board' ? 'board' : 'list'
 
   /**
+   * ★ D243：新建任务的**主操作搬到栏头**之后，那颗按钮读这里的 state。
+   *   状态在 `NewTaskForm` 里派生（能不能提交 / 按钮写什么），通过 `onState` 回调上来。
+   */
+  let createState: { canSubmit: boolean; busy: boolean; label: string; title: string | undefined } = {
+    canSubmit: false,
+    busy: false,
+    label: '',
+    title: undefined,
+  }
+
+  /** 栏头那颗「取消」：与别处同一个守卫（有草稿先问一句）。 */
+  async function closeCreate(): Promise<void> {
+    if (await leaveCreate()) selectedIssueId.set(null)
+  }
+
+  /**
    * ══════════════════════════════════════════════════════════════════
    * 右栏的两种占用：某条任务的详情 / 建任务那张表单（D58 第二步）
    * ══════════════════════════════════════════════════════════════════
@@ -1004,7 +1020,28 @@ import ListRow from '../components/ListRow.svelte'
         {/if}
       {/snippet}
       {#snippet actions()}
-        {#if selected && !$creating}
+        {#if $creating}
+          <!--
+            ★ D243（使用者："新建视图没有例外，都要是主操作在栏头"）：这一页原来主操作
+            **吸底**（`.form-foot`），是四类新建视图里唯一的例外。现在与新建智能体 /
+            新建编排 / 创建对话同一档：栏头右侧一颗 primary + 一颗 ghost。
+            `form="newtask-form"` 把它关联到体内的表单（HTML 原生做法，按钮在 form 外也能提交）。
+          -->
+          <button
+            type="submit"
+            form="newtask-form"
+            class="btn btn--primary"
+            data-task-submit
+            disabled={!createState.canSubmit}
+            title={createState.title ?? ''}
+          >{createState.label}</button>
+          <button
+            type="button"
+            class="btn btn--ghost"
+            data-task-cancel
+            onclick={() => void closeCreate()}
+          >{$t('common.cancel')}</button>
+        {:else if selected}
           <!--
             D80：任务「沉淀技能&智能体」按钮（§4.3）——按钮可用 ⟺ 任务 run 终态
             且（有用户反馈 或 审核过）。置灰时 title 说明"为什么灰"。
@@ -1038,7 +1075,7 @@ import ListRow from '../components/ListRow.svelte'
       {/snippet}
       {#snippet body()}
         {#if $creating}
-          <NewTaskForm />
+          <NewTaskForm onState={(s2) => (createState = s2)} />
         {:else if wfRunForSelected}
           <!-- ★ 编排任务（2026-11 再改）：主区直接显示运行画面（步骤链 + 日志 +
                工作目录树）——与「编排任务」视图的右栏同一形态（embedded 隐藏

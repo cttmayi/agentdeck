@@ -3,7 +3,6 @@
   import { api, type ReviewStandard, type Workflow } from '../lib/api.ts'
   import { showToast } from '../lib/view.ts'
   import PromptField from './PromptField.svelte'
-  import SettingsPanel from './SettingsPanel.svelte'
   import { USER_ENTRY_CHOICES, USER_ENTRY_LABEL_KEYS, hasAnyEntry } from '../lib/members.ts'
   import { t, tx } from '../lib/i18n.ts'
 
@@ -218,13 +217,34 @@
   底栏在 form 元素外面也能提交）。
   ══════════════════════════════════════════════════════════════════
 -->
-<SettingsPanel
-  title={$t('agents.newTitle')}
-  subtitle={isWf && scope.kind === 'workflow' ? $t('workflows.agentsOfWorkflow', { name: scope.workflowName ?? '' }) : ''}
-  onback={onclose}
-  ariaLabel={$t('agents.newTitle')}
->
-  {#snippet body()}
+<!--
+  ★★ D243（使用者："新建智能体被放在『设置面板』，应该是『新建视图』，且『新建视图』
+  没有例外，都要是主操作在栏头"）：这一页原来套 `SettingsPanel`（`.main-panel` + 底栏
+  主操作，D214 定的），现在改成 **④ 新建视图** 的骨架——与 `AgentDetail` 同一个栏头
+  （`.detail-head`：标题 / 副题 / 动作），主操作（创建）在**栏头右侧**，与新建任务 /
+  新建编排 / 创建对话同一档。`form="new-agent-form"` 把它关联到体内那个 `<form>`。
+-->
+<header class="detail-head agent-head">
+  <div class="detail-head-main">
+    <h2>{$t('agents.newTitle')}</h2>
+    {#if isWf && scope.kind === 'workflow'}
+      <p class="detail-sub">
+        <span class="faint">{$t('workflows.agentsOfWorkflow', { name: scope.workflowName ?? '' })}</span>
+      </p>
+    {/if}
+  </div>
+  <div class="detail-actions">
+    <button
+      type="submit"
+      form="new-agent-form"
+      class="btn btn--primary"
+      data-agent-create
+      disabled={busy || !name.trim() || (!isWf && !hasAnyEntry(selectedEntries))}
+    >{busy ? $t('common.creating') : $t('common.create')}</button>
+    <button type="button" class="btn btn--ghost" onclick={onclose}>{$t('common.cancel')}</button>
+  </div>
+</header>
+
 <form onsubmit={submit} class="agent-form" id="new-agent-form">
   {#if error}
     <!-- ★ 与其它页面的保存失败同一呈现（`.notice bad`） -->
@@ -384,25 +404,6 @@
     </section>
 
 </form>
-  {/snippet}
-  {#snippet foot()}
-    <!--
-      ★ 2026-11（D146）：`!hasAnyEntry(...)` 与"名字空"同一档——都只是**挡住提交**，
-         理由分别写在各自那一格下面（不是弹一个笼统的错误）。
-      ★ D214：底栏与 `.main-panel-foot` 同族 ⇒ 主操作（创建）在这里，取消在它旁边；
-         `form="new-agent-form"` 把它关联到体内那个表单（点它等于 submit 那个 form）。
-    -->
-    <button
-      type="submit"
-      form="new-agent-form"
-      class="btn btn--primary"
-      disabled={busy || !name.trim() || (!isWf && !hasAnyEntry(selectedEntries))}
-    >
-      {busy ? $t('common.creating') : $t('common.create')}
-    </button>
-    <button type="button" class="btn btn--ghost" onclick={onclose}>{$t('common.cancel')}</button>
-  {/snippet}
-</SettingsPanel>
 
 <style>
   .agent-form {

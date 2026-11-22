@@ -44,6 +44,25 @@
   let agentId = ''
   let busy = false
   let error = ''
+  /**
+   * ★ D243（使用者："新建视图没有例外，都要是主操作在栏头"）：
+   * 提交那一栏原来**吸底**（`.form-foot`），是「新建视图」里唯一的例外。现在主操作
+   * 归栏头（`MainArea` 的 `actions`），可 **表单状态在组件里**——所以把"能不能提交 /
+   * 按钮写什么"以回调的形式交出去，父组件照着画那颗
+   * `<button type=submit form="newtask-form">`。
+   *
+   * 用回调而不是 bind:state：`busy / title / executorName` 都在本组件里派生，
+   * 每变一次就通知一遍最省事；父组件只读不算。
+   */
+  export let onState:
+    | ((s: { canSubmit: boolean; busy: boolean; label: string; title: string | undefined }) => void)
+    | undefined = undefined
+  $: onState?.({
+    canSubmit: !busy && title.trim() !== '' && executorName !== null,
+    busy,
+    label: busy ? $t('newtask.creating') : $t('newtask.createAndDispatch'),
+    title: busy || title.trim() === '' || executorName === null ? $t('newtask.submitNotReady') : undefined,
+  })
 
   /** 执行者候选：`role === 'executor'`（审核者不接任务）。 */
   $: executorAgents = executorCandidates($agents)
@@ -190,7 +209,7 @@
   断点——那些排版规则随着「执行→审核→行动」三步一起删掉了。
 -->
 <div class="form-frame">
-<form onsubmit={submit} class="newtask-form">
+<form onsubmit={submit} class="newtask-form" id="newtask-form">
   <!--
     ══════════════════════════════════════════════════════════════════
     一个问题，不是一个标题 + 一段补充说明
@@ -346,35 +365,16 @@
     ★ 右边那一行是"我即将提交的是什么"：交给谁、谁审、允许几个动作。滚下去看
       高级选项时，它是唯一还在的上下文。
   -->
-  <div class="form-foot">
-    {#if error}
-      <div class="notice bad">{error}</div>
-    {/if}
-    <div class="foot-row">
-      <!-- ★ D181：它是这一屏的主操作 ⇒ 归进按钮族（原来是个裸 `<button>`：38px 高、
-           和别处的 `btn--primary` 不是一个尺寸，正是"按钮的类型差别大"的一半）。 -->
-      <button
-        type="submit"
-        class="btn btn--primary"
-        disabled={busy || !title.trim() || !executorName}
-        title={busy || !title.trim() || !executorName ? $t('newtask.submitNotReady') : undefined}
-      >
-        {busy ? $t('newtask.creating') : $t('newtask.createAndDispatch')}
-      </button>
-      {#if executorName}
-        <span class="foot-summary">
-          {$t('newtask.footExecutor', { name: executorName })}
-          <!-- ⚠️ 2026-11（D125）：这里原来还有「由某某审 / 不自动审核」（审核 run
-               退场）。 -->
-          {#if false}
-            <span class="foot-sep">·</span>
-          {/if}
-          <!-- ⚠️ 2026-11（D123）：这里原来还有 `{$t('newtask.footActions', …)}`——
-               动作能力退场，摘要与底栏都不再提"动作"。 -->
-        </span>
-      {/if}
-    </div>
-  </div>
+  <!--
+    ★ D243：**吸底的提交栏删掉了**——主操作（创建并派发）在**栏头**（与其它新建视图
+    同一条规矩，使用者："新建视图没有例外，都要是主操作在栏头"）。
+    这一栏里原来还有两样东西，去向：
+      · 提交失败的错误 ⇒ 挪到表单最上方（`{#if error}` 那块），仍在视线里；
+      · 「交给谁 …」那句摘要 ⇒ 已经不承载决策（执行者在上一格选），删。
+  -->
+  {#if executorName}
+    <p class="faint fs-xs" style="margin-top:var(--sp-1)">{$t('newtask.footExecutor', { name: executorName })}</p>
+  {/if}
 </form>
 </div>
 

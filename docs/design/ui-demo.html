@@ -4228,19 +4228,19 @@ a > button { width: 100%; }
                   </div>
                 </div>
                 <div>
-                  <p class="demo-opt-tag">已定例外 · <b>长表单</b>主操作吸底（新建任务：一个字都不用滚到底就能提交）</p>
+                  <p class="demo-opt-tag">标准 · 主操作在<b>栏头</b>（新建任务 / 新建智能体同款；**没有例外**）</p>
                   <div class="demo-skel-box" style="height: 170px">
                     <section class="pane detail-pane" style="height: 100%; position: relative">
                       <header class="detail-head">
                         <div class="detail-head-main"><h2 style="font-size: var(--fs-lg)">新建任务</h2></div>
+                        <div class="detail-actions">
+                          <button type="button" class="btn btn--primary">创建并派发</button>
+                          <button type="button" class="btn btn--ghost">取消</button>
+                        </div>
                       </header>
-                      <div class="pane-body" style="padding-bottom: 0">
+                      <div class="pane-body">
                         <div class="field"><label>要做什么</label><input type="text" value="写一份周报" /></div>
                         <div class="field"><label>交给谁</label><select><option>助手（默认）</option></select></div>
-                      </div>
-                      <div class="pane-foot" style="display: flex; justify-content: flex-end; gap: var(--sp-2)">
-                        <button type="button" class="btn btn--ghost">取消</button>
-                        <button type="button" class="btn btn--primary">创建并派发</button>
                       </div>
                     </section>
                   </div>
@@ -4251,12 +4251,12 @@ a > button { width: 100%; }
 
             <!-- ⑤ 设置面板 -->
             <figure class="demo-skeleton" data-skel="panel" data-head=".main-panel-head" data-body=".main-panel-body" data-foot=".main-panel-foot">
-              <figcaption><b>⑤ 设置面板</b>　三个设置 / 新建智能体 / 技能安装</figcaption>
+              <figcaption><b>⑤ 设置面板</b>　三个设置 / 技能安装（<b>新建智能体</b>已不属于这一族，见 ④）</figcaption>
               <div class="demo-skel-box" style="height: 190px">
                 <section class="main-panel" style="height: 100%">
                   <header class="main-panel-head">
                     <button type="button" class="btn btn--ghost btn--sm panel-back">← 返回</button>
-                    <h2 style="font-size: var(--fs-lg)">新建智能体</h2>
+                    <h2 style="font-size: var(--fs-lg)">聊天设置</h2>
                   </header>
                   <div class="main-panel-body" style="flex: 1; min-height: 0; overflow: auto">
                     <div class="field"><label>名字</label><input type="text" value="审稿助手" /></div>
@@ -4273,8 +4273,8 @@ a > button { width: 100%; }
           <p class="demo-rule-note" id="demo-skel-verdict">正在量五格的内距…</p>
           <p class="demo-rule-note">
             <b>已定（使用者拍板）</b>：<b>② 表格页</b> = 面板头（<code>.main-panel</code> + <code>h2</code> + 计数，
-            体里放表格）；<b>④ 新建视图</b> = 主操作在<b>栏头</b>（短表单那条路是标准），
-            <b>长表单（新建任务）保留吸底脚</b>——它是这一条标准的**例外**，不是第二套标准。
+            体里放表格）；<b>④ 新建视图</b> = 主操作**一律在栏头**——2026-11（D243）取消了
+            "长表单吸底"那个例外，且**新建智能体从 ⑤ 设置面板挪回 ④**（它是新建，不是设置）。
           </p>
           <table class="demo-types">
             <thead>
@@ -4283,8 +4283,8 @@ a > button { width: 100%; }
             <tbody>
               <tr><td>新建定时任务 / 新建编排</td><td><b>栏头</b> <code>.detail-actions</code></td><td>④ 标准</td></tr>
               <tr><td>新建对话（D220 起）</td><td><b>栏头</b> <code>[data-chat-create]</code></td><td>④ 标准</td></tr>
-              <tr><td>新建任务</td><td>吸底脚 <code>.form-foot</code></td><td>④ <b>已定例外</b>（长表单）</td></tr>
-              <tr><td>新建智能体</td><td>面板底栏 <code>.main-panel-foot</code></td><td>⑤ 设置面板（不是"新建视图"）</td></tr>
+              <tr><td>新建任务</td><td><b>栏头</b> <code>[data-task-submit]</code></td><td>④ 标准（D243 取消吸底例外）</td></tr>
+              <tr><td>新建智能体</td><td><b>栏头</b> <code>[data-agent-create]</code></td><td>④ 标准（D243 从 ⑤ 挪回来）</td></tr>
             </tbody>
           </table>
         </section>

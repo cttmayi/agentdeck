@@ -4798,22 +4798,22 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           const add = sec.querySelector('[data-wf-agent-new]')
           if (!add) return null
           click(add)
-          const ok = await until(() => !!d().querySelector('.main-panel[data-settings-panel]'), 60)
+          const ok = await until(() => !!d().querySelector('[data-agent-create]'), 60)
           if (!ok) return { 打开: false }
-          const pane = d().querySelector('.main-panel[data-settings-panel]')
+          const pane = d().querySelector('.detail-pane')
           const entryInputs = [...pane.querySelectorAll('[data-agent-entries] input')]
-          const create = pane.querySelector('.main-panel-foot .btn--primary')
+          const create = d().querySelector('[data-agent-create]')
           return {
             打开: true,
             地址: f.contentWindow.location.hash,
-            是设置面板: !!pane,
-            有返回: !!pane.querySelector('[data-settings-back]'),
+            是新建视图: !!pane?.querySelector('.detail-head'),
+            有取消: !!pane?.querySelector('.detail-head .detail-actions .btn--ghost'),
             // ★ D241：CLI 那一格**在**（它是真字段，不再删格子）
             有CLI那一格: !!pane.querySelector('.agent-card select'),
             入口数: entryInputs.length,
             入口都禁用: entryInputs.length === 3 && entryInputs.every((i) => i.disabled),
             只勾编排: entryInputs.filter((i) => i.checked).length === 1,
-            主操作在底栏: !!create && (text(create) ?? '').trim() !== '',
+            主操作在底栏: !!create && (text(create) ?? '').trim() !== '',  // 名字沿用「底栏」= 这一屏的主操作（D243 起在栏头）
             指令框: !!pane.querySelector('textarea'),
             技能格: !!pane.querySelector('.skill-picker'),
             /*
@@ -4865,7 +4865,8 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
 
         // 从新建页回到编排详情（后面几段假设停在详情）
         facts['workflows.agentsNewBack'] = await (async () => {
-          const back = d().querySelector('[data-settings-back]')
+          // ★ D243：取消按钮在**栏头**（原来是面板头的返回）
+          const back = d().querySelector('.detail-pane .detail-head .detail-actions .btn--ghost')
           if (!back) return null
           click(back)
           const ok = await until(() => !!d().querySelector('[data-wf-agents]'), 60)
@@ -5326,30 +5327,35 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
            *   主操作（创建）在**底栏**，与两个设置面板同一套。
            *   ⇒ 下面三条从"在原表单里找 .form-actions"改成"在面板底栏里找"。
            */
+          /*
+           * ★★ D243（使用者："新建智能体被放在『设置面板』，应该是『新建视图』，
+           *   且『新建视图』没有例外，都要是主操作在栏头"）：这一页不再是 `.main-panel`
+           *   （面板 + 底栏主操作），而是 ④ 新建视图的 `.detail-head`——标题在左、
+           *   **主操作在右**、没有底栏。下面四条跟着改量 `.detail-head`。
+           */
           facts['template.panelHead'] = (() => {
-            const panel = agentPanel()
-            if (!panel) return null
-            const head = panel.querySelector('.main-panel-head')
+            const head = d().querySelector('.detail-pane .detail-head')
             if (!head) return null
             const h = getComputedStyle(head)
             return {
               标题: text(head.querySelector('h2')),
-              返回: text(head.querySelector('.panel-back')),
+              返回: text(head.querySelector('.back-to-list')),
               内距: [h.paddingTop, h.paddingRight, h.paddingBottom, h.paddingLeft].join('/'),
               高: Math.round(head.getBoundingClientRect().height),
             }
           })()
-          facts['template.footPrimaryLabel'] = need('底部主操作', () =>
-            text(agentPanel()?.querySelector('.main-panel-foot button[type=submit]')),
-          )
+          facts['template.footPrimaryLabel'] = (() => {
+            const btn = d().querySelector('.detail-pane .detail-head .detail-actions .btn--primary')
+            return text(btn)
+          })()
           facts['template.footSecondaryLabel'] = (() => {
-            const btns = agentPanel()?.querySelectorAll('.main-panel-foot button') ?? []
-            return text([...btns].find((b) => b.textContent.trim() !== '' && b.getAttribute('type') === 'button'))
+            const btn = d().querySelector('.detail-pane .detail-head .detail-actions .btn--ghost')
+            return text(btn)
           })()
           facts['template.footVisible'] = (() => {
-            const foot = agentPanel()?.querySelector('.main-panel-foot button')
-            if (!foot) return false
-            const r = foot.getBoundingClientRect()
+            const btn = d().querySelector('.detail-pane .detail-head .detail-actions .btn--primary')
+            if (!btn) return false
+            const r = btn.getBoundingClientRect()
             return r.top >= 0 && r.bottom <= f.contentWindow.innerHeight + 1
           })()
           facts['template.formHasNoTemplateField'] = !(form && form.querySelector('.tpl-text'))
@@ -5364,7 +5370,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
            *   所以这条改量面板头——记 null 等于"没量到"，判据会红，正好挡住回退。
            */
           facts['template.detailHeadHeight'] = (() => {
-            const head = agentPanel()?.querySelector('.main-panel-head')
+            const head = d().querySelector('.detail-pane .detail-head')
             return head ? Math.round(box(head).h) : null
           })()
 
@@ -5407,12 +5413,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
            * ⚠️ 这一段在 `agentPanel` 那个 `const` **之前**执行（TDZ：Cannot access
            *   'agentPanel' before initialization）⇒ 这里自己查，别复用后面的变量。
            */
-          const cancelPanel = d().querySelector('[data-settings-panel]')
-          const ntCancel = cancelPanel
-            ? [...cancelPanel.querySelectorAll('.main-panel-foot button')].find(
-                (b) => b.getAttribute('type') === 'button',
-              )
-            : null
+          const ntCancel = d().querySelector('.detail-pane .detail-head .detail-actions .btn--ghost')
           if (ntCancel) {
             click(ntCancel)
           } else {
@@ -6685,7 +6686,8 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             return sel.value === value
           }
           const ntFoot = () => d().querySelector('.foot-summary')
-          const ntSubmit = () => d().querySelector('.form-foot button[type=submit]')
+          // ★ D243：主操作搬到栏头（.form-foot 已删）
+          const ntSubmit = () => d().querySelector('[data-task-submit]')
 
           facts['newtask.pageOpened'] = await ntOpen()
           facts['newtask.formFound'] = !!d().querySelector('.newtask-form')
@@ -6796,7 +6798,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               }
               const input = d().querySelector('.form-advanced input:not([type=checkbox])')
               const browse = d().querySelector('[data-newtask-workdir-browse]')
-              const submit = d().querySelector('.form-foot button[type=submit]')
+              const submit = d().querySelector('[data-task-submit]')
               return { 输入框: m(input), 浏览按钮: m(browse), 提交按钮: m(submit) }
             })()
             /**
@@ -6873,7 +6875,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
               }
               return {
                 顶栏格子: m(d().querySelector('.topbar .page-actions button.btn--primary')),
-                表单底栏: m(d().querySelector('.form-foot button.btn--primary')),
+                表单底栏: m(d().querySelector('[data-task-submit]')),
                 模态框底栏: m(d().querySelector('[data-dir-picker-pick]')),
                 模态框关闭: m(d().querySelector('.modal-head > button')),
                 accent: cs(d().documentElement).getPropertyValue('--accent-dim').trim(),
@@ -6985,7 +6987,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
             return null
           }
           /** 提交成功之后这一页会切走（切到任务清单）——这是"界面自己走完了"的信号。 */
-          const ntSubmitSettled = async () => until(() => !d().querySelector('.form-foot'), 300)
+          const ntSubmitSettled = async () => until(() => !d().querySelector('#newtask-form'), 300)
           const ntTitle = `探针：选单个智能体（${Date.now()}）`
           const ntTitleBox = d().querySelector('textarea')
           if (ntTitleBox) {
