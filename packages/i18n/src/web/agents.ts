@@ -195,13 +195,6 @@ export const agentsText = {
    * 使用者报的困惑：智能体页叫「指令」、模版页叫「② 身份」，看不出是同一份。
    * 这句把它钉死：**内容在这里编辑，位置在模版页决定**。
    */
-  /**
-   * ★ 分批第 53 批：新建表单里那个**一行版**（完整说明在详情页，见上一条）。
-   */
-  'agents.instructionsIdentityTag': {
-    zh: '= 第一句话的 ② 身份',
-    en: '= block ② identity',
-  },
   // ⚠️ 2026-10（使用者的决定）：`reviewerFieldLabel`（由谁来审它）、
   // `noAutoReview`、`workDirLabel`（默认工作目录）、`workDirPlaceholder` 随设置
   // 一起删了——审核走智能体组；工作目录是任务级的。协议字段原样保留。
